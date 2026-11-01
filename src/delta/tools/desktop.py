@@ -55,11 +55,16 @@ def _pg() -> Any:
 class DesktopController:
     """Owns the UIA thread, the input devices and the 'user took over' detection."""
 
-    def __init__(self) -> None:
+    def __init__(self, cursor: Any = None) -> None:
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="delta-uia")
         self._last_pos: tuple[int, int] | None = None
         self._paused_until = 0.0
         self.position: Callable[[], tuple[int, int]] = self._real_position
+        self.cursor = cursor  # AgentCursor: orange pointer while Delta drives input
+
+    def acting(self) -> Any:
+        """Context for any action where Delta drives the mouse or keyboard."""
+        return self.cursor.active() if self.cursor else contextlib.nullcontext()
 
     async def call(self, fn: Callable[..., T], *args: Any) -> T:
         return await asyncio.get_running_loop().run_in_executor(self._pool, fn, *args)
@@ -289,8 +294,9 @@ class _DesktopTool[A: BaseModel](Tool[A]):
     async def _act(self, fn: Callable[[], str], evidence: Callable[[], dict[str, Any]] | None = None) -> ToolResult:
         try:
             self.ctl.guard()
-            msg = await self.ctl.call(fn)
-            await asyncio.sleep(0.4)  # let the UI react before we look again
+            with self.ctl.acting():
+                msg = await self.ctl.call(fn)
+                await asyncio.sleep(0.4)  # let the UI react before we look again
             self.ctl.mark()
             ev = await self.ctl.call(evidence) if evidence else {}
             return ToolResult(True, msg, ev)

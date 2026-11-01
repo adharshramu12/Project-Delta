@@ -382,7 +382,8 @@ class _UBTool(Tool[Any]):
             if read:
                 text, ev = await self.ub.ctl.call(self.ub.read)
                 return ToolResult(True, text, ev)
-            msg = await self.ub.ctl.call(fn, *args)
+            with self.ub.ctl.acting():  # orange pointer while Delta drives the browser
+                msg = await self.ub.ctl.call(fn, *args)
             ev = await self.ub.ctl.call(lambda: self.ub.evidence(self.ub._window()) if self.ub._window() else {})
             title = ev.get("title", "")
             return ToolResult(True, f"{msg}: {title} ({ev.get('url', '')})" if title else msg, ev)

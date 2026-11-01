@@ -137,6 +137,7 @@ class BrowserConfig(BaseModel):
     # delta-profile: a separate Delta profile, automated in the background, not signed in
     mode: Literal["your-browser", "delta-profile"] = "your-browser"
     prefer: Literal["auto", "chrome", "edge"] = "auto"  # auto = your Windows default browser
+    orange_cursor: bool = True  # orange mouse pointer while Delta controls the mouse/keyboard
 
 
 class ApiConfig(BaseModel):

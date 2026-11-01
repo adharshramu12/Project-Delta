@@ -170,14 +170,18 @@ def build(settings: Settings) -> Container:
     closers: list[tuple[str, Callable[[], Awaitable[None]]]] = []
     desktop_ok = _installed("pywinauto", "pyautogui", "mss")
     if desktop_ok:
+        from delta.system.agent_cursor import AgentCursor
         from delta.tools.desktop import DesktopController, desktop_tools
         from delta.tools.screen import screen_tools
 
-        ctl = DesktopController()
+        AgentCursor.recover(data)  # a previous run that died while orange gives the cursor back
+        cursor = AgentCursor(data, enabled=settings.browser.orange_cursor)
+        ctl = DesktopController(cursor)
         for t in [*desktop_tools(ctl), *screen_tools(router, governor)]:
             registry.register(t)
 
         async def close_desktop() -> None:
+            cursor.restore()
             ctl.close()
 
         closers.append(("desktop", close_desktop))

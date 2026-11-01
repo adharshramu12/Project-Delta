@@ -91,6 +91,7 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
     <label class="field">How
       <select id="s_bmode"><option value="your-browser">My normal browser, signed in to my sites (recommended)</option>
         <option value="delta-profile">A separate Delta profile (works in the background, not signed in)</option></select></label>
+    <label class="check"><input type="checkbox" id="s_orange"> Show an orange mouse pointer while Delta controls the mouse or keyboard</label>
     <h3>Folders</h3>
     <label class="field">Allowed folders <small>one per line: in "Trusted" mode Delta edits files here without asking</small><textarea id="s_allowed" rows="4"></textarea></label>
     <label class="field">Blocked folders <small>Delta never reads or changes anything here</small><textarea id="s_denied" rows="3"></textarea></label>
@@ -387,7 +388,7 @@ $("opensetup").onclick = openSetup;
 const lines = id => $(id).value.split("\n").map(s => s.trim()).filter(Boolean);
 async function openSettings() {
   const s = await api("/api/settings"), b = s.boundaries;
-  $("s_prefer").value = s.browser.prefer; $("s_bmode").value = s.browser.mode;
+  $("s_prefer").value = s.browser.prefer; $("s_bmode").value = s.browser.mode; $("s_orange").checked = s.browser.orange_cursor;
   $("s_using").textContent = s.browser.using ? `(currently: ${s.browser.using})` : "(no Chrome or Edge found)";
   document.querySelector(`input[name=s_autonomy][value="${b.autonomy}"]`).checked = true;
   $("s_quiet").checked = b.quiet_hours.enabled; $("s_qstart").value = b.quiet_hours.start; $("s_qend").value = b.quiet_hours.end;
@@ -426,7 +427,7 @@ $("opensettings").onclick = openSettings;
 $("s_close").onclick = () => { $("settings").hidden = true; };
 $("s_save").onclick = async () => {
   const body = {
-    browser: {prefer: $("s_prefer").value, mode: $("s_bmode").value},
+    browser: {prefer: $("s_prefer").value, mode: $("s_bmode").value, orange_cursor: $("s_orange").checked},
     boundaries: {autonomy: document.querySelector("input[name=s_autonomy]:checked").value,
       allowed_paths: lines("s_allowed"), denied_paths: lines("s_denied"), denied_apps: lines("s_apps"),
       denied_domains: lines("s_domains"), allowed_domains: lines("s_onlydomains"),

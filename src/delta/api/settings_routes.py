@@ -48,6 +48,7 @@ class MemoryIn(BaseModel):
 class BrowserIn(BaseModel):
     mode: Literal["your-browser", "delta-profile"] | None = None
     prefer: Literal["auto", "chrome", "edge"] | None = None
+    orange_cursor: bool | None = None
 
 
 class SettingsIn(BaseModel):
@@ -144,8 +145,13 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
             for k, v in changes["browser"].items():
                 setattr(s.browser, k, v)
             ub = getattr(c.registry.get("browser_open"), "ub", None)
-            if ub is not None:  # your-browser mode: switch Chrome/Edge right away
+            if ub is not None and "prefer" in changes["browser"]:  # switch Chrome/Edge right away
                 ub.use(s.browser.prefer)
+            cursor = getattr(getattr(c.registry.get("click_at"), "ctl", None), "cursor", None)
+            if cursor is not None:
+                cursor.enabled = s.browser.orange_cursor
+                if not cursor.enabled:
+                    cursor.restore()
         c.orchestrator.executor.policy = make_policy(s)  # next action uses the new rules
         c.audit.record("settings.changed", sections=sorted(changes))
         return {"ok": True, "restart_needed": restart, "save_dir_resolved": str(save_dir(s.files, create=False))}

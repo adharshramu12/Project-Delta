@@ -72,6 +72,7 @@ browser:
   # delta-profile: a separate Delta profile, works in the background, but not signed in.
   mode: your-browser
   prefer: auto         # auto (your Windows default browser) | chrome | edge
+  orange_cursor: true  # the mouse pointer turns orange while Delta controls the mouse/keyboard
 
 addons:
   # Add-ons only run when listed here. Built-in: mcp. Community add-ons: pip packages
