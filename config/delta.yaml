@@ -1,0 +1,64 @@
+# Delta runtime configuration. Secrets (API keys, bot tokens) never go here:
+# store them with `delta secrets set <name>` (Windows Credential Manager) or DELTA_<NAME> env vars.
+
+agent:
+  name: Delta
+  owner_name: ""            # how Delta addresses you
+  max_steps: 15             # tool calls per attempt
+  max_attempts: 3           # verify -> retry cycles before reporting failure
+  approval_timeout_s: 300   # unanswered approvals are denied
+
+llm:
+  providers:
+    ollama:
+      base_url: http://127.0.0.1:11434/v1
+      local: true
+      native_tools: false   # small Gemma models: Delta uses its JSON tool protocol instead
+      keep_alive: 2m        # unload weights from VRAM after 2 idle minutes
+      timeout_s: 180
+      models:
+        chat: gemma3n:e4b   # set to the tag you pulled, e.g. gemma4:e4b
+        vision: gemma3:4b
+    groq:
+      base_url: https://api.groq.com/openai/v1
+      secret: groq_api_key
+      timeout_s: 60
+      models:
+        chat: llama-3.3-70b-versatile
+    nim:
+      base_url: https://integrate.api.nvidia.com/v1
+      secret: nvidia_api_key
+      timeout_s: 90
+      models:
+        chat: meta/llama-3.3-70b-instruct
+        vision: meta/llama-3.2-90b-vision-instruct
+  # Provider order per job. The first healthy, allowed provider wins.
+  routes:
+    chat: [ollama, groq, nim]
+    plan: [groq, nim, ollama]
+    verify: [groq, nim, ollama]
+    vision: [ollama, nim]
+
+search:
+  order: [tavily, serpapi, duckduckgo]   # duckduckgo needs no key and is the free fallback
+  max_results: 5
+
+governor:
+  sample_interval_s: 5
+  below_normal_priority: true
+  limits:
+    gpu_temp_c: { throttle: 78, critical: 87 }
+    cpu_temp_c: { throttle: 90, critical: 97 }
+    vram_pct:   { throttle: 85, critical: 95 }
+    ram_pct:    { throttle: 85, critical: 93 }
+    battery_pct_unplugged: { throttle: 30, critical: 15 }
+
+memory:
+  enabled: true
+  auto_extract: true        # suggest facts after tasks; you can view/delete with /memory
+  recall_k: 6
+
+channels:
+  cli: { enabled: true }
+  telegram: { enabled: false, allowed_user_ids: [] }
+  slack: { enabled: false, allowed_user_ids: [] }

@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+# runtime data lives in %LOCALAPPDATA%\Delta, but never commit local copies
+data/
+*.db
+*.jsonl
+logs/
+# desktop app
+apps/desktop/node_modules/
+apps/desktop/src-tauri/target/

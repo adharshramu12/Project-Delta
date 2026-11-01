@@ -1,0 +1,29 @@
+# What Delta may touch. You own this file; Delta can never edit it.
+# A hard safety floor applies on top of it (see docs/ARCHITECTURE.md#safety): system/security
+# settings, credentials and money movement are always blocked, deletes always need approval.
+
+# ask-everything : every action except reading needs your approval
+# ask-risky      : (default) reading/opening/UI input is automatic; writes, deletes, network sends ask
+# trusted        : writes inside allowed_paths are automatic; deletes and sends still ask
+autonomy: ask-risky
+
+allowed_paths:           # writes outside these always ask, even in `trusted`
+  - ~/Desktop
+  - ~/Documents
+  - ~/Downloads
+  - ~/Music/project-delta
+
+denied_paths:            # never read or written
+  - C:/Windows
+  - ~/AppData/Roaming/Microsoft/Credentials
+  - ~/.ssh
+
+denied_apps: []          # e.g. [regedit, mmc]
+denied_tools: []         # e.g. [shell]
+allowed_domains: []      # empty = any domain allowed for browsing/fetching
+denied_domains: []
+
+quiet_hours:             # no autonomous actions in this window (reads still allowed)
+  enabled: false
+  start: "23:30"
+  end: "07:00"

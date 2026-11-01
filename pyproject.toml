@@ -1,0 +1,67 @@
+[project]
+name = "delta-agent"
+version = "0.1.0"
+description = "Delta - a personal, local-first, OS-level AI agent with human approval and verified task execution."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Delta contributors" }]
+dependencies = [
+    "openai>=1.60",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+    "pyyaml>=6.0",
+    "structlog>=24.4",
+    "keyring>=25.0",
+    "psutil>=6.0",
+    "nvidia-ml-py>=12.560",
+    "send2trash>=1.8",
+    "ddgs>=9.0",
+    "trafilatura>=2.0",
+]
+
+[project.optional-dependencies]
+channels = ["python-telegram-bot>=21.6", "slack-bolt>=1.21"]
+desktop = ["pywinauto>=0.6.9", "pyautogui>=0.9.54", "mss>=9.0"]
+browser = ["playwright>=1.48"]
+voice = ["faster-whisper>=1.1", "piper-tts>=1.2", "openwakeword>=0.6", "sounddevice>=0.5"]
+api = ["fastapi>=0.115", "uvicorn>=0.32"]
+
+[project.scripts]
+delta = "delta.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "mypy>=1.13", "types-pyyaml", "types-psutil"]
+
+[tool.uv]
+# Delta targets Windows first; Linux/macOS support is a roadmap item.
+environments = ["sys_platform == 'win32'"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/delta"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM", "RUF"]
+# ASYNC240: stat()/exists() on local paths is microseconds; offloading them would only add noise.
+ignore = ["RUF001", "ASYNC240"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["delta"]
+mypy_path = "src"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true

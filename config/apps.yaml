@@ -1,0 +1,11 @@
+# Friendly names Delta can open. `command` is run with Start-Process; `path` is opened like a double-click.
+# Use %LOCALAPPDATA% / %PROGRAMFILES% style variables freely.
+apps:
+  explorer:      { command: explorer.exe, aliases: [file explorer, files] }
+  notepad:       { command: notepad.exe }
+  terminal:      { command: wt.exe, aliases: [windows terminal] }
+  vscode:        { command: code, aliases: [vs code, visual studio code] }
+  chrome:        { command: chrome.exe, aliases: [google chrome, browser] }
+  antigravity:   { path: "%LOCALAPPDATA%/Programs/Antigravity/Antigravity.exe", aliases: [google antigravity] }
+  codex:         { command: codex, aliases: [openai codex] }
+  task_manager:  { command: taskmgr.exe, aliases: [task manager] }
