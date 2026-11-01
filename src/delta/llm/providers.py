@@ -71,6 +71,8 @@ class OpenAICompatProvider:
         self._client_obj: Any = None
         self._exhausted: dict[str, float] = {}  # model -> monotonic time its daily quota resets
         self._stand_in: dict[str, str] = {}     # exhausted model -> model used meanwhile
+        self._ping_at = -1e9
+        self._ping_ok = False
 
     def _key(self) -> str | None:
         """Keys are read on first use and re-checked every minute, so a key added while Delta
@@ -87,14 +89,25 @@ class OpenAICompatProvider:
     def available(self) -> bool:
         return not self.cfg.secret or bool(self._key())
 
+    def refresh(self) -> None:
+        """Re-read the key now (e.g. the user just saved one on the setup page)."""
+        self._api_key = None
+        self._key_checked_at = -1e9
+        self._client_obj = None
+
     def ping(self) -> bool:
-        """Is anything answering at base_url? (Quick check for local servers like Ollama.)"""
+        """Is anything answering at base_url? Cached for 30 s (status screens call this often)."""
         import httpx
 
+        now = time.monotonic()
+        if now - self._ping_at < 30:
+            return self._ping_ok
         try:
-            return httpx.get(f"{self.cfg.base_url.rstrip('/')}/models", timeout=2).status_code < 500
+            self._ping_ok = httpx.get(f"{self.cfg.base_url.rstrip('/')}/models", timeout=2).status_code < 500
         except httpx.HTTPError:
-            return False
+            self._ping_ok = False
+        self._ping_at = now
+        return self._ping_ok
 
     @property
     def _client(self) -> Any:

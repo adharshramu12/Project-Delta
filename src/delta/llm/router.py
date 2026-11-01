@@ -63,9 +63,24 @@ class ModelRouter:
         self.breakers = {name: CircuitBreaker() for name in providers}
         self.last_provider: str | None = None
 
+    def refresh(self) -> None:
+        """Pick up new or changed keys immediately and forget earlier failures."""
+        for name, p in self.providers.items():
+            if callable(refresh := getattr(p, "refresh", None)):
+                refresh()
+            self.breakers[name] = CircuitBreaker()
+
     def usable(self) -> list[str]:
-        """Providers that can serve chat right now (configured, keyed), for status displays."""
-        return [n for n, p in self.providers.items() if p.supports("chat")]
+        """Providers that can serve chat right now, for status displays: cloud ones need a key,
+        local ones (Ollama) must actually be running."""
+        out = []
+        for name, p in self.providers.items():
+            if not p.supports("chat") or not self.breakers[name].available():
+                continue
+            if p.local and callable(ping := getattr(p, "ping", None)) and not ping():
+                continue
+            out.append(name)
+        return out
 
     def candidates(self, task: str) -> list[Provider]:
         route = self.routes.get(task) or self.routes.get("chat") or list(self.providers)

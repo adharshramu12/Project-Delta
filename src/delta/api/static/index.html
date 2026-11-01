@@ -16,6 +16,22 @@ header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:
 .stats{color:var(--muted);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.danger{color:var(--bad)}
+#setup{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:10;padding:16px}
+#setup[hidden]{display:none}
+.wiz{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:min(620px,100%);max-height:calc(100vh - 32px);overflow-y:auto;padding:22px 24px;display:flex;flex-direction:column;gap:10px}
+.wiz h2{margin:0;font-size:20px}.wiz .lead{color:var(--muted);margin:0 0 6px}.wiz section{display:none;flex-direction:column;gap:10px}.wiz section.on{display:flex}
+.dots{display:flex;gap:6px}.dots span{height:4px;flex:1;border-radius:4px;background:var(--line)}.dots span.on{background:var(--accent)}
+.box{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg);font-size:13px;white-space:pre-wrap}
+.tag{font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--line);color:var(--muted);font-weight:400}
+.mono{font-family:ui-monospace,Consolas,monospace}.small{font-size:13px;color:var(--muted);margin:0;padding-left:20px}
+.keyrow{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.keyrow small,.field small,.choice small{color:var(--muted);font-weight:400}
+.kin{display:flex;gap:8px}.kin input,.field input{flex:1;font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);min-width:0}
+.msg{font-size:13px}.msg.ok{color:var(--ok)}.msg.bad{color:var(--bad)}
+.field{display:flex;flex-direction:column;gap:6px;font-size:14px}.check{display:flex;gap:8px;align-items:center}
+.choice{display:grid;grid-template-columns:auto 1fr;column-gap:10px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer}
+.choice small{grid-column:2}.choice:has(input:checked){border-color:var(--accent)}
+.nav{display:flex;align-items:center;gap:10px;margin-top:6px}.nav .err{flex:1;color:var(--bad);font-size:13px}
 #warnings{white-space:pre-wrap;padding:8px 16px;border-bottom:1px solid var(--warn);color:var(--warn);background:var(--panel);font-size:13px}
 main{flex:1;display:grid;grid-template-columns:1fr 320px;min-height:0}
 #chat{display:flex;flex-direction:column;min-height:0}
@@ -47,9 +63,65 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
   <div class="logo"><b>Δ</b> Delta</div>
   <span id="health" class="pill OFFLINE">offline</span>
   <div id="stats" class="stats"></div>
+  <button id="opensetup" title="Models, permissions, Telegram">Setup</button>
   <button class="danger" id="shutdown" title="Stop Delta completely and free memory/GPU">Shutdown</button>
 </header>
 <div id="warnings" hidden></div>
+<div id="setup" hidden>
+  <div class="wiz">
+    <div class="dots" id="dots"></div>
+    <section data-step="welcome">
+      <h2>Welcome to Delta</h2>
+      <p class="lead">Let's get you set up. It takes about two minutes, and you can change everything later.</p>
+      <div class="box" id="hw">Checking this PC…</div>
+    </section>
+    <section data-step="models">
+      <h2>Choose an AI brain</h2>
+      <p class="lead">Delta needs at least one AI model. Free options work well. Keys are checked right away and stored in Windows Credential Manager, never in files.</p>
+      <div class="keyrow" data-key="groq_api_key">
+        <label><b>Groq</b> <span class="tag">free · recommended</span><br><small>Get a key at <span class="mono">console.groq.com/keys</span></small></label>
+        <div class="kin"><input type="password" placeholder="gsk_…" autocomplete="off"><button>Check &amp; save</button></div>
+        <div class="msg"></div>
+      </div>
+      <div class="keyrow" data-key="nvidia_api_key">
+        <label><b>NVIDIA NIM</b> <span class="tag">free · backup</span><br><small>Get a key at <span class="mono">build.nvidia.com</span></small></label>
+        <div class="kin"><input type="password" placeholder="nvapi-…" autocomplete="off"><button>Check &amp; save</button></div>
+        <div class="msg"></div>
+      </div>
+      <div class="box" id="localbox"></div>
+    </section>
+    <section data-step="trust">
+      <h2>How careful should Delta be?</h2>
+      <p class="lead">Deleting files, sending messages and system changes always need your OK, whatever you pick here.</p>
+      <label class="choice"><input type="radio" name="autonomy" value="ask-everything"><b>Careful</b><small>Ask before anything except reading. Best for your first days.</small></label>
+      <label class="choice"><input type="radio" name="autonomy" value="ask-risky" checked><b>Balanced</b> <span class="tag">recommended</span><small>Open apps and read freely; ask before changing or sending anything.</small></label>
+      <label class="choice"><input type="radio" name="autonomy" value="trusted"><b>Trusted</b><small>Also create and edit files in your allowed folders without asking.</small></label>
+    </section>
+    <section data-step="telegram">
+      <h2>Talk to Delta from your phone <span class="tag">optional</span></h2>
+      <p class="lead">Message Delta on Telegram and approve actions with a tap.</p>
+      <ol class="small"><li>In Telegram, message <span class="mono">@BotFather</span>, send <span class="mono">/newbot</span>, copy the token.</li>
+        <li>Message <span class="mono">@userinfobot</span> to get your numeric user id.</li></ol>
+      <div class="keyrow" data-key="telegram_bot_token">
+        <label><b>Bot token</b></label>
+        <div class="kin"><input type="password" placeholder="123456:ABC…" autocomplete="off"><button>Check &amp; save</button></div>
+        <div class="msg"></div>
+      </div>
+      <label class="field">Your Telegram user id <small>(only these ids can control Delta)</small><input id="tgid" placeholder="e.g. 123456789" inputmode="numeric"></label>
+      <label class="check"><input type="checkbox" id="tgon"> Turn on Telegram</label>
+    </section>
+    <section data-step="name">
+      <h2>What should Delta call you?</h2>
+      <label class="field">Your name <small>(optional)</small><input id="ownername" maxlength="60" placeholder="e.g. Adharsh"></label>
+    </section>
+    <section data-step="done">
+      <h2>You're all set 🎉</h2>
+      <div class="box" id="summary"></div>
+      <p class="lead">Try: <i>"Create a note on my desktop with today's to-dos"</i> or <i>"What's new in Python 3.15?"</i></p>
+    </section>
+    <div class="nav"><button id="wback">Back</button><span class="err" id="werr"></span><button class="primary" id="wnext">Next</button></div>
+  </div>
+</div>
 <main>
   <section id="chat">
     <div id="log"></div>
@@ -201,6 +273,73 @@ $("shutdown").onclick = async () => {
   await api("/api/shutdown", {method: "POST"}).catch(() => {});
   add("msg", "Delta is shutting down. You can close this window."); $("health").className = "pill OFFLINE"; $("health").textContent = "stopped";
 };
+// ---- first-run setup wizard ---------------------------------------------------------------
+const STEPS = ["welcome", "models", "trust", "telegram", "name", "done"];
+let step = 0, setupState = null;
+function showStep(i) {
+  step = Math.max(0, Math.min(STEPS.length - 1, i));
+  document.querySelectorAll("#setup section").forEach(s => s.classList.toggle("on", s.dataset.step === STEPS[step]));
+  $("dots").innerHTML = STEPS.map((_, j) => `<span class="${j <= step ? "on" : ""}"></span>`).join("");
+  $("wback").style.visibility = step === 0 || step === STEPS.length - 1 ? "hidden" : "visible";
+  $("wnext").textContent = step === STEPS.length - 2 ? "Finish" : step === STEPS.length - 1 ? "Start using Delta" : "Next";
+  $("werr").textContent = "";
+}
+function renderSetup(s) {
+  setupState = s;
+  const h = s.hardware;
+  $("hw").textContent = `This PC: ${h.ram_gb} GB RAM (${h.ram_free_gb} GB free)` +
+    (h.gpu ? `, ${h.gpu} with ${h.vram_gb} GB` : ", no NVIDIA GPU found") + `\n\n${h.recommendation}`;
+  $("localbox").textContent = h.ollama_running ? "✓ A local model server (Ollama) is running on this PC: private, free, offline."
+    : h.can_run_local ? "Optional: install Ollama (ollama.com) later to also run a model privately on this PC."
+    : "Local models are not recommended on this PC; a cloud key is all you need.";
+  for (const row of document.querySelectorAll(".keyrow")) {
+    const k = s.keys[row.dataset.key];
+    if (k && k.set && !row.querySelector(".msg").textContent) { row.querySelector(".msg").textContent = "✓ Already saved"; row.querySelector(".msg").className = "msg ok"; }
+  }
+  const a = document.querySelector(`input[name=autonomy][value="${s.autonomy}"]`); if (a) a.checked = true;
+  $("ownername").value = $("ownername").value || s.owner_name || "";
+  $("tgid").value = $("tgid").value || (s.telegram.user_ids || []).join(", ");
+  $("tgon").checked = $("tgon").checked || s.telegram.enabled;
+}
+async function openSetup() {
+  $("setup").hidden = false; showStep(0);
+  renderSetup(await api("/api/setup"));
+}
+for (const row of document.querySelectorAll(".keyrow")) {
+  const btn = row.querySelector("button"), input = row.querySelector("input"), msg = row.querySelector(".msg");
+  btn.onclick = async () => {
+    if (!input.value.trim()) return;
+    btn.disabled = true; msg.className = "msg"; msg.textContent = "Checking with the service…";
+    const r = await api("/api/setup/key", {method: "POST", body: JSON.stringify({name: row.dataset.key, value: input.value})})
+      .catch(() => ({ok: false, message: "Delta is not reachable."}));
+    btn.disabled = false; msg.className = "msg " + (r.ok ? "ok" : "bad"); msg.textContent = (r.ok ? "✓ " : "✗ ") + r.message;
+    if (r.ok) { input.value = ""; if (row.dataset.key === "telegram_bot_token") $("tgon").checked = true; refreshStatus(); }
+  };
+}
+$("wback").onclick = () => showStep(step - 1);
+$("wnext").onclick = async () => {
+  const name = STEPS[step];
+  if (name === "models") {
+    const s = await api("/api/setup");  renderSetup(s);
+    if (!s.models_ready.length) { $("werr").textContent = "Add at least one key (or start Ollama) so Delta has a brain."; return; }
+  }
+  if (name === "name") {
+    const ids = $("tgid").value.split(/[ ,]+/).filter(Boolean);
+    if ($("tgon").checked && !ids.length) { showStep(STEPS.indexOf("telegram")); $("werr").textContent = "Add your Telegram user id, or turn Telegram off."; return; }
+    const body = {owner_name: $("ownername").value, autonomy: document.querySelector("input[name=autonomy]:checked").value,
+                  telegram_enabled: $("tgon").checked, telegram_user_ids: ids};
+    const r = await api("/api/setup/complete", {method: "POST", body: JSON.stringify(body)}).catch(e => ({error: e.message}));
+    if (!r.ok) { $("werr").textContent = "Could not save: " + (r.detail || r.error || "unknown error"); return; }
+    const level = {"ask-everything": "Careful", "ask-risky": "Balanced", "trusted": "Trusted"}[body.autonomy];
+    $("summary").textContent = `AI models ready: ${r.models_ready.join(", ") || "none"}\nPermission level: ${level}\n` +
+      `Telegram: ${body.telegram_enabled ? "on" : "off"}` + (r.restart_needed ? "\n\n↻ Restart Delta (Shutdown, then open it again) to connect Telegram." : "");
+  }
+  if (name === "done") { $("setup").hidden = true; refreshStatus(); return; }
+  showStep(step + 1);
+};
+$("opensetup").onclick = openSetup;
+api("/api/setup").then(s => { if (!s.completed) openSetup(); }).catch(() => {});
+
 if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
 refreshStatus(); refreshMemory(); refreshSkills(); refreshLearned(); connect(); api("/api/approvals").then(a => a.forEach(renderApproval)).catch(() => {});
 setInterval(() => { if (!document.hidden) refreshStatus(); }, 5000);

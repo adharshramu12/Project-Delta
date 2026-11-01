@@ -201,11 +201,40 @@ def _read_yaml(path: Path) -> dict:
         return yaml.safe_load(f) or {}
 
 
+USER_SETTINGS = "settings.yaml"  # in the data dir: the user's own choices (setup page, settings page)
+
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for k, v in override.items():
+        out[k] = deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def read_user_settings(data_dir: Path) -> dict[str, Any]:
+    return _read_yaml(data_dir / USER_SETTINGS)
+
+
+def write_user_settings(data_dir: Path, changes: dict[str, Any]) -> dict[str, Any]:
+    """Merge `changes` into the user's settings file. The repo's config/ is never modified, so
+    updates (git pull, new versions) cannot overwrite what the user chose."""
+    merged = deep_merge(read_user_settings(data_dir), changes)
+    data_dir.mkdir(parents=True, exist_ok=True)  # first run: the folder may not exist yet
+    path = data_dir / USER_SETTINGS
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(yaml.safe_dump(merged, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    tmp.replace(path)  # atomic: a crash never leaves a half-written settings file
+    return merged
+
+
 def load_settings(config_dir: Path | None = None) -> Settings:
+    """Shipped defaults (config/*.yaml) overlaid with the user's own settings (data dir)."""
     cdir = config_dir or _config_dir()
+    data = _data_dir()
     raw = _read_yaml(cdir / "delta.yaml")
     raw["boundaries"] = _read_yaml(cdir / "boundaries.yaml")
     raw["apps"] = _read_yaml(cdir / "apps.yaml").get("apps", {})
+    raw = deep_merge(raw, read_user_settings(data))
     raw["config_dir"] = cdir
-    raw["data_dir"] = _data_dir()
+    raw["data_dir"] = data
     return Settings.model_validate(raw)
