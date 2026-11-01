@@ -10,11 +10,10 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import time
 import uuid
+from collections.abc import Callable
 from typing import Any, Protocol
-
-import httpx
-import openai
 
 from delta.config import ProviderConfig
 from delta.llm.schemas import LLMError, LLMResponse, Message, ToolCall
@@ -62,19 +61,48 @@ def extract_json(text: str) -> Any:
 
 
 class OpenAICompatProvider:
-    def __init__(self, name: str, cfg: ProviderConfig, api_key: str | None) -> None:
+    def __init__(self, name: str, cfg: ProviderConfig, api_key: str | Callable[[], str | None] | None) -> None:
         self.name = name
         self.cfg = cfg
         self.local = cfg.local
-        self._client = openai.AsyncOpenAI(
-            base_url=cfg.base_url,
-            api_key=api_key or "not-needed",
-            timeout=cfg.timeout_s,
-            max_retries=0,  # the router owns retries/fallback
-        )
+        self._key_source = api_key
+        self._api_key: str | None = None
+        self._key_checked_at = -1e9
+        self._client_obj: Any = None
+
+    def _key(self) -> str | None:
+        """Keys are read on first use and re-checked every minute, so a key added while Delta
+        runs is picked up without a restart, and startup never waits on the credential store."""
+        if not callable(self._key_source):
+            return self._key_source
+        now = time.monotonic()
+        if self._api_key is None and now - self._key_checked_at > 60:
+            self._key_checked_at = now
+            self._api_key = self._key_source()
+            self._client_obj = None
+        return self._api_key
+
+    def available(self) -> bool:
+        return not self.cfg.secret or bool(self._key())
+
+    @property
+    def _client(self) -> Any:
+        """The openai package takes ~2 s to import, so it loads on the first model call,
+        not at startup."""
+        if self._client_obj is None:
+            import openai
+
+            self._client_obj = openai.AsyncOpenAI(
+                base_url=self.cfg.base_url,
+                api_key=self._key() or "not-needed",
+                timeout=self.cfg.timeout_s,
+                max_retries=0,  # the router owns retries/fallback
+            )
+        return self._client_obj
 
     def supports(self, task: str) -> bool:
-        return task in self.cfg.models or (task != "vision" and "chat" in self.cfg.models)
+        fits = task in self.cfg.models or (task != "vision" and "chat" in self.cfg.models)
+        return fits and self.available()
 
     def model_for(self, task: str) -> str:
         return self.cfg.models.get(task) or self.cfg.models["chat"]
@@ -95,8 +123,11 @@ class OpenAICompatProvider:
         if self.cfg.keep_alive:
             kwargs["extra_body"] = {"keep_alive": self.cfg.keep_alive}
 
+        client = self._client
+        import openai
+
         try:
-            resp = await self._client.chat.completions.create(**kwargs)
+            resp = await client.chat.completions.create(**kwargs)
         except (openai.APIConnectionError, openai.APITimeoutError, openai.RateLimitError) as e:
             raise LLMError(f"{self.name}: {type(e).__name__}: {e}") from e
         except openai.APIStatusError as e:
@@ -157,6 +188,8 @@ class OpenAICompatProvider:
 
     async def unload(self) -> None:
         """Free VRAM right away (Ollama only): keep_alive=0 evicts the model."""
+        import httpx
+
         if not self.local:
             return
         root = self.cfg.base_url.removesuffix("/v1").rstrip("/")

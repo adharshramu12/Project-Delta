@@ -48,6 +48,7 @@ class SystemSensor:
                 vram = 100.0 * mem.used / mem.total
             except Exception:
                 pass
+        mem = psutil.virtual_memory()
         battery = psutil.sensors_battery()
         cpu_temp = None
         temps = getattr(psutil, "sensors_temperatures", None)  # not available on Windows
@@ -57,7 +58,8 @@ class SystemSensor:
                 cpu_temp = max(readings) if readings else None
         return Snapshot(
             cpu_pct=psutil.cpu_percent(None),
-            ram_pct=psutil.virtual_memory().percent,
+            ram_pct=mem.percent,
+            ram_free_gb=mem.available / 1e9,
             cpu_temp_c=cpu_temp,
             gpu_util_pct=gpu_util,
             gpu_temp_c=gpu_temp,
@@ -138,6 +140,7 @@ class Governor:
             "reasons": self.assessment.reasons,
             "cpu_pct": s.cpu_pct,
             "ram_pct": s.ram_pct,
+            "ram_free_gb": None if s.ram_free_gb is None else round(s.ram_free_gb, 1),
             "gpu_util_pct": s.gpu_util_pct,
             "gpu_temp_c": s.gpu_temp_c,
             "vram_pct": None if s.vram_pct is None else round(s.vram_pct, 1),

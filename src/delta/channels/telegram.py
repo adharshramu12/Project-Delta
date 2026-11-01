@@ -56,7 +56,7 @@ class TelegramChannel:
         g = self.c.governor.status()
         await update.message.reply_text(
             f"health {g['health']} · RAM {g['ram_pct']}% · GPU {g['gpu_temp_c']}°C · "
-            f"models {', '.join(self.c.router.providers) or 'none'}")
+            f"models {', '.join(self.c.router.usable()) or 'none'}")
 
     async def _on_message(self, update: Any, ctx: Any) -> None:
         user = update.effective_user

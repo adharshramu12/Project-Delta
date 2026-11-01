@@ -9,9 +9,11 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-import httpx
+if TYPE_CHECKING:
+    import httpx
+
 from pydantic import BaseModel, Field
 
 from delta.system.logging import log
@@ -49,6 +51,8 @@ class Tavily:
         return bool(get_secret("tavily_api_key"))
 
     async def search(self, query: str, n: int) -> list[SearchHit]:
+        import httpx
+
         async with httpx.AsyncClient(timeout=20) as c:
             r = await c.post("https://api.tavily.com/search",
                              json={"api_key": get_secret("tavily_api_key"), "query": query, "max_results": n})
@@ -64,6 +68,8 @@ class SerpApi:
         return bool(get_secret("serpapi_api_key"))
 
     async def search(self, query: str, n: int) -> list[SearchHit]:
+        import httpx
+
         async with httpx.AsyncClient(timeout=20) as c:
             r = await c.get("https://serpapi.com/search.json",
                             params={"engine": "google", "q": query, "num": n,
@@ -108,6 +114,8 @@ class SearchRouter:
         return cls([known[n] for n in order if n in known])
 
     async def search(self, query: str, n: int = 5) -> tuple[str, list[SearchHit]]:
+        import httpx
+
         errors = []
         for p in self.providers:
             if not p.available() or self._cooldown.get(p.name, 0) > time.monotonic():
@@ -161,6 +169,8 @@ class FetchPage(Tool[FetchArgs]):
         return [args.url]
 
     async def run(self, args: FetchArgs) -> ToolResult:
+        import httpx
+
         try:
             async with httpx.AsyncClient(timeout=20, follow_redirects=True,
                                          headers={"User-Agent": "Mozilla/5.0 DeltaAgent"}) as c:

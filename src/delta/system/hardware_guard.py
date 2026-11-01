@@ -18,6 +18,7 @@ class Health(IntEnum):
 class Snapshot:
     cpu_pct: float = 0.0
     ram_pct: float = 0.0
+    ram_free_gb: float | None = None
     cpu_temp_c: float | None = None
     gpu_util_pct: float | None = None
     gpu_temp_c: float | None = None
@@ -36,9 +37,14 @@ DEFAULT_LIMITS = {
     "gpu_temp_c": Limit(throttle=78, critical=87),
     "cpu_temp_c": Limit(throttle=90, critical=97),
     "vram_pct": Limit(throttle=85, critical=95),
-    "ram_pct": Limit(throttle=85, critical=93),
+    # Free RAM in GB, not "% used": many laptops sit at 85-90 % used because of the user's own apps
+    # while still having room for Delta. Local inference needs ~1 GB of system RAM (weights are on GPU).
+    "ram_free_gb": Limit(throttle=1.0, critical=0.4),
     "battery_pct_unplugged": Limit(throttle=30, critical=15),
 }
+
+# Limits where a LOWER value is worse.
+LOW_IS_BAD = {"ram_free_gb"}
 
 
 def assess(snap: Snapshot, limits: dict[str, Limit] | None = None) -> Assessment:
@@ -51,11 +57,16 @@ def assess(snap: Snapshot, limits: dict[str, Limit] | None = None) -> Assessment
         health = max(health, level)
         reasons.append(why)
 
-    for key in ("gpu_temp_c", "cpu_temp_c", "vram_pct", "ram_pct"):
+    for key in ("gpu_temp_c", "cpu_temp_c", "vram_pct", "ram_free_gb"):
         value = getattr(snap, key)
-        if value is None:
+        if value is None or key not in lim:
             continue
-        if value >= lim[key].critical:
+        if key in LOW_IS_BAD:
+            if value <= lim[key].critical:
+                bump(Health.CRITICAL, f"only {value:.1f} GB RAM free")
+            elif value <= lim[key].throttle:
+                bump(Health.THROTTLE, f"only {value:.1f} GB RAM free")
+        elif value >= lim[key].critical:
             bump(Health.CRITICAL, f"{key}={value:.0f} >= {lim[key].critical:.0f}")
         elif value >= lim[key].throttle:
             bump(Health.THROTTLE, f"{key}={value:.0f} >= {lim[key].throttle:.0f}")

@@ -13,6 +13,10 @@ def test_hardware_guard_levels():
     assert assess(Snapshot(gpu_temp_c=90)).health == Health.CRITICAL
     assert assess(Snapshot(battery_pct=25, plugged=False)).health == Health.THROTTLE
     assert assess(Snapshot(battery_pct=25, plugged=True)).health == Health.NORMAL
+    # high "% used" alone is fine: what matters is free memory
+    assert assess(Snapshot(ram_pct=91, ram_free_gb=1.6)).health == Health.NORMAL
+    assert assess(Snapshot(ram_pct=94, ram_free_gb=0.8)).health == Health.THROTTLE
+    assert assess(Snapshot(ram_free_gb=0.3)).health == Health.CRITICAL
 
 
 class HotSensor:

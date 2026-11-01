@@ -42,9 +42,9 @@ def _installed(*modules: str) -> bool:
 def build_providers(settings: Settings) -> dict[str, Provider]:
     providers: dict[str, Provider] = {}
     for name, cfg in settings.llm.providers.items():
-        key = get_secret(cfg.secret) if cfg.secret else None
-        if cfg.secret and not key:
-            continue  # cloud provider without a key: skip silently, `delta doctor` reports it
+        # Keys are looked up on first use (not at startup); providers without one are skipped
+        # by the router and reported by `delta doctor`.
+        key = (lambda s=cfg.secret: get_secret(s)) if cfg.secret else None
         providers[name] = OpenAICompatProvider(name, cfg, key)
     return providers
 

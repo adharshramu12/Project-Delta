@@ -141,6 +141,44 @@ def _walk(elem: Any, depth: int, out: list[str], max_depth: int) -> None:
             _walk(child, depth + 1, out, max_depth)
 
 
+def _walk_cached(hwnd: int, out: list[str], max_depth: int) -> None:
+    """Fast path for read_window: one UI Automation cache request fetches name, type, position
+    and visibility of the whole control tree in a single cross-process call, instead of several
+    calls per control. Typically 5-20x faster than walking wrappers."""
+    from pywinauto.uia_defines import IUIA
+
+    u = IUIA()
+    dll = u.UIA_dll
+    cr = u.iuia.CreateCacheRequest()
+    for prop in (dll.UIA_NamePropertyId, dll.UIA_ControlTypePropertyId, dll.UIA_BoundingRectanglePropertyId,
+                 dll.UIA_IsOffscreenPropertyId):
+        cr.AddProperty(prop)
+    cr.TreeScope = dll.TreeScope_Subtree
+    cr.TreeFilter = u.iuia.ControlViewCondition  # skip raw layout noise, like Inspect's control view
+    root = u.iuia.ElementFromHandle(hwnd).BuildUpdatedCache(cr)
+    names = {v: k for k, v in u.known_control_types.items()}
+
+    def visit(el: Any, depth: int) -> None:
+        if len(out) >= MAX_NODES or depth > max_depth:
+            return
+        kids = el.GetCachedChildren()
+        for i in range(kids.Length if kids else 0):
+            if len(out) >= MAX_NODES:
+                return
+            child = kids.GetElement(i)
+            name = (child.CachedName or "").strip()
+            ctype = names.get(child.CachedControlType, "Custom")
+            if (name or ctype in {"Edit", "Document", "ComboBox"}) and not child.CachedIsOffscreen:
+                r = child.CachedBoundingRectangle
+                w, h = r.right - r.left, r.bottom - r.top
+                where = f" @({r.left + w // 2},{r.top + h // 2})" if w > 0 and h > 0 else ""
+                out.append(f"{'  ' * depth}[{ctype}] {name[:80]}{where}")
+            if ctype not in LEAF_GROUPS:
+                visit(child, depth + 1)
+
+    visit(root, 0)
+
+
 def _is_foreground(w: Any) -> bool:
     import win32gui
 
@@ -297,7 +335,11 @@ class ReadWindow(_DesktopTool[ReadArgs]):
         def go() -> tuple[str, str]:
             w = _find_window(args.window)
             out: list[str] = []
-            _walk(w, 0, out, args.depth)
+            try:
+                _walk_cached(w.handle, out, args.depth)
+            except Exception:  # some apps reject cache requests: fall back to the slow walk
+                out.clear()
+                _walk(w, 0, out, args.depth)
             return w.window_text(), "\n".join(out)
 
         try:

@@ -50,7 +50,7 @@ governor:
     gpu_temp_c: { throttle: 78, critical: 87 }
     cpu_temp_c: { throttle: 90, critical: 97 }
     vram_pct:   { throttle: 85, critical: 95 }
-    ram_pct:    { throttle: 85, critical: 93 }
+    ram_free_gb: { throttle: 1.0, critical: 0.4 }   # free RAM in GB (lower is worse)
     battery_pct_unplugged: { throttle: 30, critical: 15 }
 
 memory:

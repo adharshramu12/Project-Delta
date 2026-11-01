@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import httpx
 import psutil
 from pydantic import BaseModel, Field
 
@@ -94,6 +93,8 @@ class BrowserManager:
 
     @staticmethod
     async def _alive(endpoint: str) -> bool:
+        import httpx
+
         try:
             async with httpx.AsyncClient(timeout=1) as c:
                 return (await c.get(f"{endpoint}/json/version")).status_code == 200

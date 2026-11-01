@@ -50,6 +50,10 @@ class ModelRouter:
         self.breakers = {name: CircuitBreaker() for name in providers}
         self.last_provider: str | None = None
 
+    def usable(self) -> list[str]:
+        """Providers that can serve chat right now (configured, keyed), for status displays."""
+        return [n for n, p in self.providers.items() if p.supports("chat")]
+
     def candidates(self, task: str) -> list[Provider]:
         route = self.routes.get(task) or self.routes.get("chat") or list(self.providers)
         out = []

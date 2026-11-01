@@ -102,7 +102,7 @@ def create_app(c: Container, token: str) -> FastAPI:
     @app.get("/api/status", dependencies=[Depends(auth)])
     async def get_status() -> dict[str, Any]:
         return {"name": c.settings.agent.name, "governor": c.governor.status(),
-                "providers": list(c.router.providers), "last_provider": c.router.last_provider,
+                "providers": c.router.usable(), "last_provider": c.router.last_provider,
                 "tools": c.registry.names(), "autonomy": c.settings.boundaries.autonomy,
                 "pending_approvals": len(c.approvals.pending())}
 

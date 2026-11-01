@@ -98,7 +98,7 @@ class CliChannel:
         mem = self.c.memory
         if cmd == "/status":
             print(json.dumps({"governor": self.c.governor.status(),
-                              "providers": list(self.c.router.providers),
+                              "providers": self.c.router.usable(),
                               "last_provider": self.c.router.last_provider,
                               "tools": self.c.registry.names(),
                               "memories": len(mem.list())}, indent=1, default=str))

@@ -84,13 +84,16 @@ def test_chrome_uses_dedicated_profile(tmp_path):
 
 
 def test_computer_use_registered_but_not_loaded(tmp_path):
-    """Tools are registered at startup, but pyautogui/pywinauto/playwright load only on first use."""
+    """Startup-cost guard. Building Delta registers every tool but must not import heavy libraries
+    (desktop control, browser, the ~2 s openai SDK, the credential store, HTTP clients): those load on
+    first use. If this fails, someone added a top-level import that slows startup for every user."""
     code = (
         "import sys; from delta.bootstrap import build; from delta.config import Settings; from pathlib import Path\n"
         f"c = build(Settings(data_dir=Path(r'{tmp_path}')))\n"
         "want = {'read_window', 'click_element', 'look_at_screen', 'browser_open'}\n"
         "print(sorted(want - set(c.registry.names())))\n"
-        "print([m for m in ['pyautogui','pywinauto','playwright','mss','PIL'] if m in sys.modules])"
+        "heavy = ['pyautogui','pywinauto','playwright','mss','PIL','openai','aiohttp','keyring','httpx','send2trash']\n"
+        "print([m for m in heavy if m in sys.modules])"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
                          cwd=Path(__file__).parent.parent)

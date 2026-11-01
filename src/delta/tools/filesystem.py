@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
-from send2trash import send2trash
 
 from delta.safety.policy import norm_path
 from delta.tools.base import Risk, Tool, ToolResult
@@ -169,6 +168,8 @@ class DeletePath(Tool[PathArgs]):
         p = norm_path(args.path)
         if not p.exists():
             return ToolResult(False, f"not found: {p}")
+        from send2trash import send2trash  # loaded only when something is deleted
+
         await asyncio.to_thread(send2trash, str(p))
         return ToolResult(True, f"recycled {p}", {"path": str(p), "exists": Path(p).exists()})
 

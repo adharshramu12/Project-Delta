@@ -8,9 +8,6 @@ from __future__ import annotations
 import contextlib
 import os
 
-import keyring
-from keyring.errors import KeyringError
-
 SERVICE = "delta-agent"
 
 KNOWN_SECRETS = {
@@ -29,6 +26,9 @@ def get_secret(name: str) -> str | None:
     env = os.environ.get(f"DELTA_{name.upper()}")
     if env:
         return env
+    import keyring  # ~0.2 s to import, so only when a secret is actually needed
+    from keyring.errors import KeyringError
+
     try:
         return keyring.get_password(SERVICE, name)
     except KeyringError:
@@ -36,10 +36,15 @@ def get_secret(name: str) -> str | None:
 
 
 def set_secret(name: str, value: str) -> None:
+    import keyring
+
     keyring.set_password(SERVICE, name, value)
 
 
 def delete_secret(name: str) -> None:
+    import keyring
+    from keyring.errors import KeyringError
+
     with contextlib.suppress(KeyringError):
         keyring.delete_password(SERVICE, name)
 
