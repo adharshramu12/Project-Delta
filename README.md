@@ -107,7 +107,8 @@ Runtime data (memory DB, audit log, logs) lives in `%LOCALAPPDATA%\Delta`.
 - [x] Web dashboard: chat, live steps, approvals, memory, health, one-click Shutdown
 - [x] Desktop shortcut (no console window; second click reopens the dashboard)
 - [x] Telegram + Slack with approve/deny buttons (allow-listed users only)
-- [x] Computer use: UI Automation, Unicode typing, user-takeover stop, screen vision, Chrome profile
+- [x] Computer use (in every install): UI Automation, Unicode typing, user-takeover stop, screen vision,
+      browser via Delta's own Chrome or Edge profile (free browsing; send/buy/delete still ask)
 - [x] Add-on SDK + MCP bridge
 - [x] Skill learning from verified tasks (candidate → proven → retired), export/import
 - [ ] Preference learning from approvals/corrections, reflection lessons
@@ -115,7 +116,6 @@ Runtime data (memory DB, audit log, logs) lives in `%LOCALAPPDATA%\Delta`.
 - [ ] First-run setup page, one-line installer, community skill library
 - [ ] Tauri desktop app with tray icon (wraps the same dashboard)
 - [ ] Remote control (Tailscale / Cloudflare Tunnel, device pairing, PWA)
-- [ ] Computer use: UI Automation, mouse/keyboard, screen vision, Playwright Chrome profile
 - [ ] Voice: wake word, faster-whisper, Piper, Vapi
 - [ ] Semantic memory (sqlite-vec), memory encryption at rest, MCP tools
 

@@ -23,15 +23,20 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.32",
     "websockets>=13",
+    # using the computer: browser (drives the installed Chrome/Edge, no browser download),
+    # mouse, keyboard and screen. Core abilities, so part of every install; all load on first use.
+    "playwright>=1.48",
+    "pywinauto>=0.6.9; sys_platform == 'win32'",
+    "pyautogui>=0.9.54",
+    "mss>=9.0",
+    "pillow>=10.4",
 ]
 
 [project.optional-dependencies]
 channels = ["python-telegram-bot>=21.6", "slack-bolt>=1.21", "aiohttp>=3.10"]
-desktop = ["pywinauto>=0.6.9", "pyautogui>=0.9.54", "mss>=9.0", "pillow>=10.4"]
-browser = ["playwright>=1.48"]
 voice = ["faster-whisper>=1.1", "piper-tts>=1.2", "openwakeword>=0.6", "sounddevice>=0.5"]
 mcp = ["mcp>=2.0"]
-all = ["delta-agent[channels,desktop,browser,mcp]"]
+all = ["delta-agent[channels,mcp]"]
 
 [project.scripts]
 delta = "delta.__main__:main"

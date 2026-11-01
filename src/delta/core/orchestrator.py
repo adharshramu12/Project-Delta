@@ -45,7 +45,10 @@ Rules:
 - Desktop apps: read_window first (fast, free). Fill boxes with set_field (more reliable than
   typing; dialogs like 'Save as' can be targeted by title). Click by name with click_element; use
   click_at / look_at_screen only when read_window cannot see it. Re-read after acting.
-- Websites: use browser_* tools (Delta's signed-in Chrome). browser_read after each step.
+- Websites: use the browser freely (browser_search, browser_open, browser_read, browser_click,
+  browser_fill with submit=true for search boxes, browser_scroll, browser_back). It is Delta's own
+  Chrome/Edge profile. browser_read after each step to see the page. Clicking Send/Buy/Delete,
+  submitting forms and anything with passwords or payments asks the user first.
 - If a desktop tool says STOPPED, the user took over: stop and report.
 - Never ask for or handle passwords, card numbers or API keys.
 - When everything is done, reply with a short, friendly summary for the user (no tool call).

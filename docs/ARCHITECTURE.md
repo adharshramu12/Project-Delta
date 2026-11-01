@@ -67,5 +67,5 @@ The daemon runs at BELOW_NORMAL priority. Ollama models unload after `keep_alive
 - `apps/desktop/` Tauri v2 + React: one-click start, tray, approvals, memory & boundaries editors, full shutdown.
 - `channels/telegram.py`, `channels/slack.py` (Socket Mode) — approvals via inline buttons, allow-listed user IDs.
 - Remote: Tailscale or Cloudflare Tunnel, device pairing with TOTP, kill switch.
-- Computer use: pywinauto UIA tree first, pyautogui input, mss + vision model when needed; Playwright over CDP to a dedicated Chrome profile.
+- Computer use (built, core install): pywinauto UIA tree first, Unicode SendInput typing, mss + vision model when needed; Playwright over CDP to Delta's own profile in the installed Chrome, else Edge.
 - Voice: openWakeWord → faster-whisper → Piper; Vapi adapter.

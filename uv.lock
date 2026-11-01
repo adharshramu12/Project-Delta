@@ -277,10 +277,15 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "keyring" },
+    { name = "mss" },
     { name = "nvidia-ml-py" },
     { name = "openai" },
+    { name = "pillow" },
+    { name = "playwright" },
     { name = "psutil" },
+    { name = "pyautogui" },
     { name = "pydantic" },
+    { name = "pywinauto" },
     { name = "pyyaml" },
     { name = "send2trash" },
     { name = "structlog" },
@@ -293,27 +298,13 @@ dependencies = [
 all = [
     { name = "aiohttp" },
     { name = "mcp" },
-    { name = "mss" },
-    { name = "pillow" },
-    { name = "playwright" },
-    { name = "pyautogui" },
     { name = "python-telegram-bot" },
-    { name = "pywinauto" },
     { name = "slack-bolt" },
-]
-browser = [
-    { name = "playwright" },
 ]
 channels = [
     { name = "aiohttp" },
     { name = "python-telegram-bot" },
     { name = "slack-bolt" },
-]
-desktop = [
-    { name = "mss" },
-    { name = "pillow" },
-    { name = "pyautogui" },
-    { name = "pywinauto" },
 ]
 mcp = [
     { name = "mcp" },
@@ -339,24 +330,24 @@ dev = [
 requires-dist = [
     { name = "aiohttp", marker = "extra == 'channels'", specifier = ">=3.10" },
     { name = "ddgs", specifier = ">=9.0" },
-    { name = "delta-agent", extras = ["channels", "desktop", "browser", "mcp"], marker = "extra == 'all'" },
+    { name = "delta-agent", extras = ["channels", "mcp"], marker = "extra == 'all'" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.1" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "keyring", specifier = ">=25.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0" },
-    { name = "mss", marker = "extra == 'desktop'", specifier = ">=9.0" },
+    { name = "mss", specifier = ">=9.0" },
     { name = "nvidia-ml-py", specifier = ">=12.560" },
     { name = "openai", specifier = ">=1.60" },
     { name = "openwakeword", marker = "extra == 'voice'", specifier = ">=0.6" },
-    { name = "pillow", marker = "extra == 'desktop'", specifier = ">=10.4" },
+    { name = "pillow", specifier = ">=10.4" },
     { name = "piper-tts", marker = "extra == 'voice'", specifier = ">=1.2" },
-    { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.48" },
+    { name = "playwright", specifier = ">=1.48" },
     { name = "psutil", specifier = ">=6.0" },
-    { name = "pyautogui", marker = "extra == 'desktop'", specifier = ">=0.9.54" },
+    { name = "pyautogui", specifier = ">=0.9.54" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "python-telegram-bot", marker = "extra == 'channels'", specifier = ">=21.6" },
-    { name = "pywinauto", marker = "extra == 'desktop'", specifier = ">=0.6.9" },
+    { name = "pywinauto", marker = "sys_platform == 'win32'", specifier = ">=0.6.9" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "send2trash", specifier = ">=1.8" },
     { name = "slack-bolt", marker = "extra == 'channels'", specifier = ">=1.21" },
@@ -366,7 +357,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.32" },
     { name = "websockets", specifier = ">=13" },
 ]
-provides-extras = ["channels", "desktop", "browser", "voice", "mcp", "all"]
+provides-extras = ["channels", "voice", "mcp", "all"]
 
 [package.metadata.requires-dev]
 dev = [

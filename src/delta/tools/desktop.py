@@ -27,8 +27,9 @@ from delta.tools.base import Risk, Tool, ToolResult
 
 T = TypeVar("T")
 
-SENDY = re.compile(r"\b(send|submit|pay|buy|purchase|order|checkout|post|publish|transfer|share|sign up|"
-                   r"confirm|accept|install|uninstall)\b", re.I)
+SENDY = re.compile(r"\b(send|submit|pay|payment|buy|purchase|order|place order|checkout|check out|donate|"
+                   r"subscribe|upgrade|add to cart|book|reserve|post|publish|tweet|reply|comment|transfer|"
+                   r"share|sign up|register|confirm|accept|agree|allow|authori[sz]e|install|uninstall)\b", re.I)
 DELETY = re.compile(r"\b(delete|remove|erase|discard|empty|format|reset|clear all)\b", re.I)
 MAX_NODES = 250
 # Shell/system surfaces that are not apps the user thinks of as "open windows".

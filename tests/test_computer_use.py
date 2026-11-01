@@ -77,6 +77,36 @@ def test_browser_risks(tmp_path):
     assert pe.evaluate(BrowserClick(mgr), ClickArgs(text="Next")).verdict == Verdict.DENY
 
 
+def test_browsing_flows_freely_but_irreversible_steps_ask(tmp_path):
+    from delta.tools.browser import BrowserFill, BrowserSearch, FillArgs, SearchArgs
+
+    mgr = BrowserManager(tmp_path)
+    pe = PolicyEngine(Boundaries())
+    assert pe.evaluate(BrowserSearch(mgr), SearchArgs(query="weather")).verdict == Verdict.ALLOW
+    search_submit = FillArgs(field="Search Wikipedia", value="Ada", submit=True)
+    assert pe.evaluate(BrowserFill(mgr), search_submit).verdict == Verdict.ALLOW
+    form_submit = FillArgs(field="Message", value="hi", submit=True)
+    assert pe.evaluate(BrowserFill(mgr), form_submit).verdict == Verdict.ASK
+    mgr.last_fill_was_search = True
+    assert pe.evaluate(BrowserPress(mgr), PressArgs(key="Enter")).verdict == Verdict.ALLOW
+    mgr.last_fill_was_search = False
+    assert pe.evaluate(BrowserPress(mgr), PressArgs(key="Enter")).verdict == Verdict.ASK
+    for label in ("Donate", "Place order", "Add to cart", "Subscribe", "Reply"):
+        assert pe.evaluate(BrowserClick(mgr), ClickArgs(text=label)).verdict == Verdict.ASK, label
+    assert pe.evaluate(BrowserClick(mgr), ClickArgs(text="Next page")).verdict == Verdict.ALLOW
+
+
+def test_edge_is_used_when_chrome_is_missing(tmp_path, monkeypatch):
+    from delta.tools import browser
+
+    edge = tmp_path / "msedge.exe"
+    edge.write_text("")
+    monkeypatch.setattr(browser, "BROWSERS", [("chrome", [str(tmp_path / "nope.exe")]), ("edge", [str(edge)])])
+    assert browser.find_browser() == ("edge", str(edge))
+    monkeypatch.setattr(browser, "BROWSERS", [("chrome", [str(tmp_path / "nope.exe")])])
+    assert browser.find_browser() is None
+
+
 def test_chrome_uses_dedicated_profile(tmp_path):
     args = chrome_args(tmp_path / "p")
     assert any(a.startswith("--user-data-dir=") and str(tmp_path) in a for a in args)
@@ -98,8 +128,8 @@ def test_startup_does_not_load_heavy_libraries(tmp_path):
 
 
 def test_computer_use_registered_but_not_loaded(tmp_path):
-    pytest.importorskip("pywinauto", reason="desktop extra not installed")
-    pytest.importorskip("playwright", reason="browser extra not installed")
+    pytest.importorskip("pywinauto", reason="pywinauto not installed (non-Windows)")
+    pytest.importorskip("playwright", reason="playwright not installed")
     """Startup-cost guard. Building Delta registers every tool but must not import heavy libraries
     (desktop control, browser, the ~2 s openai SDK, the credential store, HTTP clients): those load on
     first use. If this fails, someone added a top-level import that slows startup for every user."""
