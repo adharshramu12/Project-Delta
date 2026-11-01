@@ -46,7 +46,8 @@ class CircuitBreaker:
 
 MAX_RATE_LIMIT_WAIT_S = 20.0  # waiting this long beats switching to a weaker model
 LAST_RESORT_WAIT_S = 60.0     # when no other provider is left
-UNREACHABLE_COOLDOWN_S = 300.0
+UNREACHABLE_COOLDOWN_S = 300.0  # local servers only; cloud blips use the normal breaker
+NETWORK_RETRY_DELAY_S = 1.5
 
 
 class ModelRouter:
@@ -97,14 +98,21 @@ class ModelRouter:
                 try:
                     resp = await p.complete(task, messages, tools, json_mode)
                 except LLMError as e:
-                    # Free tiers often say "try again in 6s": a short wait beats failing the task.
-                    if e.kind != "rate_limit" or not e.retry_after_s or e.retry_after_s > max_wait:
+                    if e.kind == "unreachable" and not p.local:
+                        # Cloud + connection error is usually a network blip: one quick retry.
+                        log.info("router.network_retry", provider=p.name)
+                        await asyncio.sleep(NETWORK_RETRY_DELAY_S)
+                        resp = await p.complete(task, messages, tools, json_mode)
+                    elif e.kind == "rate_limit" and e.retry_after_s and e.retry_after_s <= max_wait:
+                        # Free tiers often say "try again in 6s": a short wait beats failing the task.
+                        log.info("router.rate_limit_wait", provider=p.name, seconds=round(e.retry_after_s, 1))
+                        await asyncio.sleep(e.retry_after_s + 0.5)
+                        resp = await p.complete(task, messages, tools, json_mode)
+                    else:
                         raise
-                    log.info("router.rate_limit_wait", provider=p.name, seconds=round(e.retry_after_s, 1))
-                    await asyncio.sleep(e.retry_after_s + 0.5)
-                    resp = await p.complete(task, messages, tools, json_mode)
             except LLMError as e:
-                if e.kind == "unreachable":
+                if e.kind == "unreachable" and p.local:
+                    # Nothing listening on this PC (e.g. Ollama not installed): stop trying for a while.
                     self.breakers[p.name].trip(UNREACHABLE_COOLDOWN_S)
                 elif e.kind != "rate_limit":  # being throttled says nothing about provider health
                     self.breakers[p.name].record_failure()

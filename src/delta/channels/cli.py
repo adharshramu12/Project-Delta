@@ -20,6 +20,8 @@ HELP = """commands:
   /status            health, models, memory size
   /memory            list what Delta remembers about you
   /remember <fact>   add a memory          /forget <id>   delete a memory
+  /learned           what Delta learned from you
+  /keep <id>         accept a suggestion   /undo <id>     undo something Delta learned
   /audit             last audit entries    /help          this help
   /quit              shut Delta down completely"""
 
@@ -44,6 +46,13 @@ class CliChannel:
         elif event == "task.verify":
             mark = f"{GREEN}✓ verified" if data["passed"] else f"{RED}✗ not verified"
             print(f"{DIM}  {mark}{RESET}{DIM} (attempt {data['attempt']}): {data['reason']}{RESET}")
+        elif event == "learning.added":
+            item = data.get("item", {})
+            if item.get("status") == "pending":
+                print(f"\n{CYAN}★ Suggestion #{item.get('id')}: {item.get('content')}  "
+                      f"(/keep {item.get('id')} or /undo {item.get('id')}){RESET}")
+            else:
+                print(f"\n{CYAN}★ Got it, I'll remember: {item.get('content')}  (/undo {item.get('id')}){RESET}")
         elif event == "governor.health":
             print(f"\n{YELLOW}hardware: {data['health']} {', '.join(data['reasons'])}{RESET}")
 
@@ -115,6 +124,15 @@ class CliChannel:
             print(f"remembered #{mem.add(arg, 'profile', 'user')}")
         elif cmd == "/forget" and arg.strip().isdigit():
             print("deleted" if mem.delete(int(arg)) else "no such memory")
+        elif cmd == "/learned":
+            store = self.c.orchestrator.learning
+            learned = [x for x in (store.list() if store else []) if x.status != "undone"]
+            print("\n".join(f"#{x.id} [{x.kind}{', needs OK' if x.status == 'pending' else ''}] {x.content}"
+                            for x in learned) or "(nothing learned yet)")
+        elif cmd in {"/keep", "/undo"} and arg.strip().isdigit():
+            store = self.c.orchestrator.learning
+            changed = store.set_status(int(arg), "active" if cmd == "/keep" else "undone") if store else None
+            print(f"{'kept' if cmd == '/keep' else 'undone'}: {changed.content}" if changed else "no such item")
         elif cmd == "/audit":
             for r in self.c.audit.tail(15):
                 print(f"{DIM}{r['ts'][11:19]}{RESET} {r['event']:<10} {json.dumps(r['data'], default=str)[:150]}")

@@ -1,6 +1,8 @@
 """Regression tests for problems found in the first real-model run (Groq free tier)."""
 
+import contextlib
 import time
+from types import SimpleNamespace
 
 from fakes import FakeProvider, call, js, text
 from test_orchestrator import make
@@ -100,6 +102,55 @@ def test_friendly_messages_for_users():
     busy = friendly_model_error(AllProvidersFailedError("x", ["unreachable", "rate_limit"]))
     assert "busy" in busy and "429" not in busy
     assert "Groq key" in friendly_model_error(AllProvidersFailedError("x", []))
+
+
+async def test_cloud_network_blip_is_retried_not_disabled(monkeypatch):
+    """Live finding: one Groq connection error disabled Groq for 5 minutes and failed every task."""
+    monkeypatch.setattr("delta.llm.router.NETWORK_RETRY_DELAY_S", 0)
+    groq = FakeProvider("groq", [LLMError("blip", kind="unreachable"), text("ok"),
+                                 LLMError("blip", kind="unreachable"), LLMError("blip", kind="unreachable"),
+                                 text("still usable")])
+    router = ModelRouter({"groq": groq}, {"chat": ["groq"]})
+    assert (await router.complete([])).content == "ok"  # retried once, succeeded
+    with contextlib.suppress(LLMError):
+        await router.complete([])  # two blips in a row: this call fails...
+    assert router.breakers["groq"].available()  # ...but Groq is not switched off
+    assert (await router.complete([])).content == "still usable"
+
+
+async def test_daily_quota_swaps_to_sibling_model():
+    """Live finding: gpt-oss-120b hit Groq's 200k tokens/day while other Groq models still had quota."""
+    import httpx
+    import openai
+
+    from delta.config import ProviderConfig
+    from delta.llm.providers import OpenAICompatProvider
+
+    calls: list[str] = []
+
+    class Completions:
+        async def create(self, **kw):
+            calls.append(kw["model"])
+            if kw["model"] == "openai/gpt-oss-120b":
+                raise openai.RateLimitError(
+                    "Rate limit reached for model `openai/gpt-oss-120b` on tokens per day (TPD): Limit 200000",
+                    response=httpx.Response(429, request=httpx.Request("POST", "http://x")), body=None)
+            msg = SimpleNamespace(content="pong", tool_calls=None)
+            return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    class Models:
+        async def list(self):
+            return SimpleNamespace(data=[SimpleNamespace(id=i) for i in
+                                         ("whisper-large-v3", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")])
+
+    p = OpenAICompatProvider("groq", ProviderConfig(base_url="http://x", models={"chat": "openai/gpt-oss-120b"}),
+                             "k")
+    p._client_obj = SimpleNamespace(chat=SimpleNamespace(completions=Completions()), models=Models())
+    r1 = await p.complete("chat", [{"role": "user", "content": "hi"}], None)
+    r2 = await p.complete("chat", [{"role": "user", "content": "hi"}], None)
+    assert r1.content == "pong" and r1.model == "qwen/qwen3.8-27b"
+    assert calls == ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "qwen/qwen3.8-27b"]  # no retry of the tired one
+    assert r2.model == "qwen/qwen3.8-27b"
 
 
 def test_retry_after_parsing():

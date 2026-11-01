@@ -43,6 +43,10 @@ class SkillStatusIn(BaseModel):
     status: str = Field(pattern="^(candidate|active|retired)$")
 
 
+class LearnedIn(BaseModel):
+    action: str = Field(pattern="^(keep|undo)$")
+
+
 class MemoryIn(BaseModel):
     content: str
     kind: str = "profile"
@@ -171,6 +175,20 @@ def create_app(c: Container, token: str) -> FastAPI:
     async def export_skills() -> list[dict[str, Any]]:
         store = c.orchestrator.skills
         return store.export() if store else []
+
+    @app.get("/api/learned", dependencies=[Depends(auth)])
+    async def list_learned() -> list[dict[str, Any]]:
+        store = c.orchestrator.learning
+        return [i.to_dict() for i in store.list()] if store else []
+
+    @app.post("/api/learned/{item_id}", dependencies=[Depends(auth)])
+    async def answer_learned(item_id: int, body: LearnedIn) -> dict[str, Any]:
+        store = c.orchestrator.learning
+        item = store.set_status(item_id, "active" if body.action == "keep" else "undone") if store else None
+        if not item:
+            raise HTTPException(404, "no such learned item")
+        c.audit.record("learned", item=item_id, user_action=body.action, kind=item.kind)
+        return item.to_dict()
 
     @app.get("/api/addons", dependencies=[Depends(auth)])
     async def list_addons() -> list[dict[str, Any]]:

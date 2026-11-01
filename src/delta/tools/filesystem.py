@@ -143,6 +143,10 @@ class MakeDir(Tool[PathArgs]):
     risk = Risk.WRITE
     Args = PathArgs
 
+    def risk_for(self, args: PathArgs) -> Risk:
+        # A folder that already exists is not changed: nothing to approve.
+        return Risk.READ if norm_path(args.path).is_dir() else Risk.WRITE
+
     def paths(self, args: PathArgs) -> list[str]:
         return [args.path]
 

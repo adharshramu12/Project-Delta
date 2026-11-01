@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import platform
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ from delta.core.events import EventBus
 from delta.core.planner import make_plan
 from delta.core.state import Plan, StepRecord, TaskRequest, TaskResult, Verification
 from delta.core.verifier import verify
+from delta.learning.corrections import learn_corrections, standing_instructions
+from delta.learning.store import LearningStore
 from delta.llm.router import ModelRouter
 from delta.llm.schemas import AllProvidersFailedError, LLMError, Message
 from delta.memory.distill import distill
@@ -76,7 +79,8 @@ ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "web_search", "recall"}
 class Orchestrator:
     def __init__(self, settings: Settings, router: ModelRouter, executor: ToolExecutor,
                  memory: MemoryStore | None, governor: Governor | None, events: EventBus,
-                 audit: AuditLog, skills: SkillStore | None = None) -> None:
+                 audit: AuditLog, skills: SkillStore | None = None,
+                 learning: LearningStore | None = None) -> None:
         self.s = settings
         self.router = router
         self.executor = executor
@@ -85,6 +89,7 @@ class Orchestrator:
         self.events = events
         self.audit = audit
         self.skills = skills
+        self.learning = learning
         self._learning: set[asyncio.Task[None]] = set()
 
     async def drain(self) -> None:
@@ -111,6 +116,9 @@ class Orchestrator:
 
     async def _run(self, req: TaskRequest) -> TaskResult:
         memory_ctx = self.memory.context_for(req.text, self.s.memory.recall_k) if self.memory else ""
+        if self.learning and (rules := standing_instructions(self.learning)):
+            memory_ctx = (f"STANDING INSTRUCTIONS FROM THE USER (always follow these):\n{rules}\n\n"
+                          + (memory_ctx or ""))
         known = self.skills.relevant(req.text) if self.skills else []
         environment = (f"Save folder for new files: {save_dir(self.s.files)}. Desktop: {known_folder('Desktop')}. "
                        f"Documents: {known_folder('Personal')}. Home: {Path.home()}.")
@@ -190,6 +198,10 @@ class Orchestrator:
                 await self.events.publish("task.step", task_id=req.id, tool=call.name, args=call.arguments)
                 result = await self.executor.execute(call.name, call.arguments, task_id=req.id)
                 steps.append(StepRecord(call.name, call.arguments, result.ok, result.output[:2000], result.evidence))
+                if result.evidence.get("user_denied"):
+                    # A human "no" ends the task: no workarounds, no retries, no second question.
+                    return "", (f"OK, I didn't do it. You declined: {result.evidence.get('denied_action', call.name)}. "
+                                "Tell me if you want something different.")
                 messages.append({"role": "tool", "tool_call_id": call.id, "name": call.name,
                                  "content": result.for_llm()})
         return "I ran out of steps for this attempt.", ""
@@ -199,6 +211,11 @@ class Orchestrator:
         if result.status == "cancelled":
             return
         try:
+            if self.learning:
+                for text in await learn_corrections(self.router, self.learning, req.text):
+                    self.audit.record("learned", task=req.id, kind="preference", content=text)
+                    item = self.learning.find("preference", re.sub(r"\W+", " ", text.lower()).strip())
+                    await self.events.publish("learning.added", item=item.to_dict() if item else {"content": text})
             await self._learn_skill(req, result)
             if self.memory and self.s.memory.enabled:
                 if result.steps:

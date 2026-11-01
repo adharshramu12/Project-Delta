@@ -15,6 +15,7 @@ from delta.config import Settings, ensure_desktop_shortcut, save_dir
 from delta.core.events import EventBus
 from delta.core.orchestrator import Orchestrator
 from delta.core.state import TaskRequest, TaskResult
+from delta.learning.store import Learned, LearningStore
 from delta.llm.providers import OpenAICompatProvider, Provider
 from delta.llm.router import ModelRouter
 from delta.memory.skills import SkillStore
@@ -93,6 +94,8 @@ class Container:
             self.memory.close()
             if self.orchestrator.skills:
                 self.orchestrator.skills.close()
+            if self.orchestrator.learning:
+                self.orchestrator.learning.close()
 
         self.lifecycle.on_shutdown("state", close_state)
         for name, closer in self.closers:
@@ -177,10 +180,15 @@ def build(settings: Settings) -> Container:
     # Delta's own save folder always counts as an allowed folder
     boundaries = settings.boundaries.model_copy(deep=True)
     boundaries.allowed_paths.append(str(save_dir(settings.files, create=False)))
-    executor = ToolExecutor(registry, PolicyEngine(boundaries), approvals, audit)
+    learning = LearningStore(data / "learning.db")
+
+    async def on_learned(item: Learned) -> None:
+        await events.publish("learning.added", item=item.to_dict())
+
+    executor = ToolExecutor(registry, PolicyEngine(boundaries), approvals, audit, learning, on_learned)
     skills = SkillStore(data / "skills.db")
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
-                                governor, events, audit, skills)
+                                governor, events, audit, skills, learning)
 
     async def on_health(a: Assessment) -> None:
         await events.publish("governor.health", health=a.health.name, reasons=a.reasons)

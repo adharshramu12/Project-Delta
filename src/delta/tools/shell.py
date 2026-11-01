@@ -70,6 +70,10 @@ class RunShell(Tool[ShellArgs]):
     def paths(self, args: ShellArgs) -> list[str]:
         return [args.cwd] if args.cwd else []
 
+    def scope(self, args: ShellArgs) -> str:
+        words = args.command.strip().split()
+        return words[0].lower() if words else ""
+
     def summary(self, args: ShellArgs) -> str:
         return f"run: {args.command}" + (f"  (in {args.cwd})" if args.cwd else "")
 

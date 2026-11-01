@@ -6,10 +6,12 @@ validate args -> policy decision -> (approval) -> run -> audit. Nothing runs any
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from delta.learning.store import TRUSTABLE_RISKS, Learned, LearningStore, is_folder_scope, split_key
 from delta.safety.approvals import ApprovalBroker, ApprovalRequest
 from delta.safety.audit import AuditLog
 from delta.safety.policy import PolicyEngine, Verdict, norm_path
@@ -40,13 +42,21 @@ class ToolRegistry:
 
 class ToolExecutor:
     def __init__(self, registry: ToolRegistry, policy: PolicyEngine, approvals: ApprovalBroker,
-                 audit: AuditLog) -> None:
+                 audit: AuditLog, learning: LearningStore | None = None,
+                 on_learned: Callable[[Learned], Awaitable[None]] | None = None) -> None:
         self.registry = registry
         self.policy = policy
         self.approvals = approvals
         self.audit = audit
+        self.learning = learning
+        self.on_learned = on_learned
         # task_id -> things the user refused to have changed during that task (normalised paths/targets)
         self._refused: dict[str, set[str]] = {}
+
+    @staticmethod
+    def action_key(tool: Tool, args: BaseModel, risk: str) -> str:
+        """Groups similar actions for learning: tool + risk + kind of target (folder/app/site/command)."""
+        return f"{tool.name}|{risk}|{tool.scope(args)}"
 
     @staticmethod
     def _targets(tool: Tool, args: BaseModel) -> set[str]:
@@ -68,6 +78,32 @@ class ToolExecutor:
             t = target.lower().replace("/", "\\")
             if t in self._targets(tool, args) or (len(t) > 3 and t in text):
                 return target
+        return None
+
+    def _learned_match(self, kind: str, key: str, tool: Tool, args: BaseModel, risk: str) -> Learned | None:
+        """Find an active learned rule for this call.
+
+        Exact key first. Folder-scoped rules then apply across tools, by kind of change:
+          avoid: same risk, and the folder appears in the call's targets or arguments, so a refused
+                 delete cannot come back as `Remove-Item`, a move, or an MCP tool.
+          trust: same risk, every declared path inside the folder, and never for the shell (a cwd
+                 inside a trusted folder says nothing about what a command does).
+        """
+        assert self.learning
+        if exact := self.learning.is_active(kind, key):
+            return exact
+        paths = [str(norm_path(p)) for p in tool.paths(args) if p]
+        text = json.dumps(args.model_dump(), default=str).lower().replace("\\\\", "\\").replace("/", "\\")
+        for item in self.learning.list(status="active", kind=kind):
+            _, item_risk, scope = split_key(item.key)
+            if item_risk != risk or not is_folder_scope(scope):
+                continue
+            folder = scope.lower().rstrip("\\")
+            if kind == "avoid" and (any(p.startswith(folder) for p in paths) or folder in text):
+                return item
+            if (kind == "trust" and tool.name != "run_shell" and paths
+                    and all(p == folder or p.startswith(folder + "\\") for p in paths)):
+                return item
         return None
 
     def forget_task(self, task_id: str) -> None:
@@ -96,15 +132,41 @@ class ToolExecutor:
                                   target=target)
                 return ToolResult(False, f"BLOCKED: the user already refused changes to {target} in this task. "
                                          "Do not try another way. Stop and tell the user what you could not do.")
-            outcome = await self.approvals.request(ApprovalRequest(
-                tool=name, summary=summary, risk=decision.risk, reason=decision.reason, task_id=task_id))
-            self.audit.record("approval", task=task_id, tool=name, approved=outcome.approved, by=outcome.by)
-            if not outcome.approved:
+            key = self.action_key(tool, args, decision.risk)
+            if self.learning and (avoid := self._learned_match("avoid", key, tool, args, decision.risk)):
+                self.audit.record("approval", task=task_id, tool=name, approved=False, by="learned avoid",
+                                  learned=avoid.id)
+                # Treated exactly like a fresh "no": the task stops, no workarounds.
+                return ToolResult(False, "BLOCKED: the user has refused this kind of action before.",
+                                  {"user_denied": True,
+                                   "denied_action": f"{summary} (you said no to this before; undo it in "
+                                                    f"Delta's learned list if you changed your mind)"})
+            if (self.learning and decision.risk in TRUSTABLE_RISKS
+                    and (trust := self._learned_match("trust", key, tool, args, decision.risk))):
+                self.audit.record("approval", task=task_id, tool=name, approved=True, by="learned trust",
+                                  learned=trust.id)
+            else:
+                outcome = await self.approvals.request(ApprovalRequest(
+                    tool=name, summary=summary, risk=decision.risk, reason=decision.reason, task_id=task_id))
+                self.audit.record("approval", task=task_id, tool=name, approved=outcome.approved, by=outcome.by)
+                if self.learning and outcome.by != "timeout":  # only real human answers teach anything
+                    learned = self.learning.record_decision(key, decision.risk, summary, outcome.approved)
+                    if learned:
+                        self.audit.record("learned", task=task_id, kind=learned.kind, item=learned.id,
+                                          content=learned.content)
+                        if self.on_learned:
+                            await self.on_learned(learned)
+                if outcome.approved:
+                    return await self._run(tool, args, name, task_id)
                 if task_id:
                     self._refused.setdefault(task_id, set()).update(self._targets(tool, args) or {summary})
                 return ToolResult(False, f"The user DENIED this action ({outcome.by}). Do not retry it or try "
-                                         "another way to do the same thing; tell the user.")
+                                         "another way to do the same thing; tell the user.",
+                                  {"user_denied": outcome.by != "timeout", "denied_action": summary})
 
+        return await self._run(tool, args, name, task_id)
+
+    async def _run(self, tool: Tool, args: BaseModel, name: str, task_id: str) -> ToolResult:
         try:
             result = await tool.run(args)
         except Exception as e:

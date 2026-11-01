@@ -69,6 +69,8 @@ class OpenAICompatProvider:
         self._api_key: str | None = None
         self._key_checked_at = -1e9
         self._client_obj: Any = None
+        self._exhausted: dict[str, float] = {}  # model -> monotonic time its daily quota resets
+        self._stand_in: dict[str, str] = {}     # exhausted model -> model used meanwhile
 
     def _key(self) -> str | None:
         """Keys are read on first use and re-checked every minute, so a key added while Delta
@@ -114,7 +116,22 @@ class OpenAICompatProvider:
         return fits and self.available()
 
     def model_for(self, task: str) -> str:
-        return self.cfg.models.get(task) or self.cfg.models["chat"]
+        model = self.cfg.models.get(task) or self.cfg.models["chat"]
+        # A model whose daily quota is used up is swapped for a sibling until the quota resets.
+        if self._exhausted.get(model, 0) > time.monotonic() and model in self._stand_in:
+            return self._stand_in[model]
+        return model
+
+    async def _stand_in_for(self, model: str, task: str) -> str | None:
+        """Another model on this provider that still has quota (free tiers count quota per model)."""
+        try:
+            available = [m.id for m in (await self._client.models.list()).data]
+        except Exception:
+            return None
+        now = time.monotonic()
+        tired = {m for m, until in self._exhausted.items() if until > now}
+        usable = [m for m in available if m not in tired]
+        return pick_model(usable, vision=task == "vision", exclude=model)
 
     async def _replacement_for(self, task: str, model: str, error: Exception) -> str | None:
         text = str(error).lower()
@@ -165,6 +182,22 @@ class OpenAICompatProvider:
                 if replacement is None:
                     raise
                 kwargs["model"] = model = replacement
+                resp = await client.chat.completions.create(**kwargs)
+            except openai.RateLimitError as e:
+                if not is_daily_limit(e):
+                    raise
+                # Daily quota of THIS model is gone; free tiers count quota per model, so a sibling
+                # model usually still works. Remember the swap until the quota resets.
+                configured = self.cfg.models.get(task) or self.cfg.models["chat"]
+                self._exhausted[model] = time.monotonic() + (_retry_after(e) or 3600)
+                stand_in = await self._stand_in_for(model, task)
+                if stand_in is None:
+                    raise
+                from delta.system.logging import log
+
+                log.warning("provider.daily_quota_swap", provider=self.name, exhausted=model, using=stand_in)
+                self._stand_in[configured] = stand_in
+                kwargs["model"] = model = stand_in
                 resp = await client.chat.completions.create(**kwargs)
         except openai.RateLimitError as e:
             raise LLMError(f"{self.name}: rate limited: {e.message[:200]}", kind="rate_limit",
@@ -259,6 +292,12 @@ def pick_model(available: list[str], vision: bool = False, exclude: str = "") ->
             if fragment in m.lower():
                 return m
     return usable[0] if usable else None
+
+
+def is_daily_limit(e: Any) -> bool:
+    """Per-day quotas (Groq: TPD/RPD) won't clear by waiting a few seconds."""
+    text = str(e).lower()
+    return "per day" in text or "(tpd)" in text or "(rpd)" in text or "daily" in text
 
 
 def _retry_after(e: Any) -> float | None:

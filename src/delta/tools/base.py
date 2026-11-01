@@ -49,6 +49,20 @@ class Tool[A: BaseModel](ABC):
     def app(self, args: A) -> str | None:
         return None
 
+    def scope(self, args: A) -> str:
+        """The *kind* of thing acted on, so Delta can learn per kind ("deletes in Downloads"),
+        not per exact file: the parent folder of a path, a website's host, or an app name."""
+        import os
+        from urllib.parse import urlparse
+
+        if paths := [p for p in self.paths(args) if p]:
+            full = os.path.normcase(os.path.abspath(os.path.expandvars(os.path.expanduser(paths[0]))))
+            return os.path.dirname(full) if os.path.splitext(full)[1] else full
+        if domains := self.domains(args):
+            d = domains[0]
+            return (urlparse(d if "://" in d else f"https://{d}").hostname or d).lower()
+        return (self.app(args) or "").lower()
+
     def summary(self, args: A) -> str:
         """One line shown to the human in approval prompts."""
         return f"{self.name}({args.model_dump_json()})"

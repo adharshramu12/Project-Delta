@@ -64,18 +64,31 @@ async def test_write_file_with_approval_and_verification(tmp_path):
     assert any(m.kind == "episode" for m in memory.list())
 
 
-async def test_denied_approval_then_verifier_retry_then_fail(tmp_path):
+async def test_user_denial_stops_the_task_at_once(tmp_path):
+    """A human 'no' ends the task: no workaround attempts, no verify-retry asking again."""
     target = str(tmp_path / "x.txt")
     orch, _, _ = make(tmp_path, approve=False, script={
         "plan": [js({"needs_tools": True, "success_criteria": [f"{target} exists"]})],
+        "chat": [call("write_file", path=target, content="x"), call("make_dir", path=str(tmp_path / "other"))],
+        "verify": [],
+    })
+    r = await orch.run(TaskRequest("make x"))
+    assert r.status == "cancelled" and "You declined" in r.answer
+    assert [s.tool for s in r.steps] == ["write_file"]  # nothing ran after the "no"
+    assert not Path(target).exists()
+
+
+async def test_unverified_task_retries_then_fails(tmp_path):
+    target = str(tmp_path / "x.txt")
+    orch, _, _ = make(tmp_path, script={
+        "plan": [js({"needs_tools": True, "success_criteria": [f"{target} contains 'y'"]})],
         "chat": [call("write_file", path=target, content="x"), text("done!"),
-                 call("path_info", path=target), text("It was denied, the file does not exist.")],
-        "verify": [js({"passed": False, "reason": "file missing", "missing": ["exists"]}),
-                   js({"passed": False, "reason": "still missing"})],
+                 call("path_info", path=target), text("Done again.")],
+        "verify": [js({"passed": False, "reason": "wrong content", "missing": ["contains y"]}),
+                   js({"passed": False, "reason": "still wrong"})],
     })
     r = await orch.run(TaskRequest("make x"))
     assert r.status == "failed" and r.attempts == 2
-    assert not Path(target).exists()
     assert "could not verify" in r.answer
 
 
