@@ -58,7 +58,18 @@ memory:
   auto_extract: true        # suggest facts after tasks; you can view/delete with /memory
   recall_k: 6
 
+files:
+  # Where Delta saves files it makes for you. "auto" = Desktop\Delta, or, when OneDrive syncs the
+  # Desktop, a local %USERPROFILE%\Delta folder (never synced) with a "Delta" shortcut on the Desktop.
+  save_dir: auto
+
+api:
+  host: 127.0.0.1   # dashboard + desktop app; local only
+  port: 7878
+
 channels:
   cli: { enabled: true }
+  # Telegram: get your numeric id from @userinfobot. Only these users can talk to Delta.
   telegram: { enabled: false, allowed_user_ids: [] }
+  # Slack: member ids like U0123ABCD (profile -> ... -> Copy member ID). Socket Mode, no public URL.
   slack: { enabled: false, allowed_user_ids: [] }

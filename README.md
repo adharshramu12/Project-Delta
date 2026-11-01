@@ -63,6 +63,23 @@ uv run delta doctor
 uv run delta cli
 ```
 
+### One-click app
+```powershell
+uv sync --extra api --extra channels
+powershell -File scripts/create_shortcut.ps1   # adds "Delta" to Desktop + Start menu
+```
+Click **Delta** → it starts in the background and opens the dashboard. **Shutdown** in the
+dashboard stops everything and frees RAM/VRAM. Or run `uv run delta run --open` yourself.
+
+### Telegram / Slack
+```powershell
+uv run delta secrets set telegram_bot_token      # from @BotFather
+uv run delta secrets set slack_bot_token         # xoxb-…
+uv run delta secrets set slack_app_token         # xapp-… (Socket Mode)
+```
+Then in `config/delta.yaml` set `enabled: true` and add your own user id to `allowed_user_ids`
+(an empty list means nobody can use the bot).
+
 In the CLI: just type a task. Commands: `/status`, `/memory`, `/remember <fact>`,
 `/forget <id>`, `/audit`, `/quit`.
 
@@ -84,8 +101,11 @@ Runtime data (memory DB, audit log, logs) lives in `%LOCALAPPDATA%\Delta`.
 - [x] Tools: files, shell, apps, web search, page fetch
 - [x] Memory (profile + episodic, FTS recall)
 - [x] Plan → act → verify loop, CLI
-- [ ] FastAPI/WebSocket API + Tauri desktop app (one-click start, tray, full shutdown)
-- [ ] Telegram + Slack with approve/deny buttons
+- [x] Background service + local API (FastAPI/WebSocket, token auth, localhost only)
+- [x] Web dashboard: chat, live steps, approvals, memory, health, one-click Shutdown
+- [x] Desktop shortcut (no console window; second click reopens the dashboard)
+- [x] Telegram + Slack with approve/deny buttons (allow-listed users only)
+- [ ] Tauri desktop app with tray icon (wraps the same dashboard)
 - [ ] Remote control (Tailscale / Cloudflare Tunnel, device pairing, PWA)
 - [ ] Computer use: UI Automation, mouse/keyboard, screen vision, Playwright Chrome profile
 - [ ] Voice: wake word, faster-whisper, Piper, Vapi

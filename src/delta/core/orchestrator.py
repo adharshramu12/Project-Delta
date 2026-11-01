@@ -6,7 +6,7 @@ import json
 import platform
 from datetime import datetime
 
-from delta.config import Settings
+from delta.config import Settings, known_folder, save_dir
 from delta.core.events import EventBus
 from delta.core.planner import make_plan
 from delta.core.state import Plan, StepRecord, TaskRequest, TaskResult, Verification
@@ -23,6 +23,10 @@ from delta.tools.registry import ToolExecutor
 
 ACTOR_PROMPT = """You are {name}, {owner}'s personal AI agent with access to their Windows PC
 ({os}). Today is {now}. Home folder: {home}.
+Desktop: {desktop}   Documents: {documents}
+SAVE FOLDER: {save_dir}  (the user opens it from the "Delta" item on their Desktop)
+Save every file you create in the SAVE FOLDER unless the user names another folder.
+Always use full paths (Save dialogs otherwise fall back to their own default, e.g. OneDrive).
 
 Work through the plan using tools, one step at a time, checking results as you go.
 Rules:
@@ -30,6 +34,11 @@ Rules:
   (path_info, list_running_apps, read_file) so there is evidence.
 - If a tool says BLOCKED or DENIED, do not retry it. Find an allowed way or explain.
 - If you are unsure about a fact, use web_search; cite URLs you used.
+- Desktop apps: read_window first (fast, free). Fill boxes with set_field (more reliable than
+  typing; dialogs like 'Save as' can be targeted by title). Click by name with click_element; use
+  click_at / look_at_screen only when read_window cannot see it. Re-read after acting.
+- Websites: use browser_* tools (Delta's signed-in Chrome). browser_read after each step.
+- If a desktop tool says STOPPED, the user took over: stop and report.
 - Never ask for or handle passwords, card numbers or API keys.
 - When everything is done, reply with a short, friendly summary for the user (no tool call).
 
@@ -105,7 +114,9 @@ class Orchestrator:
         system = ACTOR_PROMPT.format(
             name=self.s.agent.name, owner=self.s.agent.owner_name or "the user",
             os=f"{platform.system()} {platform.release()}", now=datetime.now().strftime("%A %d %B %Y %H:%M"),
-            home=Path.home(), goal=plan.goal,
+            home=Path.home(), desktop=known_folder("Desktop"), documents=known_folder("Personal"),
+            save_dir=save_dir(self.s.files),
+            goal=plan.goal,
             steps="\n".join(f"{i + 1}. {s}" for i, s in enumerate(plan.steps)) or "(decide as you go)",
             criteria="\n".join(f"- {c}" for c in plan.success_criteria), memory=memory_ctx or "(nothing yet)")
         return [{"role": "system", "content": system}, {"role": "user", "content": req.text}]

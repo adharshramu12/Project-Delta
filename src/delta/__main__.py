@@ -79,6 +79,13 @@ def _doctor() -> int:
 
     audit_ok = AuditLog(s.data_dir / "audit.jsonl").verify()
     print(f"Audit log chain: {'intact' if audit_ok else 'TAMPERED'}")
+    from delta.config import in_onedrive, known_folder, save_dir
+
+    out = save_dir(s.files, create=False)
+    print(f"Save folder: {out} ({'OneDrive' if in_onedrive(out) else 'on this PC'})")
+    if in_onedrive(known_folder("Desktop")) and not in_onedrive(out):
+        print("  Desktop is synced by OneDrive, so files are kept locally; a 'Delta' shortcut on the "
+              "Desktop opens them.")
     print(f"Boundaries: autonomy={s.boundaries.autonomy}, {len(s.boundaries.denied_paths)} denied paths")
     return 0 if ok and audit_ok else 1
 
@@ -114,6 +121,8 @@ def main() -> None:
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("cli", help="interactive terminal")
+    rp = sub.add_parser("run", help="background service: dashboard API + Telegram/Slack")
+    rp.add_argument("--open", action="store_true", help="open the dashboard window")
     sub.add_parser("doctor", help="check setup")
     sp = sub.add_parser("secrets", help="manage API keys and tokens")
     sp.add_argument("action", choices=["set", "delete", "list"])
@@ -132,6 +141,13 @@ def main() -> None:
         good = AuditLog(load_settings().data_dir / "audit.jsonl").verify()
         print("audit chain intact" if good else "AUDIT CHAIN BROKEN: log was modified")
         sys.exit(0 if good else 1)
+    if args.cmd == "run":
+        from delta.daemon import run
+
+        try:
+            sys.exit(asyncio.run(run(open_ui=args.open)))
+        except KeyboardInterrupt:
+            sys.exit(0)
     try:
         sys.exit(asyncio.run(_cli()))
     except KeyboardInterrupt:

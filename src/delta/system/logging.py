@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import sys
 from pathlib import Path
 
 import structlog
@@ -21,7 +22,8 @@ def setup_logging(data_dir: Path, console_level: int = logging.WARNING) -> None:
     console.setLevel(console_level)
 
     root = logging.getLogger()
-    root.handlers[:] = [file_handler, console]
+    # pythonw (the no-console desktop shortcut) has no stderr: log to file only
+    root.handlers[:] = [file_handler, console] if sys.stderr else [file_handler]
     root.setLevel(logging.DEBUG)
     for noisy in ("httpx", "httpcore", "openai", "primp", "urllib3", "trafilatura"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

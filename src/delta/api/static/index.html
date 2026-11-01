@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delta</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#14161a;--muted:#6b7280;--line:#e5e7eb;--accent:#2563eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--me:#eef2ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0d0f13;--panel:#151821;--ink:#e8eaf0;--muted:#8b93a7;--line:#252a36;--accent:#6b9bff;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--me:#1c2340}}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+.logo{font-weight:700;font-size:18px}.logo b{color:var(--accent)}
+.pill{padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid var(--line)}
+.pill.NORMAL{color:var(--ok)}.pill.THROTTLE{color:var(--warn)}.pill.CRITICAL{color:var(--bad)}.pill.OFFLINE{color:var(--muted)}
+.stats{color:var(--muted);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.danger{color:var(--bad)}
+main{flex:1;display:grid;grid-template-columns:1fr 320px;min-height:0}
+#chat{display:flex;flex-direction:column;min-height:0}
+#log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:760px;padding:10px 14px;border-radius:12px;background:var(--panel);border:1px solid var(--line);white-space:pre-wrap;word-wrap:break-word}
+.msg.me{align-self:flex-end;background:var(--me)}.msg .meta{color:var(--muted);font-size:12px;margin-top:4px}
+.msg.failed{border-color:var(--bad)}.step{color:var(--muted);font-size:12px;font-family:ui-monospace,Consolas,monospace;padding-left:8px}
+.step.ok{color:var(--ok)}.step.bad{color:var(--bad)}
+form{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line);background:var(--panel)}
+textarea{flex:1;resize:none;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);height:42px}
+aside{border-left:1px solid var(--line);overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:16px;background:var(--panel)}
+h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.card{border:1px solid var(--warn);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.card .why{color:var(--muted);font-size:12px}.card .row{display:flex;gap:8px}
+.mem{display:flex;gap:6px;align-items:flex-start;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line)}
+.mem span{flex:1}.mem button{padding:0 6px;font-size:12px}.empty{color:var(--muted);font-size:13px}
+@media (max-width:820px){main{grid-template-columns:1fr}aside{border-left:0;border-top:1px solid var(--line);max-height:40vh}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><b>Δ</b> Delta</div>
+  <span id="health" class="pill OFFLINE">offline</span>
+  <div id="stats" class="stats"></div>
+  <button class="danger" id="shutdown" title="Stop Delta completely and free memory/GPU">Shutdown</button>
+</header>
+<main>
+  <section id="chat">
+    <div id="log"></div>
+    <form id="send"><textarea id="text" placeholder="Ask Delta to do something…  (Enter to send, Shift+Enter for new line)"></textarea>
+      <button class="primary">Send</button></form>
+  </section>
+  <aside>
+    <div><h3>Approvals</h3><div id="approvals"><div class="empty">Nothing waiting.</div></div></div>
+    <div><h3>Memory</h3><div id="memory"></div>
+      <form id="addmem" style="padding:8px 0 0;border:0;background:none"><textarea id="memtext" placeholder="Remember that…" style="height:34px"></textarea><button>Add</button></form></div>
+  </aside>
+</main>
+<script>
+// Token arrives in the URL fragment (never sent to the server); keep it for reloads when storage allows.
+let token = new URLSearchParams(location.hash.slice(1)).get("token") || "";
+try { if (token) sessionStorage.setItem("delta_token", token); else token = sessionStorage.getItem("delta_token") || ""; } catch {}
+if (location.hash) history.replaceState(null, "", "/");
+const $ = id => document.getElementById(id);
+const api = (path, opts = {}) => fetch(path, {...opts, headers: {"Authorization": "Bearer " + token, "Content-Type": "application/json"}})
+  .then(r => { if (r.status === 401) throw new Error("unauthorized"); return r.json(); });
+
+function add(cls, text, meta) {
+  const d = document.createElement("div"); d.className = cls; d.textContent = text;
+  if (meta) { const m = document.createElement("div"); m.className = "meta"; m.textContent = meta; d.appendChild(m); }
+  $("log").appendChild(d); $("log").scrollTop = $("log").scrollHeight; return d;
+}
+
+async function refreshStatus() {
+  try {
+    const s = await api("/api/status"), g = s.governor;
+    $("health").className = "pill " + g.health; $("health").textContent = g.health.toLowerCase();
+    const gpu = g.gpu_temp_c == null ? "" : ` · GPU ${g.gpu_temp_c}°C ${g.vram_pct ?? "?"}% VRAM`;
+    $("stats").textContent = `RAM ${g.ram_pct}% · CPU ${g.cpu_pct}%${gpu} · Delta ${g.process_rss_mb} MB · models: ${s.providers.join(" › ") || "none"}`
+      + (g.reasons.length ? " · " + g.reasons.join(", ") : "");
+  } catch (e) { $("health").className = "pill OFFLINE"; $("health").textContent = e.message === "unauthorized" ? "no token" : "offline"; }
+}
+
+function renderApproval(a) {
+  if (document.querySelector(`[data-approval="${a.id}"]`)) return;
+  $("approvals").querySelector(".empty")?.remove();
+  const c = document.createElement("div"); c.className = "card"; c.dataset.approval = a.id;
+  c.innerHTML = `<b></b><div class="why"></div><div class="row"><button class="primary">Approve</button><button>Deny</button></div>`;
+  c.querySelector("b").textContent = a.summary; c.querySelector(".why").textContent = `${a.risk} · ${a.reason}`;
+  const [yes, no] = c.querySelectorAll("button");
+  const answer = ok => api(`/api/approvals/${a.id}`, {method: "POST", body: JSON.stringify({approved: ok})}).finally(() => dropApproval(a.id));
+  yes.onclick = () => answer(true); no.onclick = () => answer(false);
+  $("approvals").appendChild(c);
+  if (document.hidden && "Notification" in window && Notification.permission === "granted") new Notification("Delta needs approval", {body: a.summary});
+}
+function dropApproval(id) {
+  document.querySelector(`[data-approval="${id}"]`)?.remove();
+  if (!$("approvals").children.length) $("approvals").innerHTML = '<div class="empty">Nothing waiting.</div>';
+}
+
+async function refreshMemory() {
+  const items = await api("/api/memory").catch(() => []);
+  $("memory").innerHTML = items.length ? "" : '<div class="empty">Delta has not learned anything yet.</div>';
+  for (const m of items) {
+    const row = document.createElement("div"); row.className = "mem";
+    row.innerHTML = "<span></span><button title='Forget'>×</button>";
+    row.querySelector("span").textContent = m.content + (m.kind === "episode" ? " (task)" : "");
+    row.querySelector("button").onclick = () => api(`/api/memory/${m.id}`, {method: "DELETE"}).then(refreshMemory);
+    $("memory").appendChild(row);
+  }
+}
+
+function connect() {
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws?token=${encodeURIComponent(token)}`);
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "approval") renderApproval(m.approval);
+    else if (m.type === "result") {
+      const r = m.result;
+      add("msg" + (r.status === "done" ? "" : " failed"), r.answer, `${r.status}${r.provider ? " · via " + r.provider : ""}${r.attempts ? " · " + r.attempts + " attempt(s)" : ""}`);
+      refreshMemory();
+    } else if (m.type === "event") {
+      const d = m.data;
+      if (m.event === "task.plan" && d.plan.needs_tools) add("step", "plan: " + (d.plan.steps || []).join(" → "));
+      if (m.event === "task.step") add("step", "· " + d.tool + " " + JSON.stringify(d.args).slice(0, 140));
+      if (m.event === "task.verify") add("step " + (d.passed ? "ok" : "bad"), (d.passed ? "✓ verified: " : "✗ not verified: ") + d.reason);
+      if (m.event === "governor.health") refreshStatus();
+    }
+  };
+  ws.onclose = () => setTimeout(connect, 2000);
+}
+
+$("send").onsubmit = async e => {
+  e.preventDefault(); const text = $("text").value.trim(); if (!text) return;
+  $("text").value = ""; add("msg me", text);
+  await api("/api/tasks", {method: "POST", body: JSON.stringify({text})}).catch(err => add("msg failed", "Could not reach Delta: " + err.message));
+};
+$("text").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("send").requestSubmit(); } };
+$("addmem").onsubmit = e => { e.preventDefault(); const t = $("memtext").value.trim(); if (!t) return; $("memtext").value = "";
+  api("/api/memory", {method: "POST", body: JSON.stringify({content: t})}).then(refreshMemory); };
+$("shutdown").onclick = async () => {
+  if (!confirm("Shut Delta down completely? Models are unloaded and nothing keeps running.")) return;
+  await api("/api/shutdown", {method: "POST"}).catch(() => {});
+  add("msg", "Delta is shutting down. You can close this window."); $("health").className = "pill OFFLINE"; $("health").textContent = "stopped";
+};
+if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+refreshStatus(); refreshMemory(); connect(); api("/api/approvals").then(a => a.forEach(renderApproval)).catch(() => {});
+setInterval(() => { if (!document.hidden) refreshStatus(); }, 5000);
+add("msg", "Hi, I'm Delta. Tell me what to do. Anything risky will show up on the right for your approval.");
+</script>
+</body>
+</html>
