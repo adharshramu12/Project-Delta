@@ -16,6 +16,7 @@ header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:
 .stats{color:var(--muted);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.danger{color:var(--bad)}
+#warnings{white-space:pre-wrap;padding:8px 16px;border-bottom:1px solid var(--warn);color:var(--warn);background:var(--panel);font-size:13px}
 main{flex:1;display:grid;grid-template-columns:1fr 320px;min-height:0}
 #chat{display:flex;flex-direction:column;min-height:0}
 #log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
@@ -44,6 +45,7 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
   <div id="stats" class="stats"></div>
   <button class="danger" id="shutdown" title="Stop Delta completely and free memory/GPU">Shutdown</button>
 </header>
+<div id="warnings" hidden></div>
 <main>
   <section id="chat">
     <div id="log"></div>
@@ -77,6 +79,8 @@ async function refreshStatus() {
     const s = await api("/api/status"), g = s.governor;
     $("health").className = "pill " + g.health; $("health").textContent = g.health.toLowerCase();
     const gpu = g.gpu_temp_c == null ? "" : ` · GPU ${g.gpu_temp_c}°C ${g.vram_pct ?? "?"}% VRAM`;
+    $("warnings").hidden = !s.warnings?.length;
+    $("warnings").textContent = (s.warnings || []).map(w => "⚠ " + w).join("\n");
     $("stats").textContent = `RAM ${g.ram_pct}% · CPU ${g.cpu_pct}%${gpu} · Delta ${g.process_rss_mb} MB · models: ${s.providers.join(" › ") || "none"}`
       + (g.reasons.length ? " · " + g.reasons.join(", ") : "");
   } catch (e) { $("health").className = "pill OFFLINE"; $("health").textContent = e.message === "unauthorized" ? "no token" : "offline"; }

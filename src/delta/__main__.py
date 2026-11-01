@@ -14,6 +14,7 @@ import getpass
 import logging
 import os
 import sys
+import warnings
 
 import httpx
 
@@ -112,6 +113,8 @@ def _secrets(action: str, name: str | None) -> int:
 
 
 def main() -> None:
+    # Old third-party code (pywinauto) emits SyntaxWarnings on Python 3.12; users should never see them.
+    warnings.filterwarnings("ignore", category=SyntaxWarning)
     if os.name == "nt":
         os.system("")  # enable ANSI colours in classic consoles
         reconfigure = getattr(sys.stdout, "reconfigure", None)

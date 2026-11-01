@@ -18,6 +18,11 @@ dependencies = [
     "send2trash>=1.8",
     "ddgs>=9.0",
     "trafilatura>=2.0",
+    # dashboard + local API: the main way people use Delta, so part of every install
+    # (imported only when `delta run` starts, so the CLI stays light)
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "websockets>=13",
 ]
 
 [project.optional-dependencies]
@@ -25,9 +30,8 @@ channels = ["python-telegram-bot>=21.6", "slack-bolt>=1.21", "aiohttp>=3.10"]
 desktop = ["pywinauto>=0.6.9", "pyautogui>=0.9.54", "mss>=9.0", "pillow>=10.4"]
 browser = ["playwright>=1.48"]
 voice = ["faster-whisper>=1.1", "piper-tts>=1.2", "openwakeword>=0.6", "sounddevice>=0.5"]
-api = ["fastapi>=0.115", "uvicorn>=0.32", "websockets>=13"]
-mcp = ["mcp>=1.2"]
-all = ["delta-agent[channels,desktop,browser,api,mcp]"]
+mcp = ["mcp>=2.0"]
+all = ["delta-agent[channels,desktop,browser,mcp]"]
 
 [project.scripts]
 delta = "delta.__main__:main"

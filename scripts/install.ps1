@@ -14,7 +14,7 @@ if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
 [Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "2m", "User")
 [Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS", "1", "User")
 
-python -m uv sync --python 3.12
+python -m uv sync --python 3.12 --extra all
 
 $model = (Select-String -Path config/delta.yaml -Pattern '^\s+chat:\s+(\S+)' | Select-Object -First 1).Matches.Groups[1].Value
 if ((Get-Command ollama -ErrorAction SilentlyContinue) -and (Confirm-Step "Pull local model $model (~3 GB)?")) {

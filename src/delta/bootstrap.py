@@ -26,6 +26,7 @@ from delta.safety.policy import PolicyEngine
 from delta.system.governor import Governor
 from delta.system.hardware_guard import Assessment
 from delta.system.lifecycle import Lifecycle
+from delta.system.logging import log
 from delta.system.secrets import get_secret
 from delta.tools.apps import app_tools
 from delta.tools.filesystem import filesystem_tools
@@ -64,6 +65,12 @@ class Container:
     _task_lock: asyncio.Semaphore
     closers: list[tuple[str, Callable[[], Awaitable[None]]]] = field(default_factory=list)
     addon_infos: list[Any] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)  # setup problems shown to the user, not just logged
+
+    def warn(self, message: str) -> None:
+        if message not in self.warnings:
+            self.warnings.append(message)
+        log.warning("delta.warning", message=message)
 
     async def submit(self, req: TaskRequest) -> TaskResult:
         """One heavy task at a time keeps the laptop responsive."""
@@ -77,6 +84,7 @@ class Container:
         await self.governor.start()
         self.lifecycle.on_shutdown("governor", self.governor.stop)
         await self._start_addons()
+        await asyncio.to_thread(self._check_models)
         self.lifecycle.on_shutdown("models", self.router.unload_local)
 
         async def close_state() -> None:
@@ -90,6 +98,16 @@ class Container:
         for name, closer in self.closers:
             self.lifecycle.on_shutdown(name, closer)
         self.audit.record("delta.start")
+
+    def _check_models(self) -> None:
+        """Tell new users up front when no AI model can be reached, instead of failing later."""
+        cloud = [n for n, p in self.router.providers.items() if not p.local and p.supports("chat")]
+        if cloud:
+            return
+        local = [p for p in self.router.providers.values() if p.local]
+        if not any(callable(ping := getattr(p, "ping", None)) and ping() for p in local):
+            self.warn("No AI model is available. Add a free Groq key (delta secrets set groq_api_key) "
+                      "or install Ollama to run models on this PC.")
 
     async def _start_addons(self) -> None:
         cfg = self.settings.addons
@@ -109,6 +127,9 @@ class Container:
         for ctx in contexts:
             for name, hook in ctx._shutdown:
                 self.lifecycle.on_shutdown(name, hook)
+        for info in self.addon_infos:
+            if info.status != "running":
+                self.warn(f"Add-on '{info.name}' {info.status}: {info.error}")
         self.audit.record("addons", running=[i.name for i in self.addon_infos if i.status == "running"])
 
     async def stop(self) -> None:

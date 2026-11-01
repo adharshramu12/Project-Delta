@@ -31,6 +31,9 @@ SENDY = re.compile(r"\b(send|submit|pay|buy|purchase|order|checkout|post|publish
                    r"confirm|accept|install|uninstall)\b", re.I)
 DELETY = re.compile(r"\b(delete|remove|erase|discard|empty|format|reset|clear all)\b", re.I)
 MAX_NODES = 250
+# Shell/system surfaces that are not apps the user thinks of as "open windows".
+SYSTEM_WINDOWS = {"Program Manager", "Taskbar", "Status", "Start", "Search", "Notification Center",
+                  "Windows Input Experience", "NVIDIA GeForce Overlay"}
 OVERRIDE_PX = 40
 BACKOFF_S = 30
 
@@ -313,7 +316,8 @@ class ListWindows(_DesktopTool[NoArgs]):
 
     async def run(self, args: NoArgs) -> ToolResult:
         def go() -> list[str]:
-            return [w.window_text() for w in _desktop().windows() if w.is_visible() and w.window_text()]
+            return [w.window_text() for w in _desktop().windows()
+                    if w.is_visible() and w.window_text() and w.window_text() not in SYSTEM_WINDOWS]
 
         titles = await self.ctl.call(go)
         return ToolResult(True, "\n".join(titles) or "(none)", {"windows": titles})

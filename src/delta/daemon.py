@@ -35,35 +35,52 @@ def open_dashboard(settings: Settings, token: str) -> None:
         webbrowser.open(url)
 
 
+def _make_telegram(c: Container) -> object:
+    cfg = c.settings.channels["telegram"]
+    token = get_secret("telegram_bot_token")
+    if not token:
+        raise RuntimeError("no bot token: run `delta secrets set telegram_bot_token`")
+    if not cfg.allowed_user_ids:
+        raise RuntimeError("allowed_user_ids is empty in config/delta.yaml, so nobody could use the bot")
+    from delta.channels.telegram import TelegramChannel
+
+    return TelegramChannel(c, token, cfg.allowed_user_ids)
+
+
+def _make_slack(c: Container) -> object:
+    cfg = c.settings.channels["slack"]
+    bot, app = get_secret("slack_bot_token"), get_secret("slack_app_token")
+    if not (bot and app):
+        raise RuntimeError("missing tokens: run `delta secrets set slack_bot_token` and `slack_app_token`")
+    if not cfg.allowed_user_ids:
+        raise RuntimeError("allowed_user_ids is empty in config/delta.yaml, so nobody could use the bot")
+    from delta.channels.slack import SlackChannel
+
+    return SlackChannel(c, bot, app, cfg.allowed_user_ids)
+
+
+CHANNELS = {"telegram": (_make_telegram, "channels"), "slack": (_make_slack, "channels")}
+
+
 async def _start_channels(c: Container) -> list[object]:
-    started: list[object] = []
-    ch = c.settings.channels
-    tg = ch.get("telegram")
-    if tg and tg.enabled:
-        token = get_secret("telegram_bot_token")
-        if not token:
-            log.error("telegram.no_token", hint="delta secrets set telegram_bot_token")
-        else:
-            from delta.channels.telegram import TelegramChannel
-
-            started.append(TelegramChannel(c, token, tg.allowed_user_ids))
-    sl = ch.get("slack")
-    if sl and sl.enabled:
-        bot, app = get_secret("slack_bot_token"), get_secret("slack_app_token")
-        if not (bot and app):
-            log.error("slack.no_token", hint="delta secrets set slack_bot_token / slack_app_token")
-        else:
-            from delta.channels.slack import SlackChannel
-
-            started.append(SlackChannel(c, bot, app, sl.allowed_user_ids))
+    """Start enabled chat channels. A broken channel (missing library, bad token, network down)
+    is reported to the user and skipped; it never stops Delta from starting."""
     ok = []
-    for channel in started:
+    for name, (factory, extra) in CHANNELS.items():
+        cfg = c.settings.channels.get(name)
+        if not cfg or not cfg.enabled:
+            continue
         try:
-            await channel.start()  # type: ignore[attr-defined]
-            c.lifecycle.on_shutdown(channel.name, channel.stop)  # type: ignore[attr-defined]
-            ok.append(channel)
-        except Exception as e:  # one broken channel must not take the agent down
-            log.error("channel.start_failed", channel=getattr(channel, "name", "?"), error=str(e))
+            channel = factory(c)
+            await asyncio.wait_for(channel.start(), 30)  # type: ignore[attr-defined]
+        except ImportError:
+            c.warn(f"{name.title()} is enabled but not installed. Run: uv sync --extra {extra}")
+            continue
+        except Exception as e:
+            c.warn(f"{name.title()} could not start: {e}")
+            continue
+        c.lifecycle.on_shutdown(name, channel.stop)  # type: ignore[attr-defined]
+        ok.append(channel)
     return ok
 
 

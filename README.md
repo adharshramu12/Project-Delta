@@ -53,7 +53,7 @@ winget install Ollama.Ollama
 ollama pull gemma3n:e4b          # or the Gemma tag you prefer; set it in config/delta.yaml
 
 # 2. install
-uv sync
+uv sync --extra all        # everything; plain 'uv sync' gives the core agent + dashboard
 
 # 3. cloud fallback keys (optional but recommended) -> stored in Windows Credential Manager
 uv run delta secrets set groq_api_key
@@ -67,7 +67,7 @@ uv run delta cli
 
 ### One-click app
 ```powershell
-uv sync --extra api --extra channels
+uv sync --extra all
 powershell -File scripts/create_shortcut.ps1   # adds "Delta" to Desktop + Start menu
 ```
 Click **Delta** → it starts in the background and opens the dashboard. **Shutdown** in the

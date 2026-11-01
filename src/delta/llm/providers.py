@@ -85,6 +85,15 @@ class OpenAICompatProvider:
     def available(self) -> bool:
         return not self.cfg.secret or bool(self._key())
 
+    def ping(self) -> bool:
+        """Is anything answering at base_url? (Quick check for local servers like Ollama.)"""
+        import httpx
+
+        try:
+            return httpx.get(f"{self.cfg.base_url.rstrip('/')}/models", timeout=2).status_code < 500
+        except httpx.HTTPError:
+            return False
+
     @property
     def _client(self) -> Any:
         """The openai package takes ~2 s to import, so it loads on the first model call,

@@ -83,7 +83,23 @@ def test_chrome_uses_dedicated_profile(tmp_path):
     assert "--remote-debugging-port=9223" in args
 
 
+def test_startup_does_not_load_heavy_libraries(tmp_path):
+    """Startup-cost guard for every install (core or full)."""
+    code = (
+        "import sys; from delta.bootstrap import build; from delta.config import Settings; from pathlib import Path\n"
+        f"c = build(Settings(data_dir=Path(r'{tmp_path}')))\n"
+        "heavy = ['pyautogui','pywinauto','playwright','mss','PIL','openai','aiohttp','keyring','httpx','send2trash',"
+        "'fastapi','uvicorn','mcp','telegram','slack_bolt']\n"
+        "print([m for m in heavy if m in sys.modules])"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
+                         cwd=Path(__file__).parent.parent)
+    assert out.stdout.strip() == "[]"
+
+
 def test_computer_use_registered_but_not_loaded(tmp_path):
+    pytest.importorskip("pywinauto", reason="desktop extra not installed")
+    pytest.importorskip("playwright", reason="browser extra not installed")
     """Startup-cost guard. Building Delta registers every tool but must not import heavy libraries
     (desktop control, browser, the ~2 s openai SDK, the credential store, HTTP clients): those load on
     first use. If this fails, someone added a top-level import that slows startup for every user."""

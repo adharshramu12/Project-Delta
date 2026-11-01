@@ -49,6 +49,59 @@ def test_pick_replacement_model_from_real_groq_list():
     assert pick_model(groq_nov_2026, vision=True) is None
 
 
+async def test_refusal_covers_every_other_way_of_doing_it(tmp_path):
+    """Live finding: after the user denied delete_path, the model tried `Remove-Item -Force` via run_shell."""
+    from delta.config import Boundaries
+    from delta.safety.approvals import ApprovalBroker
+    from delta.safety.audit import AuditLog
+    from delta.safety.policy import PolicyEngine
+    from delta.tools.filesystem import filesystem_tools
+    from delta.tools.registry import ToolExecutor, ToolRegistry
+    from delta.tools.shell import RunShell
+
+    target = tmp_path / "keep.txt"
+    target.write_text("x")
+    asked = []
+    broker = ApprovalBroker(timeout_s=1)
+
+    async def deny(req):
+        asked.append(req.tool)
+        broker.resolve(req.id, False, "user")
+
+    broker.add_presenter("t", deny)
+    ex = ToolExecutor(ToolRegistry([*filesystem_tools(), RunShell()]), PolicyEngine(Boundaries()), broker,
+                      AuditLog(tmp_path / "a.jsonl"))
+    r1 = await ex.execute("delete_path", {"path": str(target)}, task_id="t1")
+    r2 = await ex.execute("run_shell", {"command": f'Remove-Item -Path "{target}" -Force'}, task_id="t1")
+    r3 = await ex.execute("move_path", {"source": str(target), "destination": str(tmp_path / "x.txt")},
+                          task_id="t1")
+    assert not r1.ok and "DENIED" in r1.output
+    assert not r2.ok and "already refused" in r2.output
+    assert not r3.ok and "already refused" in r3.output
+    assert asked == ["delete_path"]  # the user was asked once, not nagged
+    assert target.exists()
+    ex.forget_task("t1")  # a new task may ask again
+    await ex.execute("delete_path", {"path": str(target)}, task_id="t2")
+    assert asked == ["delete_path", "delete_path"]
+
+
+async def test_last_provider_waits_longer_instead_of_failing(monkeypatch):
+    monkeypatch.setattr("delta.llm.router.MAX_RATE_LIMIT_WAIT_S", 0.01)
+    monkeypatch.setattr("delta.llm.router.LAST_RESORT_WAIT_S", 0.2)
+    only = FakeProvider("groq", [LLMError("429", kind="rate_limit", retry_after_s=0.1), text("ok")])
+    router = ModelRouter({"groq": only}, {"chat": ["groq"]})
+    assert (await router.complete([])).content == "ok"  # 0.1 s > normal limit, but it is the last resort
+
+
+def test_friendly_messages_for_users():
+    from delta.core.orchestrator import friendly_model_error
+    from delta.llm.schemas import AllProvidersFailedError
+
+    busy = friendly_model_error(AllProvidersFailedError("x", ["unreachable", "rate_limit"]))
+    assert "busy" in busy and "429" not in busy
+    assert "Groq key" in friendly_model_error(AllProvidersFailedError("x", []))
+
+
 def test_retry_after_parsing():
     class E(Exception):
         response = None

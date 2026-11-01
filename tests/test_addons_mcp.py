@@ -2,6 +2,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from delta.addons.api import AddonContext
 from delta.addons.builtin import builtin_addons
 from delta.addons.builtin.mcp_bridge import FreeArgs, McpTool, pick_risk, tool_name
@@ -90,6 +92,7 @@ async def test_mcp_tool_maps_results():
 
 
 async def test_real_mcp_server_over_stdio(tmp_path):
+    pytest.importorskip("mcp", reason="MCP add-on not installed (uv sync --extra mcp)")
     reg = ToolRegistry()
     conf = {"mcp": {"servers": {"calc": {"command": sys.executable, "args": [str(HERE / "mcp_test_server.py")]}}}}
     infos, ctxs = await start_addons(["mcp"], conf, builtin_addons(), ctx_factory(tmp_path, reg), tmp_path)

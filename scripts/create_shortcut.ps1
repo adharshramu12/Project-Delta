@@ -3,7 +3,7 @@
 # while it runs just reopens the dashboard. Stop it with the dashboard's Shutdown button.
 $root = Split-Path $PSScriptRoot -Parent
 $pythonw = Join-Path $root ".venv\Scripts\pythonw.exe"
-if (-not (Test-Path $pythonw)) { throw "Run 'uv sync --extra api --extra channels' first." }
+if (-not (Test-Path $pythonw)) { throw "Run 'uv sync --extra all' first." }
 
 $shell = New-Object -ComObject WScript.Shell
 $targets = @(

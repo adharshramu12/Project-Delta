@@ -38,4 +38,11 @@ class LLMError(RuntimeError):
 
 
 class AllProvidersFailedError(LLMError):
-    pass
+    def __init__(self, message: str, kinds: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.kinds = kinds or []
+
+    @property
+    def only_rate_limited(self) -> bool:
+        return bool(self.kinds) and all(k == "rate_limit" for k in self.kinds if k != "unreachable") \
+            and "rate_limit" in self.kinds

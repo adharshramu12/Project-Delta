@@ -59,7 +59,10 @@ class CliChannel:
         loop.run_in_executor(None, self._reader, loop)
         name = self.c.settings.agent.name
         print(f"{CYAN}{BOLD}Δ {name} is online.{RESET} {DIM}Type a task, /help for commands.{RESET}")
+        for w in self.c.warnings:
+            print(f"{YELLOW}⚠ {w}{RESET}")
         self._prompt()
+        quit_now = False
         while (line := await self.lines.get()) is not None:
             text = line.strip()
             if not text:
@@ -71,6 +74,7 @@ class CliChannel:
                 continue
             if text.startswith("/"):
                 if text in {"/quit", "/exit"}:
+                    quit_now = True
                     break
                 self._command(text)
                 self._prompt()
@@ -78,8 +82,10 @@ class CliChannel:
             t = asyncio.create_task(self._task(text))
             self.tasks.add(t)
             t.add_done_callback(self.tasks.discard)
-        for t in self.tasks:
-            t.cancel()
+        # /quit stops running work now. End of piped input (scripts) lets running tasks finish.
+        if quit_now:
+            for t in self.tasks:
+                t.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(*self.tasks, return_exceptions=True)
 

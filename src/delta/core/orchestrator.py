@@ -15,7 +15,7 @@ from delta.core.planner import make_plan
 from delta.core.state import Plan, StepRecord, TaskRequest, TaskResult, Verification
 from delta.core.verifier import verify
 from delta.llm.router import ModelRouter
-from delta.llm.schemas import LLMError, Message
+from delta.llm.schemas import AllProvidersFailedError, LLMError, Message
 from delta.memory.distill import distill
 from delta.memory.extractor import extract_facts
 from delta.memory.skills import Skill, SkillStore
@@ -57,6 +57,18 @@ What you know about the user:
 {memory}"""
 
 
+def friendly_model_error(e: LLMError) -> str:
+    """What a non-technical user should read when no model could answer."""
+    if isinstance(e, AllProvidersFailedError):
+        if e.only_rate_limited:
+            return ("The AI service is busy right now (free-tier usage limit). Please try again in a minute. "
+                    "Adding a second provider key (e.g. NVIDIA NIM) or a local model avoids this.")
+        if not e.kinds:
+            return ("No AI model is set up yet. Add a free Groq key with `delta secrets set groq_api_key`, "
+                    "or install Ollama to run a model on this PC.")
+    return f"I couldn't reach an AI model to finish this. Details: {e}"
+
+
 # Read-only helpers every task may need for checking its own work.
 ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "web_search", "recall"}
 
@@ -86,7 +98,9 @@ class Orchestrator:
         try:
             result = await self._run(req)
         except LLMError as e:
-            result = TaskResult(req.id, "failed", f"I couldn't reach any AI model: {e}")
+            result = TaskResult(req.id, "failed", friendly_model_error(e))
+        finally:
+            self.executor.forget_task(req.id)
         self.audit.record("task.end", task=req.id, status=result.status, attempts=result.attempts)
         await self.events.publish("task.finished", task_id=req.id, status=result.status, answer=result.answer)
         # Learning happens after the answer is delivered, so the user never waits for it.

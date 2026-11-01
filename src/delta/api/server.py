@@ -104,7 +104,7 @@ def create_app(c: Container, token: str) -> FastAPI:
         return {"name": c.settings.agent.name, "governor": c.governor.status(),
                 "providers": c.router.usable(), "last_provider": c.router.last_provider,
                 "tools": c.registry.names(), "autonomy": c.settings.boundaries.autonomy,
-                "pending_approvals": len(c.approvals.pending())}
+                "pending_approvals": len(c.approvals.pending()), "warnings": c.warnings}
 
     @app.post("/api/tasks", dependencies=[Depends(auth)])
     async def create_task(body: TaskIn) -> dict[str, str]:

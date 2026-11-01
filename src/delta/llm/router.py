@@ -44,7 +44,8 @@ class CircuitBreaker:
         self.cooldown_s = cooldown_s
 
 
-MAX_RATE_LIMIT_WAIT_S = 20.0  # waiting this long beats failing or switching to a weaker model
+MAX_RATE_LIMIT_WAIT_S = 20.0  # waiting this long beats switching to a weaker model
+LAST_RESORT_WAIT_S = 60.0     # when no other provider is left
 UNREACHABLE_COOLDOWN_S = 300.0
 
 
@@ -86,14 +87,18 @@ class ModelRouter:
         json_mode: bool = False,
     ) -> LLMResponse:
         errors: list[str] = []
-        for p in self.candidates(task):
+        kinds: list[str] = []
+        candidates = self.candidates(task)
+        for i, p in enumerate(candidates):
             started = time.perf_counter()
+            # With nothing left to fall back to, waiting longer beats failing the user's task.
+            max_wait = MAX_RATE_LIMIT_WAIT_S if i < len(candidates) - 1 else LAST_RESORT_WAIT_S
             try:
                 try:
                     resp = await p.complete(task, messages, tools, json_mode)
                 except LLMError as e:
                     # Free tiers often say "try again in 6s": a short wait beats failing the task.
-                    if e.kind != "rate_limit" or not e.retry_after_s or e.retry_after_s > MAX_RATE_LIMIT_WAIT_S:
+                    if e.kind != "rate_limit" or not e.retry_after_s or e.retry_after_s > max_wait:
                         raise
                     log.info("router.rate_limit_wait", provider=p.name, seconds=round(e.retry_after_s, 1))
                     await asyncio.sleep(e.retry_after_s + 0.5)
@@ -104,6 +109,7 @@ class ModelRouter:
                 elif e.kind != "rate_limit":  # being throttled says nothing about provider health
                     self.breakers[p.name].record_failure()
                 errors.append(str(e))
+                kinds.append(e.kind)
                 log.warning("router.fallback", provider=p.name, task=task, error=str(e))
                 continue
             self.breakers[p.name].record_success()
@@ -114,7 +120,8 @@ class ModelRouter:
             return resp
         raise AllProvidersFailedError(
             "No model provider is available for task "
-            f"'{task}'. Errors: {'; '.join(errors) or 'none configured (add API keys or start Ollama)'}"
+            f"'{task}'. Errors: {'; '.join(errors) or 'none configured (add API keys or start Ollama)'}",
+            kinds,
         )
 
     async def unload_local(self) -> None:

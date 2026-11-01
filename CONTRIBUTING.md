@@ -2,7 +2,7 @@
 
 ```powershell
 pip install uv
-uv sync
+uv sync --extra all
 uv run pytest
 uv run ruff check src tests
 uv run mypy

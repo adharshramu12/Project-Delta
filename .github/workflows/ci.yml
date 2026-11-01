@@ -1,12 +1,24 @@
 name: ci
 on: [push, pull_request]
+
 jobs:
-  test:
+  # Everything installed: every test runs.
+  full:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --python 3.12 --extra all
+      - run: uv run ruff check src tests
+      - run: uv run mypy
+      - run: uv run pytest -q
+
+  # What a user gets from a plain `uv sync`: core must work, optional tests skip cleanly.
+  minimal:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --python 3.12
-      - run: uv run ruff check src tests
-      - run: uv run mypy
       - run: uv run pytest -q
+      - run: uv run delta --version
