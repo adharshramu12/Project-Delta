@@ -55,6 +55,7 @@ async def test_write_file_with_approval_and_verification(tmp_path):
         "verify": [js({"passed": True, "reason": "path_info shows it exists"})],
     })
     r = await orch.run(TaskRequest("create notes"))
+    await orch.drain()  # memory/skill learning runs after the answer is returned
     assert r.status == "done", r.answer
     assert Path(target).read_text() == "hello"
     assert [s.tool for s in r.steps] == ["write_file", "path_info"]

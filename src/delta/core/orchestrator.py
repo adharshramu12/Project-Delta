@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import platform
 from datetime import datetime
@@ -13,7 +14,9 @@ from delta.core.state import Plan, StepRecord, TaskRequest, TaskResult, Verifica
 from delta.core.verifier import verify
 from delta.llm.router import ModelRouter
 from delta.llm.schemas import LLMError, Message
+from delta.memory.distill import distill
 from delta.memory.extractor import extract_facts
+from delta.memory.skills import Skill, SkillStore
 from delta.memory.store import MemoryStore
 from delta.safety.audit import AuditLog
 from delta.system.governor import Governor
@@ -47,7 +50,7 @@ PLAN:
 {steps}
 SUCCESS CRITERIA:
 {criteria}
-
+{skill}
 What you know about the user:
 {memory}"""
 
@@ -55,7 +58,7 @@ What you know about the user:
 class Orchestrator:
     def __init__(self, settings: Settings, router: ModelRouter, executor: ToolExecutor,
                  memory: MemoryStore | None, governor: Governor | None, events: EventBus,
-                 audit: AuditLog) -> None:
+                 audit: AuditLog, skills: SkillStore | None = None) -> None:
         self.s = settings
         self.router = router
         self.executor = executor
@@ -63,6 +66,13 @@ class Orchestrator:
         self.governor = governor
         self.events = events
         self.audit = audit
+        self.skills = skills
+        self._learning: set[asyncio.Task[None]] = set()
+
+    async def drain(self) -> None:
+        """Wait for background learning (used at shutdown and in tests)."""
+        if self._learning:
+            await asyncio.gather(*self._learning, return_exceptions=True)
 
     async def run(self, req: TaskRequest) -> TaskResult:
         self.audit.record("task.start", task=req.id, channel=req.channel, text=req.text)
@@ -73,18 +83,23 @@ class Orchestrator:
             result = TaskResult(req.id, "failed", f"I couldn't reach any AI model: {e}")
         self.audit.record("task.end", task=req.id, status=result.status, attempts=result.attempts)
         await self.events.publish("task.finished", task_id=req.id, status=result.status, answer=result.answer)
-        await self._remember(req, result)
+        # Learning happens after the answer is delivered, so the user never waits for it.
+        t = asyncio.create_task(self._learn(req, result))
+        self._learning.add(t)
+        t.add_done_callback(self._learning.discard)
         return result
 
     async def _run(self, req: TaskRequest) -> TaskResult:
         memory_ctx = self.memory.context_for(req.text, self.s.memory.recall_k) if self.memory else ""
+        known = self.skills.relevant(req.text) if self.skills else []
         plan = await make_plan(self.router, req.text, self.executor.registry.names(), memory_ctx,
-                               self.s.agent.name)
+                               self.s.agent.name, known)
         await self.events.publish("task.plan", task_id=req.id, plan=plan.__dict__)
         if not plan.needs_tools:
             return TaskResult(req.id, "done", plan.answer, provider=self.router.last_provider or "")
 
-        messages = self._initial_messages(req, plan, memory_ctx)
+        skill = next((s for s in known if s.id == plan.skill_id), None)
+        messages = self._initial_messages(req, plan, memory_ctx, skill)
         steps: list[StepRecord] = []
         verification: Verification | None = None
         final = ""
@@ -99,16 +114,17 @@ class Orchestrator:
                               reason=verification.reason)
             if verification.passed:
                 return TaskResult(req.id, "done", final, attempt, steps, verification,
-                                  self.router.last_provider or "")
+                                  self.router.last_provider or "", plan.skill_id)
             messages.append({"role": "user", "content": (
                 f"Verification FAILED: {verification.reason}. Unmet: {verification.missing}. "
                 "Inspect the current state with tools, fix what is missing, then summarise again.")})
         answer = (f"{final}\n\n⚠ I could not verify this task is complete after "
                   f"{self.s.agent.max_attempts} attempts: {verification.reason if verification else ''}")
         return TaskResult(req.id, "failed", answer.strip(), self.s.agent.max_attempts, steps, verification,
-                          self.router.last_provider or "")
+                          self.router.last_provider or "", plan.skill_id)
 
-    def _initial_messages(self, req: TaskRequest, plan: Plan, memory_ctx: str) -> list[Message]:
+    def _initial_messages(self, req: TaskRequest, plan: Plan, memory_ctx: str,
+                          skill: Skill | None = None) -> list[Message]:
         from pathlib import Path
 
         system = ACTOR_PROMPT.format(
@@ -118,7 +134,9 @@ class Orchestrator:
             save_dir=save_dir(self.s.files),
             goal=plan.goal,
             steps="\n".join(f"{i + 1}. {s}" for i, s in enumerate(plan.steps)) or "(decide as you go)",
-            criteria="\n".join(f"- {c}" for c in plan.success_criteria), memory=memory_ctx or "(nothing yet)")
+            criteria="\n".join(f"- {c}" for c in plan.success_criteria), memory=memory_ctx or "(nothing yet)",
+            skill=(f"\nFOLLOW LEARNED SKILL #{skill.id} ({skill.name}), adapting it to this request:\n"
+                   + "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(skill.procedure)) + "\n") if skill else "")
         return [{"role": "system", "content": system}, {"role": "user", "content": req.text}]
 
     async def _act(self, req: TaskRequest, messages: list[Message], steps: list[StepRecord]) -> tuple[str, str]:
@@ -144,12 +162,34 @@ class Orchestrator:
                                  "content": result.for_llm()})
         return "I ran out of steps for this attempt.", ""
 
-    async def _remember(self, req: TaskRequest, result: TaskResult) -> None:
-        if not self.memory or not self.s.memory.enabled or result.status == "cancelled":
+    async def _learn(self, req: TaskRequest, result: TaskResult) -> None:
+        """Self-improvement after a task: memory facts + skills. Never raises."""
+        if result.status == "cancelled":
             return
-        if result.steps:
-            self.memory.add(f"{req.text[:200]} -> {result.status}", kind="episode", source="agent")
-        if self.s.memory.auto_extract:
-            for fact in await extract_facts(self.router, req.text, result.answer):
-                self.memory.add(fact, kind="profile", source="auto")
-                log.info("memory.learned", fact=fact)
+        try:
+            await self._learn_skill(req, result)
+            if self.memory and self.s.memory.enabled:
+                if result.steps:
+                    self.memory.add(f"{req.text[:200]} -> {result.status}", kind="episode", source="agent")
+                if self.s.memory.auto_extract:
+                    for fact in await extract_facts(self.router, req.text, result.answer):
+                        self.memory.add(fact, kind="profile", source="auto")
+                        await self.events.publish("memory.learned", fact=fact)
+        except Exception as e:
+            log.error("learning.failed", task=req.id, error=str(e))
+
+    async def _learn_skill(self, req: TaskRequest, result: TaskResult) -> None:
+        if not self.skills or not self.s.memory.learn_skills:
+            return
+        verified = result.status == "done" and result.verification is not None and result.verification.passed
+        if result.skill_id is not None:  # a learned skill was used: its track record changes
+            change = self.skills.record(result.skill_id, success=verified)
+        elif verified:
+            draft = await distill(self.router, req.text, result.steps)
+            if draft is None:
+                return
+            change = self.skills.learn(draft.name, draft.when_to_use, draft.procedure, draft.tools)
+        else:
+            return
+        self.audit.record("skill", task=req.id, skill=change.skill.id, change=change.change)
+        await self.events.publish("skill.changed", change=change.change, skill=change.skill.to_dict())

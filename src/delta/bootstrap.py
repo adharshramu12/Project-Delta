@@ -9,6 +9,7 @@ import asyncio
 import importlib.util
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from delta.config import Settings, ensure_desktop_shortcut, save_dir
 from delta.core.events import EventBus
@@ -16,6 +17,7 @@ from delta.core.orchestrator import Orchestrator
 from delta.core.state import TaskRequest, TaskResult
 from delta.llm.providers import OpenAICompatProvider, Provider
 from delta.llm.router import ModelRouter
+from delta.memory.skills import SkillStore
 from delta.memory.store import MemoryStore
 from delta.memory.tools import memory_tools
 from delta.safety.approvals import ApprovalBroker
@@ -61,6 +63,7 @@ class Container:
     lifecycle: Lifecycle
     _task_lock: asyncio.Semaphore
     closers: list[tuple[str, Callable[[], Awaitable[None]]]] = field(default_factory=list)
+    addon_infos: list[Any] = field(default_factory=list)
 
     async def submit(self, req: TaskRequest) -> TaskResult:
         """One heavy task at a time keeps the laptop responsive."""
@@ -73,16 +76,40 @@ class Container:
         await asyncio.to_thread(ensure_desktop_shortcut, folder)
         await self.governor.start()
         self.lifecycle.on_shutdown("governor", self.governor.stop)
+        await self._start_addons()
         self.lifecycle.on_shutdown("models", self.router.unload_local)
 
         async def close_state() -> None:
             self.approvals.deny_all()
+            await self.orchestrator.drain()  # let in-flight learning finish before closing stores
             self.memory.close()
+            if self.orchestrator.skills:
+                self.orchestrator.skills.close()
 
         self.lifecycle.on_shutdown("state", close_state)
         for name, closer in self.closers:
             self.lifecycle.on_shutdown(name, closer)
         self.audit.record("delta.start")
+
+    async def _start_addons(self) -> None:
+        cfg = self.settings.addons
+        if not cfg.enabled:
+            return
+        from delta.addons.api import AddonContext
+        from delta.addons.builtin import builtin_addons
+        from delta.addons.loader import start_addons
+
+        def make_ctx(name: str, conf: dict[str, Any]) -> AddonContext:
+            folder = self.settings.data_dir / "addon-data" / name
+            folder.mkdir(parents=True, exist_ok=True)
+            return AddonContext(name, conf, folder, self.router, self.events, self.registry)
+
+        self.addon_infos, contexts = await start_addons(
+            cfg.enabled, cfg.config, builtin_addons(), make_ctx, self.settings.data_dir / "addons")
+        for ctx in contexts:
+            for name, hook in ctx._shutdown:
+                self.lifecycle.on_shutdown(name, hook)
+        self.audit.record("addons", running=[i.name for i in self.addon_infos if i.status == "running"])
 
     async def stop(self) -> None:
         self.audit.record("delta.stop")
@@ -130,8 +157,9 @@ def build(settings: Settings) -> Container:
     boundaries = settings.boundaries.model_copy(deep=True)
     boundaries.allowed_paths.append(str(save_dir(settings.files, create=False)))
     executor = ToolExecutor(registry, PolicyEngine(boundaries), approvals, audit)
+    skills = SkillStore(data / "skills.db")
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
-                                governor, events, audit)
+                                governor, events, audit, skills)
 
     async def on_health(a: Assessment) -> None:
         await events.publish("governor.health", health=a.health.name, reasons=a.reasons)

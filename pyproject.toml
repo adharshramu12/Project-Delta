@@ -26,6 +26,8 @@ desktop = ["pywinauto>=0.6.9", "pyautogui>=0.9.54", "mss>=9.0", "pillow>=10.4"]
 browser = ["playwright>=1.48"]
 voice = ["faster-whisper>=1.1", "piper-tts>=1.2", "openwakeword>=0.6", "sounddevice>=0.5"]
 api = ["fastapi>=0.115", "uvicorn>=0.32", "websockets>=13"]
+mcp = ["mcp>=1.2"]
+all = ["delta-agent[channels,desktop,browser,api,mcp]"]
 
 [project.scripts]
 delta = "delta.__main__:main"

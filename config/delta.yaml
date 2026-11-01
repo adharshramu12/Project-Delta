@@ -56,12 +56,30 @@ governor:
 memory:
   enabled: true
   auto_extract: true        # suggest facts after tasks; you can view/delete with /memory
+  learn_skills: true        # turn verified tasks into reusable skills (see dashboard > Learned skills)
   recall_k: 6
 
 files:
   # Where Delta saves files it makes for you. "auto" = Desktop\Delta, or, when OneDrive syncs the
   # Desktop, a local %USERPROFILE%\Delta folder (never synced) with a "Delta" shortcut on the Desktop.
   save_dir: auto
+
+addons:
+  # Add-ons only run when listed here. Built-in: mcp. Community add-ons: pip packages
+  # (entry point group "delta.addons") or folders in %LOCALAPPDATA%\Delta\addons\<name>\addon.py
+  enabled: []
+  config:
+    mcp:
+      servers: {}
+      # Example (local server over stdio):
+      #   filesystem:
+      #     command: npx
+      #     args: ["-y", "@modelcontextprotocol/server-filesystem", "C:/Users/you/Delta"]
+      # Example (remote server over HTTP):
+      #   github:
+      #     url: https://your-mcp-server/mcp
+      #     token_secret: github_mcp_token   # delta secrets set github_mcp_token
+      #     risk: write                      # tools ask before running unless marked read-only
 
 api:
   host: 127.0.0.1   # dashboard + desktop app; local only

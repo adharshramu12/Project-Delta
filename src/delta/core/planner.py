@@ -5,6 +5,7 @@ from __future__ import annotations
 from delta.core.state import Plan
 from delta.llm.providers import extract_json
 from delta.llm.router import ModelRouter
+from delta.memory.skills import Skill
 
 PLANNER_PROMPT = """You are the planner of {name}, a personal AI agent running on the user's Windows PC.
 Tools the agent can use: {tools}.
@@ -18,7 +19,12 @@ Reply with JSON only:
   "answer": "<only if needs_tools is false: the full reply to the user>",
   "goal": "<one sentence>",
   "steps": ["<short step>", ...],
-  "success_criteria": ["<observable fact that proves the task is done, checkable with a tool>", ...]}}
+  "success_criteria": ["<observable fact that proves the task is done, checkable with a tool>", ...],
+  "skill_id": <id of a skill below that fits this request, or null>}}
+
+Skills the agent learned from earlier verified successes on this PC (reuse one when it fits;
+adapt its steps to this request):
+{skills}
 
 Success criteria must be concrete, e.g. "file C:/Users/x/Desktop/notes.txt exists and contains 'hello'",
 "process Antigravity.exe is running", "answer cites at least one source URL".
@@ -27,10 +33,13 @@ What you know about the user:
 {memory}"""
 
 
-async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memory: str, name: str) -> Plan:
+async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memory: str, name: str,
+                    skills: list[Skill] | None = None) -> Plan:
+    skills = skills or []
     resp = await router.complete(
         [{"role": "system", "content": PLANNER_PROMPT.format(
-            name=name, tools=", ".join(tool_names), memory=memory or "(nothing yet)")},
+            name=name, tools=", ".join(tool_names), memory=memory or "(nothing yet)",
+            skills="\n".join(s.prompt_line() for s in skills) or "(none yet)")},
          {"role": "user", "content": text}],
         task="plan", json_mode=True)
     try:
@@ -46,6 +55,9 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
         success_criteria=[str(c) for c in data.get("success_criteria", [])][:8],
         answer=str(data.get("answer", "")),
     )
+    sid = data.get("skill_id")
+    if isinstance(sid, int) and any(s.id == sid for s in skills):  # never trust an invented id
+        plan.skill_id = sid
     if not plan.needs_tools and not plan.answer:
         plan.needs_tools = True
     if plan.needs_tools and not plan.success_criteria:

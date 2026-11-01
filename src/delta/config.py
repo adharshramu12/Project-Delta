@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -58,6 +58,7 @@ class GovernorConfig(BaseModel):
 class MemoryConfig(BaseModel):
     enabled: bool = True
     auto_extract: bool = True
+    learn_skills: bool = True  # learn reusable skills from verified tasks
     recall_k: int = 6
 
 
@@ -126,6 +127,11 @@ def ensure_desktop_shortcut(folder: Path) -> Path | None:
     return link if link.exists() else None
 
 
+class AddonsConfig(BaseModel):
+    enabled: list[str] = Field(default_factory=list)  # nothing runs unless listed here
+    config: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
 class ApiConfig(BaseModel):
     host: str = "127.0.0.1"  # never 0.0.0.0: remote access goes through Tailscale/Cloudflare Tunnel
     port: int = 7878
@@ -166,6 +172,7 @@ class Settings(BaseModel):
     channels: dict[str, ChannelConfig] = Field(default_factory=dict)
     api: ApiConfig = Field(default_factory=ApiConfig)
     files: FilesConfig = Field(default_factory=FilesConfig)
+    addons: AddonsConfig = Field(default_factory=AddonsConfig)
     boundaries: Boundaries = Field(default_factory=Boundaries)
     apps: dict[str, AppEntry] = Field(default_factory=dict)
     config_dir: Path = REPO_ROOT / "config"

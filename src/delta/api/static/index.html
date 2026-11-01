@@ -30,7 +30,10 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
 .card{border:1px solid var(--warn);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px}
 .card .why{color:var(--muted);font-size:12px}.card .row{display:flex;gap:8px}
 .mem{display:flex;gap:6px;align-items:flex-start;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line)}
-.mem span{flex:1}.mem button{padding:0 6px;font-size:12px}.empty{color:var(--muted);font-size:13px}
+.mem span{flex:1}.count{text-transform:none;letter-spacing:0;font-weight:400}
+.badge{font-size:11px;padding:0 6px;border-radius:99px;border:1px solid var(--line);margin-left:4px}
+.badge.active{color:var(--ok);border-color:var(--ok)}.badge.candidate{color:var(--warn)}.badge.retired{color:var(--muted)}
+.skill small{display:block;color:var(--muted);font-size:12px}.mem button{padding:0 6px;font-size:12px}.empty{color:var(--muted);font-size:13px}
 @media (max-width:820px){main{grid-template-columns:1fr}aside{border-left:0;border-top:1px solid var(--line);max-height:40vh}}
 </style>
 </head>
@@ -49,6 +52,7 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
   </section>
   <aside>
     <div><h3>Approvals</h3><div id="approvals"><div class="empty">Nothing waiting.</div></div></div>
+    <div><h3>Learned skills <span id="skillcount" class="count"></span></h3><div id="skills"></div></div>
     <div><h3>Memory</h3><div id="memory"></div>
       <form id="addmem" style="padding:8px 0 0;border:0;background:none"><textarea id="memtext" placeholder="Remember that…" style="height:34px"></textarea><button>Add</button></form></div>
   </aside>
@@ -107,6 +111,22 @@ async function refreshMemory() {
   }
 }
 
+async function refreshSkills() {
+  const items = await api("/api/skills").catch(() => []);
+  const live = items.filter(s => s.status !== "retired");
+  $("skillcount").textContent = live.length ? `· ${live.filter(s => s.status === "active").length} proven, ${live.filter(s => s.status === "candidate").length} learning` : "";
+  $("skills").innerHTML = items.length ? "" : '<div class="empty">Delta learns a skill each time it verifiably finishes a multi-step task.</div>';
+  for (const s of items) {
+    const row = document.createElement("div"); row.className = "mem skill";
+    row.innerHTML = "<span><b></b><span class='badge'></span><small></small></span><button title='Forget skill'>×</button>";
+    row.querySelector("b").textContent = s.name;
+    const b = row.querySelector(".badge"); b.className = "badge " + s.status; b.textContent = s.status === "candidate" ? "learning" : s.status;
+    row.querySelector("small").textContent = `${s.successes}✓ ${s.failures}✗ · ${s.when_to_use}`;
+    row.querySelector("button").onclick = () => api(`/api/skills/${s.id}`, {method: "DELETE"}).then(refreshSkills);
+    $("skills").appendChild(row);
+  }
+}
+
 function connect() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws?token=${encodeURIComponent(token)}`);
   ws.onmessage = ev => {
@@ -122,6 +142,12 @@ function connect() {
       if (m.event === "task.step") add("step", "· " + d.tool + " " + JSON.stringify(d.args).slice(0, 140));
       if (m.event === "task.verify") add("step " + (d.passed ? "ok" : "bad"), (d.passed ? "✓ verified: " : "✗ not verified: ") + d.reason);
       if (m.event === "governor.health") refreshStatus();
+      if (m.event === "skill.changed") {
+        const words = {learned: "learned a new skill", promoted: "skill is now proven", retired: "retired a failing skill",
+                       reinforced: "skill worked again", weakened: "skill did not work this time"};
+        add("step ok", `★ Delta ${words[d.change] || d.change}: ${d.skill.name}`); refreshSkills();
+      }
+      if (m.event === "memory.learned") { add("step", "★ remembered: " + d.fact); refreshMemory(); }
     }
   };
   ws.onclose = () => setTimeout(connect, 2000);
@@ -141,7 +167,7 @@ $("shutdown").onclick = async () => {
   add("msg", "Delta is shutting down. You can close this window."); $("health").className = "pill OFFLINE"; $("health").textContent = "stopped";
 };
 if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-refreshStatus(); refreshMemory(); connect(); api("/api/approvals").then(a => a.forEach(renderApproval)).catch(() => {});
+refreshStatus(); refreshMemory(); refreshSkills(); connect(); api("/api/approvals").then(a => a.forEach(renderApproval)).catch(() => {});
 setInterval(() => { if (!document.hidden) refreshStatus(); }, 5000);
 add("msg", "Hi, I'm Delta. Tell me what to do. Anything risky will show up on the right for your approval.");
 </script>

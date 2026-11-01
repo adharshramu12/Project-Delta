@@ -20,6 +20,7 @@ class Plan:
     steps: list[str] = field(default_factory=list)
     success_criteria: list[str] = field(default_factory=list)
     answer: str = ""  # filled when no tools are needed
+    skill_id: int | None = None  # learned skill the planner chose to follow
 
 
 @dataclass
@@ -50,3 +51,4 @@ class TaskResult:
     steps: list[StepRecord] = field(default_factory=list)
     verification: Verification | None = None
     provider: str = ""
+    skill_id: int | None = None

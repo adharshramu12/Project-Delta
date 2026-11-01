@@ -18,6 +18,8 @@ asks before anything risky, and **verifies every task before it says "done".**
 | **You stay in charge** | Every action is risk-classified. Writes, deletes and anything that leaves the machine need your approval. Deletes go to the Recycle Bin. System settings, credentials and payments are hard-blocked. |
 | **Your rules** | `config/boundaries.yaml`: allowed/denied folders, apps, tools, domains, quiet hours, autonomy level. |
 | **Verified, not hopeful** | Plan → act → **verify against explicit success criteria** → retry or report honest failure. |
+| **Learns your workflows** | Every verified multi-step task becomes a reusable *skill*. Skills are promoted only after they work again, and retired automatically if they keep failing. You can see and remove every one. |
+| **Extensible** | Add-ons via a small stable SDK, plus a built-in **MCP** bridge to any Model Context Protocol server. Add-on tools obey the same safety rules. See [docs/ADDONS.md](docs/ADDONS.md). |
 | **Remembers you** | Local memory of your preferences and past tasks. View, edit, delete any time (`/memory`). |
 | **Auditable** | Hash-chained, tamper-evident audit log of every decision and tool call. |
 
@@ -105,6 +107,12 @@ Runtime data (memory DB, audit log, logs) lives in `%LOCALAPPDATA%\Delta`.
 - [x] Web dashboard: chat, live steps, approvals, memory, health, one-click Shutdown
 - [x] Desktop shortcut (no console window; second click reopens the dashboard)
 - [x] Telegram + Slack with approve/deny buttons (allow-listed users only)
+- [x] Computer use: UI Automation, Unicode typing, user-takeover stop, screen vision, Chrome profile
+- [x] Add-on SDK + MCP bridge
+- [x] Skill learning from verified tasks (candidate → proven → retired), export/import
+- [ ] Preference learning from approvals/corrections, reflection lessons
+- [ ] Routines and proactive suggestions
+- [ ] First-run setup page, one-line installer, community skill library
 - [ ] Tauri desktop app with tray icon (wraps the same dashboard)
 - [ ] Remote control (Tailscale / Cloudflare Tunnel, device pairing, PWA)
 - [ ] Computer use: UI Automation, mouse/keyboard, screen vision, Playwright Chrome profile

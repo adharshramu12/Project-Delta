@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from delta.bootstrap import Container
 from delta.core.state import TaskRequest, TaskResult
@@ -37,6 +37,10 @@ class TaskIn(BaseModel):
 
 class ApprovalIn(BaseModel):
     approved: bool
+
+
+class SkillStatusIn(BaseModel):
+    status: str = Field(pattern="^(candidate|active|retired)$")
 
 
 class MemoryIn(BaseModel):
@@ -144,6 +148,33 @@ def create_app(c: Container, token: str) -> FastAPI:
     @app.delete("/api/memory/{mem_id}", dependencies=[Depends(auth)])
     async def delete_memory(mem_id: int) -> dict[str, bool]:
         return {"ok": c.memory.delete(mem_id)}
+
+    @app.get("/api/skills", dependencies=[Depends(auth)])
+    async def list_skills() -> list[dict[str, Any]]:
+        store = c.orchestrator.skills
+        return [s.to_dict() for s in store.list()] if store else []
+
+    @app.post("/api/skills/{skill_id}/status", dependencies=[Depends(auth)])
+    async def set_skill_status(skill_id: int, body: SkillStatusIn) -> dict[str, bool]:
+        store = c.orchestrator.skills
+        if not store or not store.set_status(skill_id, body.status):
+            raise HTTPException(404, "no such skill")
+        c.audit.record("skill", skill=skill_id, change=f"user set {body.status}")
+        return {"ok": True}
+
+    @app.delete("/api/skills/{skill_id}", dependencies=[Depends(auth)])
+    async def delete_skill(skill_id: int) -> dict[str, bool]:
+        store = c.orchestrator.skills
+        return {"ok": bool(store and store.delete(skill_id))}
+
+    @app.get("/api/skills/export", dependencies=[Depends(auth)])
+    async def export_skills() -> list[dict[str, Any]]:
+        store = c.orchestrator.skills
+        return store.export() if store else []
+
+    @app.get("/api/addons", dependencies=[Depends(auth)])
+    async def list_addons() -> list[dict[str, Any]]:
+        return [i.__dict__ for i in c.addon_infos]
 
     @app.get("/api/boundaries", dependencies=[Depends(auth)])
     async def get_boundaries() -> dict[str, Any]:
