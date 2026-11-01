@@ -20,6 +20,7 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#fff}bu
 .overlay[hidden]{display:none}
 .wiz h3{margin:10px 0 0;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 .wiz textarea{font:13px ui-monospace,Consolas,monospace;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical}
+.wiz select{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
 .time{width:64px;font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
 .krow{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line)}
 .ok-text{color:var(--ok)}
@@ -84,6 +85,12 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
     <label class="choice"><input type="radio" name="s_autonomy" value="trusted"><b>Trusted</b><small>Also edit files in allowed folders without asking.</small></label>
     <label class="check"><input type="checkbox" id="s_quiet"> Quiet hours: only reading allowed between
       <input id="s_qstart" class="time" placeholder="23:30"> and <input id="s_qend" class="time" placeholder="07:00"></label>
+    <h3>Browser</h3>
+    <label class="field">Which browser Delta uses <small id="s_using"></small>
+      <select id="s_prefer"><option value="auto">My Windows default browser</option><option value="chrome">Google Chrome</option><option value="edge">Microsoft Edge</option></select></label>
+    <label class="field">How
+      <select id="s_bmode"><option value="your-browser">My normal browser, signed in to my sites (recommended)</option>
+        <option value="delta-profile">A separate Delta profile (works in the background, not signed in)</option></select></label>
     <h3>Folders</h3>
     <label class="field">Allowed folders <small>one per line: in "Trusted" mode Delta edits files here without asking</small><textarea id="s_allowed" rows="4"></textarea></label>
     <label class="field">Blocked folders <small>Delta never reads or changes anything here</small><textarea id="s_denied" rows="3"></textarea></label>
@@ -380,6 +387,8 @@ $("opensetup").onclick = openSetup;
 const lines = id => $(id).value.split("\n").map(s => s.trim()).filter(Boolean);
 async function openSettings() {
   const s = await api("/api/settings"), b = s.boundaries;
+  $("s_prefer").value = s.browser.prefer; $("s_bmode").value = s.browser.mode;
+  $("s_using").textContent = s.browser.using ? `(currently: ${s.browser.using})` : "(no Chrome or Edge found)";
   document.querySelector(`input[name=s_autonomy][value="${b.autonomy}"]`).checked = true;
   $("s_quiet").checked = b.quiet_hours.enabled; $("s_qstart").value = b.quiet_hours.start; $("s_qend").value = b.quiet_hours.end;
   $("s_allowed").value = b.allowed_paths.join("\n"); $("s_denied").value = b.denied_paths.join("\n");
@@ -417,6 +426,7 @@ $("opensettings").onclick = openSettings;
 $("s_close").onclick = () => { $("settings").hidden = true; };
 $("s_save").onclick = async () => {
   const body = {
+    browser: {prefer: $("s_prefer").value, mode: $("s_bmode").value},
     boundaries: {autonomy: document.querySelector("input[name=s_autonomy]:checked").value,
       allowed_paths: lines("s_allowed"), denied_paths: lines("s_denied"), denied_apps: lines("s_apps"),
       denied_domains: lines("s_domains"), allowed_domains: lines("s_onlydomains"),

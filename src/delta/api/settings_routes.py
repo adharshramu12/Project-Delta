@@ -45,7 +45,13 @@ class MemoryIn(BaseModel):
     learn_skills: bool | None = None
 
 
+class BrowserIn(BaseModel):
+    mode: Literal["your-browser", "delta-profile"] | None = None
+    prefer: Literal["auto", "chrome", "edge"] | None = None
+
+
 class SettingsIn(BaseModel):
+    browser: BrowserIn | None = None
     boundaries: BoundariesIn | None = None
     memory: MemoryIn | None = None
     save_dir: str | None = Field(default=None, max_length=300)
@@ -64,7 +70,11 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
     async def get_settings() -> dict[str, Any]:
         s = c.settings
         keys = await asyncio.to_thread(lambda: {k: bool(get_secret(k)) for k in KEY_INFO})
+        from delta.tools.user_browser import default_browser
+
+        found = await asyncio.to_thread(default_browser, s.browser.prefer)
         return {
+            "browser": {**s.browser.model_dump(), "using": found[0] if found else None},
             "boundaries": s.boundaries.model_dump(),
             "memory": {"enabled": s.memory.enabled, "auto_extract": s.memory.auto_extract,
                        "learn_skills": s.memory.learn_skills},
@@ -80,6 +90,11 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
         s = c.settings
         changes: dict[str, Any] = {}
         restart = False
+        if body.browser:
+            br = body.browser.model_dump(exclude_none=True)
+            if br.get("mode", s.browser.mode) != s.browser.mode:
+                restart = True  # a different set of browser tools is registered at start-up
+            changes["browser"] = br
         if body.boundaries:
             b = body.boundaries.model_dump(exclude_none=True)
             for key in ("allowed_paths", "denied_paths", "denied_apps", "denied_domains", "allowed_domains"):
@@ -125,6 +140,12 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
             s.files.save_dir = changes["files"]["save_dir"]
         if "addons" in changes:
             s.addons.enabled = changes["addons"]["enabled"]
+        if "browser" in changes:
+            for k, v in changes["browser"].items():
+                setattr(s.browser, k, v)
+            ub = getattr(c.registry.get("browser_open"), "ub", None)
+            if ub is not None:  # your-browser mode: switch Chrome/Edge right away
+                ub.use(s.browser.prefer)
         c.orchestrator.executor.policy = make_policy(s)  # next action uses the new rules
         c.audit.record("settings.changed", sections=sorted(changes))
         return {"ok": True, "restart_needed": restart, "save_dir_resolved": str(save_dir(s.files, create=False))}

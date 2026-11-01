@@ -107,6 +107,37 @@ def test_edge_is_used_when_chrome_is_missing(tmp_path, monkeypatch):
     assert browser.find_browser() is None
 
 
+def test_your_browser_mode_is_default_and_keeps_safety_rules(tmp_path):
+    pytest.importorskip("pywinauto", reason="pywinauto not installed (non-Windows)")
+    from delta.bootstrap import build
+    from delta.config import Settings
+    from delta.tools.browser import FillArgs
+    from delta.tools.user_browser import UBClick, UBFill, UBPress
+
+    c = build(Settings(data_dir=tmp_path))
+    tool = c.registry.get("browser_open")
+    assert hasattr(tool, "ub")  # the user's own browser, not a separate profile
+    ub = tool.ub
+    pe = PolicyEngine(Boundaries())
+    assert pe.evaluate(UBFill(ub), FillArgs(field="Search", value="x", submit=True)).verdict == Verdict.ALLOW
+    assert pe.evaluate(UBFill(ub), FillArgs(field="Message", value="x", submit=True)).verdict == Verdict.ASK
+    assert pe.evaluate(UBClick(ub), ClickArgs(text="Place order")).verdict == Verdict.ASK
+    assert pe.evaluate(UBPress(ub), PressArgs(key="Enter")).verdict == Verdict.ASK
+
+
+def test_browser_preference_order(monkeypatch, tmp_path):
+    from delta.tools import user_browser
+
+    chrome, edge = tmp_path / "chrome.exe", tmp_path / "msedge.exe"
+    chrome.write_text("")
+    edge.write_text("")
+    monkeypatch.setattr(user_browser, "KNOWN", {"ChromeHTML": ("chrome", "chrome.exe", [str(chrome)]),
+                                                "MSEdge": ("edge", "msedge.exe", [str(edge)])})
+    assert user_browser.default_browser("chrome")[0] == "chrome"
+    assert user_browser.default_browser("edge")[0] == "edge"
+    assert user_browser.default_browser("auto")[0] in {"chrome", "edge"}
+
+
 def test_chrome_uses_dedicated_profile(tmp_path):
     args = chrome_args(tmp_path / "p")
     assert any(a.startswith("--user-data-dir=") and str(tmp_path) in a for a in args)

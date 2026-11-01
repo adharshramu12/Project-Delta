@@ -66,6 +66,13 @@ files:
   # Desktop, a local %USERPROFILE%\Delta folder (never synced) with a "Delta" shortcut on the Desktop.
   save_dir: auto
 
+browser:
+  # your-browser: use YOUR normal Chrome/Edge (signed in to your sites). Delta opens one window of
+  #   its own there and drives it like a person (needs that window in front while typing).
+  # delta-profile: a separate Delta profile, works in the background, but not signed in.
+  mode: your-browser
+  prefer: auto         # auto (your Windows default browser) | chrome | edge
+
 addons:
   # Add-ons only run when listed here. Built-in: mcp. Community add-ons: pip packages
   # (entry point group "delta.addons") or folders in %LOCALAPPDATA%\Delta\addons\<name>\addon.py

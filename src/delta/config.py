@@ -132,6 +132,13 @@ class AddonsConfig(BaseModel):
     config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
+class BrowserConfig(BaseModel):
+    # your-browser: your normal signed-in Chrome/Edge, driven like a person (default)
+    # delta-profile: a separate Delta profile, automated in the background, not signed in
+    mode: Literal["your-browser", "delta-profile"] = "your-browser"
+    prefer: Literal["auto", "chrome", "edge"] = "auto"  # auto = your Windows default browser
+
+
 class ApiConfig(BaseModel):
     host: str = "127.0.0.1"  # never 0.0.0.0: remote access goes through Tailscale/Cloudflare Tunnel
     port: int = 7878
@@ -173,6 +180,7 @@ class Settings(BaseModel):
     api: ApiConfig = Field(default_factory=ApiConfig)
     files: FilesConfig = Field(default_factory=FilesConfig)
     addons: AddonsConfig = Field(default_factory=AddonsConfig)
+    browser: BrowserConfig = Field(default_factory=BrowserConfig)
     boundaries: Boundaries = Field(default_factory=Boundaries)
     apps: dict[str, AppEntry] = Field(default_factory=dict)
     config_dir: Path = REPO_ROOT / "config"

@@ -168,7 +168,8 @@ def build(settings: Settings) -> Container:
         *(memory_tools(memory) if settings.memory.enabled else []),
     ])
     closers: list[tuple[str, Callable[[], Awaitable[None]]]] = []
-    if _installed("pywinauto", "pyautogui", "mss"):
+    desktop_ok = _installed("pywinauto", "pyautogui", "mss")
+    if desktop_ok:
         from delta.tools.desktop import DesktopController, desktop_tools
         from delta.tools.screen import screen_tools
 
@@ -180,7 +181,14 @@ def build(settings: Settings) -> Container:
             ctl.close()
 
         closers.append(("desktop", close_desktop))
-    if _installed("playwright"):
+    if settings.browser.mode == "your-browser" and desktop_ok:
+        # Default: the user's own signed-in Chrome/Edge, driven like a person (see user_browser.py).
+        from delta.tools.user_browser import user_browser_tools
+
+        for t in user_browser_tools(ctl, settings.browser.prefer):
+            registry.register(t)
+    elif _installed("playwright"):
+        # Optional: a separate Delta profile, fully automatable in the background but not signed in.
         from delta.tools.browser import BrowserManager, browser_tools
 
         browser = BrowserManager(data)
