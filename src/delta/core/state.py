@@ -21,6 +21,7 @@ class Plan:
     success_criteria: list[str] = field(default_factory=list)
     answer: str = ""  # filled when no tools are needed
     skill_id: int | None = None  # learned skill the planner chose to follow
+    tools: list[str] = field(default_factory=list)  # tools the planner expects to need
 
 
 @dataclass

@@ -7,6 +7,7 @@ providers that are (a) unconfigured, (b) circuit-broken after repeated failures,
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -35,6 +36,16 @@ class CircuitBreaker:
         self.failures += 1
         if self.failures >= self.threshold:
             self.opened_at = time.monotonic()
+
+    def trip(self, cooldown_s: float) -> None:
+        """Open immediately, e.g. nothing is listening: retrying every call only wastes time."""
+        self.failures = self.threshold
+        self.opened_at = time.monotonic()
+        self.cooldown_s = cooldown_s
+
+
+MAX_RATE_LIMIT_WAIT_S = 20.0  # waiting this long beats failing or switching to a weaker model
+UNREACHABLE_COOLDOWN_S = 300.0
 
 
 class ModelRouter:
@@ -78,9 +89,20 @@ class ModelRouter:
         for p in self.candidates(task):
             started = time.perf_counter()
             try:
-                resp = await p.complete(task, messages, tools, json_mode)
+                try:
+                    resp = await p.complete(task, messages, tools, json_mode)
+                except LLMError as e:
+                    # Free tiers often say "try again in 6s": a short wait beats failing the task.
+                    if e.kind != "rate_limit" or not e.retry_after_s or e.retry_after_s > MAX_RATE_LIMIT_WAIT_S:
+                        raise
+                    log.info("router.rate_limit_wait", provider=p.name, seconds=round(e.retry_after_s, 1))
+                    await asyncio.sleep(e.retry_after_s + 0.5)
+                    resp = await p.complete(task, messages, tools, json_mode)
             except LLMError as e:
-                self.breakers[p.name].record_failure()
+                if e.kind == "unreachable":
+                    self.breakers[p.name].trip(UNREACHABLE_COOLDOWN_S)
+                elif e.kind != "rate_limit":  # being throttled says nothing about provider health
+                    self.breakers[p.name].record_failure()
                 errors.append(str(e))
                 log.warning("router.fallback", provider=p.name, task=task, error=str(e))
                 continue

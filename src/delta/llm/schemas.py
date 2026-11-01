@@ -25,7 +25,16 @@ Message = dict[str, Any]  # {"role": ..., "content": ..., optional "tool_calls"/
 
 
 class LLMError(RuntimeError):
-    """Raised when a provider fails in a way that should trigger fallback."""
+    """Raised when a provider fails in a way that should trigger fallback.
+
+    kind: "unreachable" (nothing listening, e.g. Ollama not installed), "rate_limit", or "error".
+    retry_after_s: for rate limits, how long the provider asked us to wait (if it said).
+    """
+
+    def __init__(self, message: str, kind: str = "error", retry_after_s: float | None = None) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.retry_after_s = retry_after_s
 
 
 class AllProvidersFailedError(LLMError):

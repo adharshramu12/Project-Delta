@@ -24,7 +24,9 @@ llm:
       secret: groq_api_key
       timeout_s: 60
       models:
-        chat: llama-3.3-70b-versatile
+        chat: openai/gpt-oss-120b     # strong tool use
+        plan: openai/gpt-oss-120b
+        verify: openai/gpt-oss-20b    # fast, cheap checks
     nim:
       base_url: https://integrate.api.nvidia.com/v1
       secret: nvidia_api_key

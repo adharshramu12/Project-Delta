@@ -57,7 +57,15 @@ class Tool[A: BaseModel](ABC):
     async def run(self, args: A) -> ToolResult: ...
 
     def spec(self) -> dict[str, Any]:
-        schema = self.Args.model_json_schema()
-        schema.pop("title", None)
         return {"type": "function", "function": {"name": self.name, "description": self.description,
-                                                  "parameters": schema}}
+                                                  "parameters": _compact(self.Args.model_json_schema())}}
+
+
+def _compact(node: Any) -> Any:
+    """Drop JSON-schema keys models do not need ('title' on every field). Tool specs are sent on
+    every call, so each token saved here is saved many times per task."""
+    if isinstance(node, dict):
+        return {k: _compact(v) for k, v in node.items() if k != "title"}
+    if isinstance(node, list):
+        return [_compact(v) for v in node]
+    return node

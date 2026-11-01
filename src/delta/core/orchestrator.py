@@ -6,6 +6,8 @@ import asyncio
 import json
 import platform
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 from delta.config import Settings, known_folder, save_dir
 from delta.core.events import EventBus
@@ -55,6 +57,10 @@ What you know about the user:
 {memory}"""
 
 
+# Read-only helpers every task may need for checking its own work.
+ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "web_search", "recall"}
+
+
 class Orchestrator:
     def __init__(self, settings: Settings, router: ModelRouter, executor: ToolExecutor,
                  memory: MemoryStore | None, governor: Governor | None, events: EventBus,
@@ -92,8 +98,10 @@ class Orchestrator:
     async def _run(self, req: TaskRequest) -> TaskResult:
         memory_ctx = self.memory.context_for(req.text, self.s.memory.recall_k) if self.memory else ""
         known = self.skills.relevant(req.text) if self.skills else []
+        environment = (f"Save folder for new files: {save_dir(self.s.files)}. Desktop: {known_folder('Desktop')}. "
+                       f"Documents: {known_folder('Personal')}. Home: {Path.home()}.")
         plan = await make_plan(self.router, req.text, self.executor.registry.names(), memory_ctx,
-                               self.s.agent.name, known)
+                               self.s.agent.name, known, environment)
         await self.events.publish("task.plan", task_id=req.id, plan=plan.__dict__)
         if not plan.needs_tools:
             return TaskResult(req.id, "done", plan.answer, provider=self.router.last_provider or "")
@@ -104,7 +112,10 @@ class Orchestrator:
         verification: Verification | None = None
         final = ""
         for attempt in range(1, self.s.agent.max_attempts + 1):
-            final, stopped = await self._act(req, messages, steps)
+            # First attempt: only the tools the plan needs. A retry gets everything, in case the
+            # planner missed one.
+            tools = self._tool_specs(plan.tools if attempt == 1 else [])
+            final, stopped = await self._act(req, messages, steps, tools)
             if stopped:
                 return TaskResult(req.id, "cancelled", stopped, attempt, steps)
             verification = await verify(self.router, req.text, plan, steps, final)
@@ -125,8 +136,6 @@ class Orchestrator:
 
     def _initial_messages(self, req: TaskRequest, plan: Plan, memory_ctx: str,
                           skill: Skill | None = None) -> list[Message]:
-        from pathlib import Path
-
         system = ACTOR_PROMPT.format(
             name=self.s.agent.name, owner=self.s.agent.owner_name or "the user",
             os=f"{platform.system()} {platform.release()}", now=datetime.now().strftime("%A %d %B %Y %H:%M"),
@@ -139,9 +148,18 @@ class Orchestrator:
                    + "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(skill.procedure)) + "\n") if skill else "")
         return [{"role": "system", "content": system}, {"role": "user", "content": req.text}]
 
-    async def _act(self, req: TaskRequest, messages: list[Message], steps: list[StepRecord]) -> tuple[str, str]:
+    def _tool_specs(self, wanted: list[str]) -> list[dict[str, Any]]:
+        """Specs for the planned tools plus a few cheap read-only helpers; all tools if none planned.
+        Sending 6 tool descriptions instead of 30+ cuts most of the tokens of every call."""
+        specs = self.executor.registry.specs()
+        if not wanted:
+            return specs
+        keep = set(wanted) | ALWAYS_TOOLS
+        return [s for s in specs if s["function"]["name"] in keep]
+
+    async def _act(self, req: TaskRequest, messages: list[Message], steps: list[StepRecord],
+                   tools: list[dict[str, Any]]) -> tuple[str, str]:
         """Run tool calls until the model gives a final answer. Returns (final_answer, stop_reason)."""
-        tools = self.executor.registry.specs()
         for _ in range(self.s.agent.max_steps):
             if self.governor and self.governor.health == Health.CRITICAL:
                 reasons = ", ".join(self.governor.assessment.reasons)

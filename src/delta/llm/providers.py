@@ -107,6 +107,26 @@ class OpenAICompatProvider:
     def model_for(self, task: str) -> str:
         return self.cfg.models.get(task) or self.cfg.models["chat"]
 
+    async def _replacement_for(self, task: str, model: str, error: Exception) -> str | None:
+        text = str(error).lower()
+        if "model" not in text or not any(w in text for w in ("not found", "does not exist", "decommission",
+                                                               "not supported", "model_not_found", "invalid model")):
+            return None
+        try:
+            available = [m.id for m in (await self._client.models.list()).data]
+        except Exception:
+            return None
+        choice = pick_model(available, vision=task == "vision", exclude=model)
+        if choice:
+            from delta.system.logging import log
+
+            log.warning("provider.model_replaced", provider=self.name, retired=model, using=choice,
+                        hint=f"update llm.providers.{self.name}.models.{task} in config/delta.yaml")
+            for key, value in list(self.cfg.models.items()):  # stop asking for the retired model
+                if value == model:
+                    self.cfg.models[key] = choice
+        return choice
+
     async def complete(
         self, task: str, messages: list[Message], tools: list[dict] | None, json_mode: bool = False
     ) -> LLMResponse:
@@ -127,9 +147,23 @@ class OpenAICompatProvider:
         import openai
 
         try:
-            resp = await client.chat.completions.create(**kwargs)
-        except (openai.APIConnectionError, openai.APITimeoutError, openai.RateLimitError) as e:
-            raise LLMError(f"{self.name}: {type(e).__name__}: {e}") from e
+            try:
+                resp = await client.chat.completions.create(**kwargs)
+            except (openai.NotFoundError, openai.BadRequestError) as e:
+                # Providers retire models often. Instead of breaking for every user until they edit
+                # config, pick the best model the provider still offers and carry on.
+                replacement = await self._replacement_for(task, model, e)
+                if replacement is None:
+                    raise
+                kwargs["model"] = model = replacement
+                resp = await client.chat.completions.create(**kwargs)
+        except openai.RateLimitError as e:
+            raise LLMError(f"{self.name}: rate limited: {e.message[:200]}", kind="rate_limit",
+                           retry_after_s=_retry_after(e)) from e
+        except openai.APITimeoutError as e:
+            raise LLMError(f"{self.name}: timed out after {self.cfg.timeout_s}s") from e
+        except openai.APIConnectionError as e:
+            raise LLMError(f"{self.name}: not reachable at {self.cfg.base_url}", kind="unreachable") from e
         except openai.APIStatusError as e:
             raise LLMError(f"{self.name}: HTTP {e.status_code}: {e.message}") from e
 
@@ -197,6 +231,37 @@ class OpenAICompatProvider:
             for model in set(self.cfg.models.values()):
                 with contextlib.suppress(httpx.HTTPError):
                     await client.post(f"{root}/api/generate", json={"model": model, "keep_alive": 0})
+
+
+# Ranked name fragments of models known to handle tool calling well. Order = preference.
+# Unknown future models still work: anything not matching falls to a size-based guess.
+PREFERRED_MODELS = ["gpt-oss-120b", "qwen3", "llama-4", "llama-3.3-70b", "deepseek-v3", "kimi-k2", "gpt-oss-20b",
+                    "mistral-large", "llama-3.1-70b", "gemma"]
+NOT_CHAT = ("whisper", "guard", "orpheus", "tts", "embed", "rerank", "safeguard", "allam")
+
+
+def pick_model(available: list[str], vision: bool = False, exclude: str = "") -> str | None:
+    """Best general chat/tool model from a provider's list (used when a configured model is gone)."""
+    usable = [m for m in available if m != exclude and not any(x in m.lower() for x in NOT_CHAT)]
+    if vision:
+        usable = [m for m in usable if any(x in m.lower() for x in ("vision", "-vl", "scout", "maverick", "gemma"))]
+    for fragment in PREFERRED_MODELS:
+        for m in usable:
+            if fragment in m.lower():
+                return m
+    return usable[0] if usable else None
+
+
+def _retry_after(e: Any) -> float | None:
+    """Seconds the provider asked us to wait: Retry-After header, or Groq's 'try again in 6.7s'."""
+    with contextlib.suppress(Exception):
+        header = e.response.headers.get("retry-after")
+        if header:
+            return float(header)
+    m = re.search(r"try again in ([\d.]+)\s*(ms|s)", str(e))
+    if m:
+        return float(m.group(1)) / (1000 if m.group(2) == "ms" else 1)
+    return None
 
 
 def _loads(raw: str | dict | None) -> dict[str, Any]:
