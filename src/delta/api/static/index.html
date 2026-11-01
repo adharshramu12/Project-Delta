@@ -16,8 +16,14 @@ header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:
 .stats{color:var(--muted);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.danger{color:var(--bad)}
-#setup{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:10;padding:16px}
-#setup[hidden]{display:none}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:10;padding:16px}
+.overlay[hidden]{display:none}
+.wiz h3{margin:10px 0 0;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.wiz textarea{font:13px ui-monospace,Consolas,monospace;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical}
+.time{width:64px;font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.krow{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line)}
+.ok-text{color:var(--ok)}
+.nav.sticky{position:sticky;bottom:-22px;background:var(--panel);padding:10px 0}
 .wiz{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:min(620px,100%);max-height:calc(100vh - 32px);overflow-y:auto;padding:22px 24px;display:flex;flex-direction:column;gap:10px}
 .wiz h2{margin:0;font-size:20px}.wiz .lead{color:var(--muted);margin:0 0 6px}.wiz section{display:none;flex-direction:column;gap:10px}.wiz section.on{display:flex}
 .dots{display:flex;gap:6px}.dots span{height:4px;flex:1;border-radius:4px;background:var(--line)}.dots span.on{background:var(--accent)}
@@ -64,10 +70,41 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
   <span id="health" class="pill OFFLINE">offline</span>
   <div id="stats" class="stats"></div>
   <button id="opensetup" title="Models, permissions, Telegram">Setup</button>
+  <button id="opensettings" title="Folders, apps, learning, add-ons, keys">Settings</button>
   <button class="danger" id="shutdown" title="Stop Delta completely and free memory/GPU">Shutdown</button>
 </header>
 <div id="warnings" hidden></div>
-<div id="setup" hidden>
+<div id="settings" class="overlay" hidden>
+  <div class="wiz">
+    <h2>Settings</h2>
+    <p class="lead">Changes apply to Delta's very next action.</p>
+    <h3>Permission level</h3>
+    <label class="choice"><input type="radio" name="s_autonomy" value="ask-everything"><b>Careful</b><small>Ask before anything except reading.</small></label>
+    <label class="choice"><input type="radio" name="s_autonomy" value="ask-risky"><b>Balanced</b><small>Ask before changing or sending anything.</small></label>
+    <label class="choice"><input type="radio" name="s_autonomy" value="trusted"><b>Trusted</b><small>Also edit files in allowed folders without asking.</small></label>
+    <label class="check"><input type="checkbox" id="s_quiet"> Quiet hours: only reading allowed between
+      <input id="s_qstart" class="time" placeholder="23:30"> and <input id="s_qend" class="time" placeholder="07:00"></label>
+    <h3>Folders</h3>
+    <label class="field">Allowed folders <small>one per line: in "Trusted" mode Delta edits files here without asking</small><textarea id="s_allowed" rows="4"></textarea></label>
+    <label class="field">Blocked folders <small>Delta never reads or changes anything here</small><textarea id="s_denied" rows="3"></textarea></label>
+    <label class="field">Save new files in <small>"auto" = a Delta folder you can open from your Desktop</small><input id="s_savedir"></label>
+    <div class="box small" id="s_protected"></div>
+    <h3>Apps and websites</h3>
+    <label class="field">Blocked apps <small>one per line, e.g. regedit</small><textarea id="s_apps" rows="2"></textarea></label>
+    <label class="field">Blocked websites <small>one per line, e.g. example.com</small><textarea id="s_domains" rows="2"></textarea></label>
+    <label class="field">Only these websites <small>leave empty to allow all</small><textarea id="s_onlydomains" rows="2"></textarea></label>
+    <h3>Learning and memory</h3>
+    <label class="check"><input type="checkbox" id="s_mem"> Remember things about me</label>
+    <label class="check"><input type="checkbox" id="s_extract"> Learn facts from our chats automatically</label>
+    <label class="check"><input type="checkbox" id="s_skills"> Learn reusable skills from tasks that worked</label>
+    <h3>Add-ons</h3>
+    <div id="s_addons"></div>
+    <h3>Keys</h3>
+    <div id="s_keys"></div>
+    <div class="nav sticky"><button id="s_close">Close</button><span class="err" id="s_err"></span><button class="primary" id="s_save">Save</button></div>
+  </div>
+</div>
+<div id="setup" class="overlay" hidden>
   <div class="wiz">
     <div class="dots" id="dots"></div>
     <section data-step="welcome">
@@ -338,6 +375,61 @@ $("wnext").onclick = async () => {
   showStep(step + 1);
 };
 $("opensetup").onclick = openSetup;
+
+// ---- settings page ------------------------------------------------------------------------
+const lines = id => $(id).value.split("\n").map(s => s.trim()).filter(Boolean);
+async function openSettings() {
+  const s = await api("/api/settings"), b = s.boundaries;
+  document.querySelector(`input[name=s_autonomy][value="${b.autonomy}"]`).checked = true;
+  $("s_quiet").checked = b.quiet_hours.enabled; $("s_qstart").value = b.quiet_hours.start; $("s_qend").value = b.quiet_hours.end;
+  $("s_allowed").value = b.allowed_paths.join("\n"); $("s_denied").value = b.denied_paths.join("\n");
+  $("s_apps").value = b.denied_apps.join("\n"); $("s_domains").value = b.denied_domains.join("\n");
+  $("s_onlydomains").value = b.allowed_domains.join("\n");
+  $("s_savedir").value = s.save_dir; $("s_savedir").title = s.save_dir_resolved;
+  $("s_protected").textContent = "Always protected, whatever you set: Windows system files, saved passwords and keys, " +
+    "and Delta's own data folder (so Delta can never change its own rules).\nNew files currently go to: " + s.save_dir_resolved;
+  $("s_mem").checked = s.memory.enabled; $("s_extract").checked = s.memory.auto_extract; $("s_skills").checked = s.memory.learn_skills;
+  $("s_addons").innerHTML = s.addons.available.length ? "" : '<div class="empty">No add-ons installed.</div>';
+  for (const a of s.addons.available) {
+    const l = document.createElement("label"); l.className = "check";
+    l.innerHTML = `<input type="checkbox" data-addon><span></span>`;
+    l.querySelector("input").dataset.addon = a; l.querySelector("input").checked = s.addons.enabled.includes(a);
+    l.querySelector("span").textContent = a === "mcp" ? "mcp (connect other apps via Model Context Protocol)" : a;
+    $("s_addons").appendChild(l);
+  }
+  $("s_keys").innerHTML = "";
+  for (const [name, k] of Object.entries(s.keys)) {
+    const row = document.createElement("div"); row.className = "krow";
+    row.innerHTML = "<span></span><span></span>";
+    row.firstChild.textContent = k.label;
+    if (k.set) {
+      row.lastChild.innerHTML = "<span class='ok-text'>✓ saved</span> <button>Remove</button>";
+      row.querySelector("button").onclick = async () => {
+        if (!confirm(`Remove the ${k.label} key from this PC?`)) return;
+        await api(`/api/settings/key/${name}`, {method: "DELETE"}); openSettings(); refreshStatus();
+      };
+    } else { row.lastChild.innerHTML = "<button>Add in Setup</button>"; row.querySelector("button").onclick = () => { $("settings").hidden = true; openSetup(); }; }
+    $("s_keys").appendChild(row);
+  }
+  $("s_err").textContent = ""; $("settings").hidden = false;
+}
+$("opensettings").onclick = openSettings;
+$("s_close").onclick = () => { $("settings").hidden = true; };
+$("s_save").onclick = async () => {
+  const body = {
+    boundaries: {autonomy: document.querySelector("input[name=s_autonomy]:checked").value,
+      allowed_paths: lines("s_allowed"), denied_paths: lines("s_denied"), denied_apps: lines("s_apps"),
+      denied_domains: lines("s_domains"), allowed_domains: lines("s_onlydomains"),
+      quiet_hours: {enabled: $("s_quiet").checked, start: $("s_qstart").value || "23:30", end: $("s_qend").value || "07:00"}},
+    memory: {enabled: $("s_mem").checked, auto_extract: $("s_extract").checked, learn_skills: $("s_skills").checked},
+    save_dir: $("s_savedir").value || "auto",
+    addons_enabled: [...document.querySelectorAll("[data-addon]")].filter(i => i.checked).map(i => i.dataset.addon),
+  };
+  const r = await api("/api/settings", {method: "PUT", body: JSON.stringify(body)}).catch(e => ({detail: e.message}));
+  if (!r.ok) { $("s_err").textContent = typeof r.detail === "string" ? r.detail : "Please check the values."; return; }
+  $("settings").hidden = true;
+  add("step ok", "✓ Settings saved and applied." + (r.restart_needed ? " Restart Delta for the add-on change to take effect." : ""));
+};
 api("/api/setup").then(s => { if (!s.completed) openSetup(); }).catch(() => {});
 
 if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();

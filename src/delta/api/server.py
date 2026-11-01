@@ -207,9 +207,11 @@ def create_app(c: Container, token: str) -> FastAPI:
         c.lifecycle.request_stop()
         return {"ok": True}
 
+    from delta.api.settings_routes import register as register_settings
     from delta.api.setup_routes import register as register_setup
 
     register_setup(app, c, auth)
+    register_settings(app, c, auth)
 
     @app.websocket("/api/ws")
     async def ws(socket: WebSocket) -> None:

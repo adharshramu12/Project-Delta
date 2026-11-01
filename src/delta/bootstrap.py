@@ -41,6 +41,15 @@ def _installed(*modules: str) -> bool:
     return all(importlib.util.find_spec(m) is not None for m in modules)
 
 
+def make_policy(settings: Settings) -> PolicyEngine:
+    """Policy from the current settings. Rebuilt when the user changes settings, so edits apply
+    to the very next action. Delta's data dir (access token, audit log, settings) is protected and
+    its config dir read-only: no setting or tool can let Delta rewrite its own rules."""
+    boundaries = settings.boundaries.model_copy(deep=True)
+    boundaries.allowed_paths.append(str(save_dir(settings.files, create=False)))  # always allowed
+    return PolicyEngine(boundaries, protected=[settings.data_dir], read_only=[settings.config_dir])
+
+
 def build_providers(settings: Settings) -> dict[str, Provider]:
     providers: dict[str, Provider] = {}
     for name, cfg in settings.llm.providers.items():
@@ -142,6 +151,7 @@ class Container:
 
 def build(settings: Settings) -> Container:
     data = settings.data_dir
+    data.mkdir(parents=True, exist_ok=True)  # first run: databases need the folder to exist
     events = EventBus()
     governor = Governor(settings.governor)
     router = ModelRouter(build_providers(settings), settings.llm.routes, allow_local=governor.allow_local)
@@ -177,15 +187,12 @@ def build(settings: Settings) -> Container:
         for t in browser_tools(browser):
             registry.register(t)
         closers.append(("browser", browser.close))
-    # Delta's own save folder always counts as an allowed folder
-    boundaries = settings.boundaries.model_copy(deep=True)
-    boundaries.allowed_paths.append(str(save_dir(settings.files, create=False)))
     learning = LearningStore(data / "learning.db")
 
     async def on_learned(item: Learned) -> None:
         await events.publish("learning.added", item=item.to_dict())
 
-    executor = ToolExecutor(registry, PolicyEngine(boundaries), approvals, audit, learning, on_learned)
+    executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
     skills = SkillStore(data / "skills.db")
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
                                 governor, events, audit, skills, learning)
