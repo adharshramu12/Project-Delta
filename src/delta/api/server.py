@@ -86,6 +86,7 @@ def create_app(c: Container, token: str) -> FastAPI:
     app = FastAPI(title="Delta", docs_url=None, redoc_url=None, openapi_url=None)
     hub = Hub()
     results: dict[str, dict[str, Any]] = {}
+    by_id: dict[str, asyncio.Task[None]] = {}  # running tasks, so the dashboard can stop one
     running: set[asyncio.Task[None]] = set()
     bearer = HTTPBearer(auto_error=False)
 
@@ -119,14 +120,29 @@ def create_app(c: Container, token: str) -> FastAPI:
         results[req.id] = {"task_id": req.id, "status": "running"}
 
         async def work() -> None:
-            res = await c.submit(req)
+            try:
+                res = await c.submit(req)
+            except asyncio.CancelledError:
+                # Stopped from the dashboard: nothing more runs for this task (clean-up already ran).
+                res = TaskResult(req.id, "cancelled", "Stopped. I won't do anything more for this request.")
             results[req.id] = _result_json(res)
             await hub.broadcast({"type": "result", "result": results[req.id]})
 
-        t = asyncio.create_task(work())
+        t = asyncio.create_task(work(), name=f"task-{req.id}")
         running.add(t)
+        by_id[req.id] = t
         t.add_done_callback(running.discard)
+        t.add_done_callback(lambda _: by_id.pop(req.id, None))
         return {"task_id": req.id}
+
+    @app.post("/api/tasks/{task_id}/cancel", dependencies=[Depends(auth)])
+    async def cancel_task(task_id: str) -> dict[str, bool]:
+        t = by_id.get(task_id)
+        if t is None or t.done():
+            return {"ok": False}
+        c.audit.record("task.cancel_requested", task=task_id)
+        t.cancel()
+        return {"ok": True}
 
     @app.get("/api/tasks/{task_id}", dependencies=[Depends(auth)])
     async def get_task(task_id: str) -> dict[str, Any]:
@@ -217,6 +233,16 @@ def create_app(c: Container, token: str) -> FastAPI:
     register_setup(app, c, auth)
     register_settings(app, c, auth)
     register_apps(app, c, auth)
+
+    @app.get("/api/runs/unfinished", dependencies=[Depends(auth)])
+    async def unfinished_run() -> dict[str, Any]:
+        proof = c.orchestrator.proof
+        return {"run": proof.unfinished() if proof else None}
+
+    @app.post("/api/runs/{task_id}/dismiss", dependencies=[Depends(auth)])
+    async def dismiss_run(task_id: str) -> dict[str, bool]:
+        proof = c.orchestrator.proof
+        return {"ok": bool(proof and proof.close_unfinished(task_id))}
 
     @app.get("/api/runs/{task_id}", dependencies=[Depends(auth)])
     async def run_proof(task_id: str) -> dict[str, Any]:

@@ -28,6 +28,10 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#fff}bu
 .app .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .app .state{font-size:12px}.app .state.bad{color:var(--muted)}
 .app .row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.app button{padding:3px 10px;font-size:12px}
+.checklist{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:4px 0 8px;font-size:13px}
+.chead{font-weight:600;margin-bottom:4px}.citem{color:var(--muted);padding:1px 0}.citem span{display:inline-block;width:16px}
+.citem.done{color:var(--ink)}.citem.done span{color:var(--ok)}
+.stopbtn{margin:4px 0 8px;padding:4px 12px;border-radius:999px;border:1px solid var(--bad);color:var(--bad);background:none;cursor:pointer;font-size:12px}
 .qopts{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 12px}
 .qopts button{padding:6px 14px;border-radius:999px;border:1px solid var(--accent);background:none;color:var(--ink);cursor:pointer}
 .qopts button:hover{background:var(--accent);color:#fff}
@@ -232,7 +236,7 @@ async function refreshStatus() {
 function renderApproval(a) {
   if (document.querySelector(`[data-approval="${a.id}"]`)) return;
   $("approvals").querySelector(".empty")?.remove();
-  const c = document.createElement("div"); c.className = "card"; c.dataset.approval = a.id;
+  const c = document.createElement("div"); c.className = "card"; c.dataset.approval = a.id; if (a.task_id) c.dataset.task = a.task_id;
   c.innerHTML = `<b></b><div class="why"></div><div class="row"><button class="primary">Approve</button><button>Deny</button></div>`;
   c.querySelector("b").textContent = a.summary; c.querySelector(".why").textContent = `${a.risk} · ${a.reason}`;
   const [yes, no] = c.querySelectorAll("button");
@@ -240,6 +244,57 @@ function renderApproval(a) {
   yes.onclick = () => answer(true); no.onclick = () => answer(false);
   $("approvals").appendChild(c);
   if (document.hidden && "Notification" in window && Notification.permission === "granted") new Notification("Delta needs approval", {body: a.summary});
+}
+// A task Delta was doing when it (or the PC) stopped: offer to resume. Never resumed silently:
+// a half-done task may already have sent something.
+async function checkInterrupted() {
+  const u = await api("/api/runs/unfinished").catch(() => null); const run = u && u.run; if (!run) return;
+  const done = (run.steps || []).filter(s => s.ok).map(s => s.tool);
+  const box = document.createElement("div"); box.className = "checklist";
+  box.innerHTML = '<div class="chead">I was interrupted while working on this:</div><div class="citem"></div><div class="citem"></div><div class="row" style="margin-top:6px;display:flex;gap:8px"><button class="primary">Resume</button><button>Dismiss</button></div>';
+  const [req, steps] = box.querySelectorAll(".citem");
+  req.textContent = "“" + run.request + "”"; steps.textContent = done.length ? `${done.length} step(s) were already done: ${done.join(", ")}` : "No steps had finished yet.";
+  const [resume, dismiss] = box.querySelectorAll("button");
+  const close = () => api(`/api/runs/${run.task_id}/dismiss`, {method: "POST"}).catch(() => {}).finally(() => box.remove());
+  dismiss.onclick = close;
+  resume.onclick = async () => {
+    await close();
+    $("text").value = done.length ? `${run.request} (resume: these steps already ran before you stopped: ${done.join(", ")}; check the current state before doing anything again)` : run.request;
+    $("send").requestSubmit();
+  };
+  $("log").appendChild(box);
+}
+
+// The plan as a live checklist: each tool call ticks the first open step that names it.
+const lists = {};
+function showChecklist(taskId, plan) {
+  const steps = (plan.steps || []).filter(Boolean); if (!steps.length) return;
+  const box = document.createElement("div"); box.className = "checklist";
+  const head = document.createElement("div"); head.className = "chead";
+  head.textContent = plan.replay ? `Using learned skill: ${plan.replay}` : (plan.goal || "Plan");
+  box.appendChild(head);
+  const items = steps.map(s => { const r = document.createElement("div"); r.className = "citem"; r.innerHTML = "<span>○</span> "; r.append(s); box.appendChild(r); return {el: r, text: s.toLowerCase(), done: false}; });
+  lists[taskId] = items; $("log").appendChild(box); box.scrollIntoView({block: "end"});
+}
+function tickStep(taskId, tool) {
+  const items = lists[taskId]; if (!items) return;
+  const i = items.findIndex(it => !it.done && it.text.includes(tool.toLowerCase()));
+  if (i === -1) return;
+  for (let k = 0; k <= i; k++) if (!items[k].done) { items[k].done = true; items[k].el.classList.add("done"); items[k].el.firstChild.textContent = "✓"; }
+}
+function tickAll(taskId) { (lists[taskId] || []).forEach(it => { it.done = true; it.el.classList.add("done"); it.el.firstChild.textContent = "✓"; }); }
+
+// While a task runs, a Stop button cancels it (approvals it was waiting on are withdrawn too).
+const stops = {};
+function showStop(taskId) {
+  const b = document.createElement("button"); b.className = "stopbtn"; b.textContent = "■ Stop";
+  b.title = "Stop this task now";
+  b.onclick = async () => { b.disabled = true; b.textContent = "Stopping…"; await api(`/api/tasks/${taskId}/cancel`, {method: "POST"}).catch(() => {}); };
+  stops[taskId] = b; $("log").appendChild(b); b.scrollIntoView({block: "end"});
+}
+function taskEnded(taskId) {
+  stops[taskId]?.remove(); delete stops[taskId];
+  document.querySelectorAll(`[data-task="${taskId}"]`).forEach(c => dropApproval(c.dataset.approval));
 }
 function dropApproval(id) {
   document.querySelector(`[data-approval="${id}"]`)?.remove();
@@ -341,6 +396,7 @@ function connect() {
     if (m.type === "approval") renderApproval(m.approval);
     else if (m.type === "result") {
       const r = m.result;
+      taskEnded(r.task_id);
       const t = r.tokens || {}, k = n => n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
       const cost = t.calls ? ` · ${t.calls} AI calls · ${k((t.input || 0) + (t.output || 0))} tokens${t.cached ? " (+" + k(t.cached) + " cached)" : ""}` : "";
       add("msg" + (r.status === "done" || r.status === "needs_user" ? "" : " failed"), (r.status === "needs_user" ? "❓ " : "") + r.answer, `${r.status}${r.provider ? " · via " + r.provider : ""}${r.attempts ? " · " + r.attempts + " attempt(s)" : ""}${cost}`);
@@ -349,8 +405,9 @@ function connect() {
       refreshMemory();
     } else if (m.type === "event") {
       const d = m.data;
-      if (m.event === "task.plan" && d.plan.needs_tools) add("step", "plan: " + (d.plan.steps || []).join(" → "));
-      if (m.event === "task.step") add("step", "· " + d.tool + " " + JSON.stringify(d.args).slice(0, 140));
+      if (m.event === "task.plan" && d.plan.needs_tools) showChecklist(d.task_id, d.plan);
+      if (m.event === "task.step") { tickStep(d.task_id, d.tool); if (!(d.args && d.args.auto)) add("step", "· " + d.tool + " " + JSON.stringify(d.args).slice(0, 140)); }
+      if (m.event === "task.verify" && d.passed) tickAll(d.task_id);
       if (m.event === "chat.replied") add("step ok", `💬 replied to ${d.person} on ${d.app}: “${d.text}”`);
       if (m.event === "chat.skipped") add("step", `💬 you skipped a reply to ${d.person}: “${d.text}”`);
       if (m.event === "chat.handoff") { add("step bad", `✋ stopped chatting with ${d.person} (${d.app}): ${d.reason}. Please reply yourself.`); if (window.Notification && Notification.permission === "granted") new Notification(`Delta: ${d.person} needs you`, {body: d.reason}); }
@@ -377,7 +434,8 @@ function connect() {
 $("send").onsubmit = async e => {
   e.preventDefault(); const text = $("text").value.trim(); if (!text) return;
   $("text").value = ""; add("msg me", text);
-  await api("/api/tasks", {method: "POST", body: JSON.stringify({text})}).catch(err => add("msg failed", "Could not reach Delta: " + err.message));
+  const started = await api("/api/tasks", {method: "POST", body: JSON.stringify({text})}).catch(err => { add("msg failed", "Could not reach Delta: " + err.message); return null; });
+  if (started && started.task_id) showStop(started.task_id);
 };
 $("text").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("send").requestSubmit(); } };
 $("addmem").onsubmit = e => { e.preventDefault(); const t = $("memtext").value.trim(); if (!t) return; $("memtext").value = "";
@@ -630,7 +688,7 @@ $("s_save").onclick = async () => {
 api("/api/setup").then(s => { if (!s.completed) openSetup(); }).catch(() => {});
 
 if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-refreshStatus(); refreshMemory(); refreshSkills(); refreshLearned(); connect(); api("/api/approvals").then(a => a.forEach(renderApproval)).catch(() => {});
+checkInterrupted(); refreshStatus(); refreshMemory(); refreshSkills(); refreshLearned(); connect(); api("/api/approvals").then(a => a.forEach(renderApproval)).catch(() => {});
 setInterval(() => { if (!document.hidden) refreshStatus(); }, 5000);
 add("msg", "Hi, I'm Delta. Tell me what to do. Anything risky will show up on the right for your approval.");
 </script>

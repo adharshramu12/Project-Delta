@@ -78,3 +78,23 @@ async def test_checkpoints_decide_even_if_the_overall_flag_disagrees():
     router = ModelRouter({"g": TextOnly("g", [reply])}, {"verify": ["g"]})
     v = await verify(router, "play", PLAN, STEPS, "done")
     assert v.passed and v.missing == [] and "All checkpoints" in v.raw
+
+
+def test_an_interrupted_run_is_offered_once_with_its_progress(tmp_path):
+    rec = ProofRecorder(tmp_path)
+    rec.start("crashed1", "send the report to Ravi")
+    rec.checkpoint([StepRecord("open_app", {}, True, "opened", {}), StepRecord("type_text", {}, False, "x", {})])
+    rec.dir = None  # Delta stopped here: finish() never ran
+    other = ProofRecorder(tmp_path)  # next start of Delta
+    run = other.unfinished()
+    assert run["request"] == "send the report to Ravi"
+    assert [s["tool"] for s in run["steps"]] == ["open_app", "type_text"]
+    assert other.close_unfinished("crashed1") and other.unfinished() is None  # offered only once
+    assert not other.close_unfinished("../etc")  # ids are checked
+
+
+def test_finished_runs_are_never_offered(tmp_path):
+    rec = ProofRecorder(tmp_path)
+    rec.start("ok1", "x")
+    rec.finish(TaskResult("ok1", "done", "fine"))
+    assert rec.unfinished() is None

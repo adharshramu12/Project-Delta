@@ -42,6 +42,42 @@ class ProofRecorder:
         (self.dir / name).write_bytes(base64.b64decode(b64_jpeg))
         return name
 
+    def checkpoint(self, steps: list[Any]) -> None:
+        """Progress so far (after every step), so an interrupted run can be shown and resumed."""
+        if self.dir is None:
+            return
+        rows = [{"tool": s.tool, "ok": s.ok, "output": s.output[:300]} for s in steps]
+        tmp = self.dir / "progress.tmp"
+        tmp.write_text(json.dumps(rows, default=str), encoding="utf-8")
+        tmp.replace(self.dir / "progress.json")  # atomic: a crash never leaves half a file
+
+    def unfinished(self, max_age_s: float = 86400) -> dict[str, Any] | None:
+        """The newest run that started but never finished (Delta or the PC stopped mid-task)."""
+        if not self.root.is_dir():
+            return None
+        runs = sorted((p for p in self.root.iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
+        for d in runs[:5]:
+            if (d / "run.json").exists() or not (d / "request.txt").exists() or d == self.dir:
+                continue
+            if time.time() - d.stat().st_mtime > max_age_s:
+                return None
+            steps = []
+            if (d / "progress.json").exists():
+                try:
+                    steps = json.loads((d / "progress.json").read_text(encoding="utf-8"))
+                except ValueError:
+                    steps = []
+            return {"task_id": d.name, "request": (d / "request.txt").read_text(encoding="utf-8"), "steps": steps}
+        return None
+
+    def close_unfinished(self, task_id: str) -> bool:
+        """Mark an interrupted run as handled (resumed or dismissed), so it is offered only once."""
+        d = self.root / task_id
+        if not task_id.isalnum() or not (d / "request.txt").exists() or (d / "run.json").exists():
+            return False
+        (d / "run.json").write_text(json.dumps({"task_id": task_id, "status": "interrupted"}), encoding="utf-8")
+        return True
+
     def finish(self, result: Any) -> None:
         if self.dir is None:
             return

@@ -209,6 +209,13 @@ class Orchestrator:
             result = await self._run(req)
         except LLMError as e:
             result = TaskResult(req.id, "failed", friendly_model_error(e))
+        except asyncio.CancelledError:
+            # Stopped by the user: close the run record and tell the UI, then let the cancel finish.
+            self.audit.record("task.end", task=req.id, status="cancelled", attempts=0)
+            if self.proof:
+                self.proof.finish(TaskResult(req.id, "cancelled", "Stopped by the user."))
+            await self.events.publish("task.finished", task_id=req.id, status="cancelled", answer="Stopped.")
+            raise
         finally:
             self.executor.forget_task(req.id)
             await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
@@ -531,6 +538,8 @@ class Orchestrator:
                 await self.events.publish("task.step", task_id=req.id, tool=call.name, args=call.arguments)
                 result = await self.executor.execute(call.name, call.arguments, task_id=req.id)
                 steps.append(StepRecord(call.name, call.arguments, result.ok, result.output[:2000], result.evidence))
+                if self.proof:
+                    self.proof.checkpoint(steps)
                 if result.evidence.get("user_denied"):
                     # A human "no" ends the task: no workarounds, no retries, no second question.
                     return "", (f"OK, I didn't do it. You declined: {result.evidence.get('denied_action', call.name)}. "

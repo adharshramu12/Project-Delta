@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from fakes import FakeProvider, call, js, text
 from pydantic import BaseModel
 
@@ -311,3 +312,36 @@ async def test_unknown_argument_names_are_rejected_with_a_hint(tmp_path):
     from delta.tools.meetings import ScheduleArgs
     assert unknown_arguments(ScheduleArgs, {"title": "t", "start": "s", "attendees": []}) == ""  # an alias
     assert "did you mean 'guests'" in unknown_arguments(ScheduleArgs, {"title": "t", "start": "s", "guest": []})
+
+
+async def test_stopping_a_task_closes_its_record_and_tells_the_ui(tmp_path):
+    import asyncio
+
+    from delta.core.proof import ProofRecorder
+
+    class Slow(Tool[Args]):
+        name, description, risk, Args = "slow_tool", "slow", Risk.READ, Args
+
+        async def run(self, args):
+            await asyncio.sleep(30)
+            return ToolResult(True, "never")
+
+    seen: list = []
+    plan = js({"needs_tools": True, "goal": "x", "steps": ["x"], "tools": ["slow_tool"], "success_criteria": ["x"]})
+    orch, _ = make(tmp_path, "claude_code", {"plan": [plan], "chat": [call("slow_tool", target="x")]}, seen)
+    orch.executor.registry.register(Slow())
+    orch.proof = ProofRecorder(tmp_path / "runs")
+    finished = []
+    async def on_event(event, data):
+        if event == "task.finished":
+            finished.append((event, data.get("status")))
+
+    orch.events.subscribe(on_event)
+    req = TaskRequest("click x")
+    t = asyncio.create_task(orch.run(req))
+    await asyncio.sleep(0.2)
+    t.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t
+    assert ("task.finished", "cancelled") in finished
+    assert (tmp_path / "runs" / req.id / "run.json").exists()
