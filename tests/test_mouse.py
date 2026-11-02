@@ -85,3 +85,32 @@ async def test_scroll_goes_where_you_point_and_sideways(mouse):
     assert mouse.log == [("move", 900, 500), ("scroll", -600)]
     await s.run(ScrollArgs(amount=2, horizontal=True))
     assert mouse.log[-1] == ("hscroll", 240)
+
+
+def test_enter_inside_a_chat_app_counts_as_sending_a_message(monkeypatch):
+    from delta.tools.desktop import KeysArgs, PressKeys, TypeArgs, TypeText
+
+    monkeypatch.setattr(desktop, "_title_at", lambda x, y: "WhatsApp")
+    monkeypatch.setattr(desktop, "_title_of", lambda window: "WhatsApp")
+    batch = ActionsArgs(steps=[Step(action="click", x=1202, y=973), Step(action="type", text="test from Delta"),
+                               Step(action="keys", keys=["enter"])])
+    t = DoActions.__new__(DoActions)
+    assert t.risk_for(batch) == Risk.EXTERNAL
+    assert t.summary(batch) == "SEND a message in WhatsApp: “test from Delta” (by clicking and typing)"
+    typer = TypeText.__new__(TypeText)
+    assert typer.risk_for(TypeArgs(text="hi\n")) == Risk.EXTERNAL
+    assert PressKeys.__new__(PressKeys).risk_for(KeysArgs(keys=["enter"])) == Risk.EXTERNAL
+
+
+def test_enter_elsewhere_stays_a_normal_write(monkeypatch):
+    monkeypatch.setattr(desktop, "_title_at", lambda x, y: "Untitled - Notepad")
+    monkeypatch.setattr(desktop, "_title_of", lambda window: "Untitled - Notepad")
+    batch = ActionsArgs(steps=[Step(action="click", x=1, y=1), Step(action="keys", keys=["enter"])])
+    assert DoActions.__new__(DoActions).risk_for(batch) == Risk.WRITE
+
+
+def test_chat_apps_are_recognised_by_title():
+    from delta.tools.desktop import messaging_app
+
+    assert messaging_app("WhatsApp") == "WhatsApp" and messaging_app("Telegram (5201)") == "Telegram"
+    assert messaging_app("Slack (DM) - Ravi - Slack") == "Slack" and messaging_app("Notepad") is None

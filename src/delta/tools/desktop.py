@@ -296,6 +296,49 @@ def _send_unicode(text: str) -> None:
         time.sleep(0.01)  # WinUI apps (new Notepad) drop keys that arrive faster than this
 
 
+# --- messaging apps: Enter there SENDS a message ------------------------------------------------
+# A raw click + type + Enter in WhatsApp/Telegram/Slack is a message to another person, so it gets
+# the same approval as send_message (EXTERNAL) and an approval card that says so in plain words.
+
+def messaging_app(title: str) -> str | None:
+    t = title.strip()
+    if t == "WhatsApp":
+        return "WhatsApp"
+    if t.startswith("Telegram"):
+        return "Telegram"
+    if t == "Slack" or t.endswith("- Slack"):
+        return "Slack"
+    return None
+
+
+def _title_at(x: int, y: int) -> str:
+    try:
+        import win32gui
+
+        return str(win32gui.GetWindowText(win32gui.GetAncestor(win32gui.WindowFromPoint((x, y)), 2)))
+    except Exception:
+        return ""
+
+
+def _title_of(window: str | None) -> str:
+    """The title of the named window, or of the one in front."""
+    try:
+        import win32gui
+
+        if window:
+            from delta.tools.screen import find_window_handle
+
+            h = find_window_handle(window)
+            return str(win32gui.GetWindowText(h)) if h else window
+        return str(win32gui.GetWindowText(win32gui.GetForegroundWindow()))
+    except Exception:
+        return window or ""
+
+
+def _presses_enter(keys: list[str] | None) -> bool:
+    return bool({k.lower() for k in keys or []} & {"enter", "return"})
+
+
 def click_risk(name: str) -> Risk:
     if DELETY.search(name):
         return Risk.DESTRUCTIVE
@@ -486,11 +529,16 @@ class TypeText(_DesktopTool[TypeArgs]):
     def risk_for(self, args: TypeArgs) -> Risk:
         # A newline is an Enter key press: it can submit a form or send a message, so it needs
         # the same approval as press_keys Enter (typing "hi\n" must not slip past it).
-        return Risk.WRITE if "\n" in args.text or "\r" in args.text else Risk.ACT
+        if "\n" not in args.text and "\r" not in args.text:
+            return Risk.ACT
+        return Risk.EXTERNAL if messaging_app(_title_of(args.window)) else Risk.WRITE
 
     def summary(self, args: TypeArgs) -> str:
-        enter = " and press Enter" if "\n" in args.text or "\r" in args.text else ""
-        return f"type {len(args.text)} chars{enter}" + (f" into {args.window}" if args.window else "")
+        enter = "\n" in args.text or "\r" in args.text
+        if enter and (app := messaging_app(_title_of(args.window))):
+            return f"SEND a message in {app}: \u201c{args.text.strip()}\u201d"
+        return f"type {len(args.text)} chars{' and press Enter' if enter else ''}" + (
+            f" into {args.window}" if args.window else "")
 
     async def run(self, args: TypeArgs) -> ToolResult:
         def go() -> str:
@@ -527,12 +575,16 @@ class PressKeys(_DesktopTool[KeysArgs]):
         if k & {"delete", "del"} or {"shift", "delete"} <= k:
             return Risk.DESTRUCTIVE
         if "enter" in k or "return" in k:
+            if messaging_app(_title_of(getattr(args, "window", None))):
+                return Risk.EXTERNAL  # Enter in a chat app sends whatever is typed there
             return Risk.WRITE  # Enter can submit forms/messages: needs approval in ask-risky
         if {"alt", "f4"} <= k or {"ctrl", "w"} <= k:
             return Risk.WRITE  # closing things can lose unsaved work
         return Risk.ACT
 
     def summary(self, args: KeysArgs) -> str:
+        if _presses_enter(args.keys) and (app := messaging_app(_title_of(args.window))):
+            return f"press Enter in {app} (this SENDS whatever is typed in the chat)"
         return "press " + "+".join(args.keys)
 
     async def run(self, args: KeysArgs) -> ToolResult:
@@ -694,6 +746,8 @@ class DoActions(_DesktopTool[ActionsArgs]):
         """The riskiest step decides: a batch can't slip an Enter or Delete past the approval rules."""
         order = [Risk.READ, Risk.ACT, Risk.WRITE, Risk.EXTERNAL, Risk.DESTRUCTIVE]
         worst = Risk.ACT
+        if self._sends_in(args):
+            worst = Risk.EXTERNAL
         for s in args.steps:
             if s.action == "type" and s.text and ("\n" in s.text or "\r" in s.text):
                 r = Risk.WRITE
@@ -704,7 +758,20 @@ class DoActions(_DesktopTool[ActionsArgs]):
             worst = max(worst, r, key=order.index)
         return worst
 
+    @staticmethod
+    def _sends_in(args: ActionsArgs) -> str | None:
+        """The chat app this batch sends a message in (it presses Enter there), if any."""
+        enter = any((s.action == "keys" and _presses_enter(s.keys)) or
+                    (s.action == "type" and s.text and ("\n" in s.text or "\r" in s.text)) for s in args.steps)
+        if not enter:
+            return None
+        point = next(((s.x, s.y) for s in args.steps if s.x is not None and s.y is not None), None)
+        return messaging_app(_title_at(*point) if point else _title_of(None))
+
     def summary(self, args: ActionsArgs) -> str:
+        if app := self._sends_in(args):
+            typed = " ".join(s.text or "" for s in args.steps if s.action == "type").strip()
+            return f"SEND a message in {app}: \u201c{typed}\u201d (by clicking and typing)"
         parts = []
         for s in args.steps:
             if s.action == "type":

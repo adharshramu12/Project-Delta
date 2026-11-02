@@ -145,3 +145,51 @@ def test_stop_chatting_is_an_instant_command():
 
     assert match_intent("stop chatting", {"chat_for_me"}).args == {"stop": True}
     assert match_intent("stop chatting with Priya", {"chat_for_me"}).args == {"stop": True, "person": "Priya"}
+
+
+class FakeBox:
+    def __init__(self, keeps_text):
+        self.value, self.keeps_text = "", keeps_text
+
+    def click_input(self):
+        pass
+
+    def has_keyboard_focus(self):
+        return self.keeps_text
+
+    @property
+    def iface_value(self):
+        return type("V", (), {"CurrentValue": self.value})()
+
+
+def wired(monkeypatch, box):
+    pressed = []
+    d = apps.WhatsAppDriver()
+    monkeypatch.setattr(d, "open_app", lambda: None)
+    monkeypatch.setattr(d, "_edits", lambda w: (None, box))
+    monkeypatch.setattr(apps.time, "sleep", lambda s: None)
+
+    def type_(text):
+        if box.keeps_text:
+            box.value += text
+
+    def press(keys):
+        pressed.append(keys)
+        if keys == "{ENTER}":
+            box.value = ""  # WhatsApp clears the box when it sends
+    monkeypatch.setattr(apps, "_type", type_)
+    monkeypatch.setattr(apps, "_press", press)
+    return d, pressed
+
+
+def test_enter_is_never_pressed_if_the_text_missed_the_message_box(monkeypatch):
+    d, pressed = wired(monkeypatch, FakeBox(keeps_text=False))
+    with pytest.raises(apps.MessagingError, match="nothing was sent"):
+        d.send_text("test from Delta \U0001F44B")
+    assert "{ENTER}" not in pressed
+
+
+def test_send_is_confirmed_when_the_box_empties(monkeypatch):
+    d, pressed = wired(monkeypatch, FakeBox(keeps_text=True))
+    assert d.send_text("test from Delta \U0001F44B") is True
+    assert pressed[-1] == "{ENTER}"

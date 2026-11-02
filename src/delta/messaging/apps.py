@@ -96,6 +96,20 @@ def _type(text: str) -> None:
             _send_unicode(line)
 
 
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def _value(element: Any) -> str:
+    try:
+        return str(element.iface_value.CurrentValue or "")
+    except Exception:
+        try:
+            return str(element.window_text() or "")
+        except Exception:
+            return ""
+
+
 def _press(keys: str) -> None:
     from pywinauto.keyboard import send_keys
 
@@ -153,24 +167,30 @@ class _SearchListDriver(AppDriver):
     """WhatsApp and Telegram: a named search box, results as list items, a message box."""
 
     search_names: tuple[str, ...] = ()
+    compose_names: tuple[str, ...] = ()  # the message box, found ONLY by its own name
     result_types: tuple[str, ...] = ("DataItem", "ListItem")
 
     def _edits(self, w: Any) -> tuple[Any | None, Any | None]:
-        search = compose = None
+        """(search box, message box). The message box is matched by name only: once text is typed,
+        WhatsApp's search box loses its name, and typing a message into it must never happen."""
+        search = compose = unnamed = None
         for e in w.descendants(control_type="Edit"):
             n = (e.element_info.name or "").strip()
-            if any(n.startswith(s) for s in self.search_names):
-                search = search or e
-            elif e.is_visible():
+            if compose is None and any(n.startswith(c) for c in self.compose_names) and e.is_visible():
                 compose = e
-        return search, compose
+            elif search is None and any(n.startswith(s) for s in self.search_names):
+                search = e
+            elif unnamed is None and not n and e.is_visible():
+                unnamed = e  # WhatsApp's search box once it holds text
+        return search or unnamed, compose
 
     def open_chat(self, person: str) -> str:
         w = self.open_app()
         search, _ = self._edits(w)
         if search is None:
             raise MessagingError(f"Could not find {self.label}'s search box.")
-        search.set_focus()
+        search.click_input()  # a click: Windows may refuse a plain focus request
+        time.sleep(0.2)
         _press("^a{BACKSPACE}")
         _type(person)
         time.sleep(2.2)
@@ -189,21 +209,38 @@ class _SearchListDriver(AppDriver):
         raise MessagingError(f"Opened '{chat}' in {self.label} but no message box appeared.")
 
     def send_text(self, text: str) -> bool:
+        """Type into the chat's message box and send. Enter is pressed ONLY after the text is
+        confirmed inside that box: if Windows kept focus elsewhere, the keys would land in another
+        app, and Enter there could do anything. Sent = the box empties, as both apps do on send."""
         w = self.open_app()
         _, compose = self._edits(w)
         if compose is None:
             raise MessagingError(f"No open chat in {self.label} to type into.")
-        compose.set_focus()
+        compose.click_input()  # a real click: focus requests can be refused by Windows, clicks are not
+        time.sleep(0.3)
+        _press("^a{BACKSPACE}")
         _type(text)
+        time.sleep(0.4)
+        snippet = _norm(text)[:40]
+        if snippet not in _norm(_value(compose)):
+            if self._has_focus(compose):  # clear a half-typed draft, but never keys into another app
+                _press("^a{BACKSPACE}")
+            raise MessagingError(f"The text did not reach {self.label}'s message box (another window kept the "
+                                 "keyboard), so nothing was sent. Try again with the app in front.")
         _press("{ENTER}")
-        snippet = re.sub(r"\s+", " ", text.split("\n")[0]).strip()[:30].casefold()
         end = time.monotonic() + 5
-        while time.monotonic() < end:  # the sent message shows up in the chat
-            for e in w.descendants(control_type="ListItem"):
-                if snippet and snippet in re.sub(r"\s+", " ", e.element_info.name or "").casefold():
-                    return True
-            time.sleep(0.7)
+        while time.monotonic() < end:
+            if snippet not in _norm(_value(compose)):
+                return True
+            time.sleep(0.4)
         return False
+
+    @staticmethod
+    def _has_focus(element: Any) -> bool:
+        try:
+            return bool(element.has_keyboard_focus())
+        except Exception:
+            return False
 
     def read(self, count: int = 15) -> list[str]:
         w = self.open_app()
@@ -215,6 +252,7 @@ class _SearchListDriver(AppDriver):
 class WhatsAppDriver(_SearchListDriver):
     name, label = "whatsapp", "WhatsApp"
     search_names = ("Search or start a new chat", "Search")
+    compose_names = ("Type a message",)
 
     def _is_mine(self, title: str) -> bool:
         return title.strip() == "WhatsApp"
@@ -226,6 +264,7 @@ class WhatsAppDriver(_SearchListDriver):
 class TelegramDriver(_SearchListDriver):
     name, label = "telegram", "Telegram"
     search_names = ("Search",)
+    compose_names = ("Write a message", "Message", "Type a message")
 
     def _is_mine(self, title: str) -> bool:
         return title.startswith("Telegram")
