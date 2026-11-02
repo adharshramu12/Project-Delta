@@ -278,7 +278,11 @@ function showChecklist(taskId, plan) {
 }
 function tickStep(taskId, tool) {
   const items = lists[taskId]; if (!items) return;
-  const i = items.findIndex(it => !it.done && it.text.includes(tool.toLowerCase()));
+  let i = items.findIndex(it => !it.done && it.text.includes(tool.toLowerCase()));
+  // Plans written in plain words ("open Notepad") name no tool: then each action (not a read
+  // or a check) moves the list on by one step; the last step waits for the final check.
+  const looking = /^(read_|list_|look_|browser_read|media_status|path_info|recall|screenshot)/.test(tool);
+  if (i === -1 && !looking) { i = items.findIndex(it => !it.done); if (i === items.length - 1) i = -1; }
   if (i === -1) return;
   for (let k = 0; k <= i; k++) if (!items[k].done) { items[k].done = true; items[k].el.classList.add("done"); items[k].el.firstChild.textContent = "✓"; }
 }

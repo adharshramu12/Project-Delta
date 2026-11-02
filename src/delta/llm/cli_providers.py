@@ -17,6 +17,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -166,9 +167,16 @@ class CLIProvider:
             if code != 0:
                 raise self._error(stderr or stdout, code)
             content = self.reply(stdout, out_file)
+            usage = self.usage(stdout, stderr)
         if tools:  # json_mode alone: the caller parses its own JSON (e.g. the planner)
-            return parse_prompt_tools(content, self.name, model or "default")
-        return LLMResponse(content=content, provider=self.name, model=model or "default")
+            resp = parse_prompt_tools(content, self.name, model or "default")
+            resp.usage = usage
+            return resp
+        return LLMResponse(content=content, provider=self.name, model=model or "default", usage=usage)
+
+    def usage(self, stdout: str, stderr: str) -> dict[str, int]:
+        """Token counts the CLI printed, for the per-task meter ({} if it printed none)."""
+        return {}
 
     async def _run(self, cmd: list[str], prompt: str, cwd: str) -> tuple[str, str, int]:
         env = {**os.environ, "NO_COLOR": "1"}
@@ -485,6 +493,12 @@ class CodexProvider(CLIProvider):
         if effort:
             cmd += ["-c", f"model_reasoning_effort={effort}"]
         return [*cmd, "--", "-"]  # "-": read the prompt from stdin ("--": not another image)
+
+    def usage(self, stdout: str, stderr: str) -> dict[str, int]:
+        """`codex exec` ends with 'tokens used' and the total (e.g. '2,658'): count it as input+output,
+        since this mode does not split them."""
+        m = re.search(r"tokens used\s*[:\n\r ]\s*([\d,]+)", f"{stderr}\n{stdout}", re.I)
+        return {"input": int(m.group(1).replace(",", ""))} if m else {}
 
     def reply(self, stdout: str, out_file: Path) -> str:
         if out_file.is_file():

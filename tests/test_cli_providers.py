@@ -291,3 +291,22 @@ def test_codex_effort_and_model_list(tmp_path, monkeypatch):
         {"slug": "internal", "visibility": "hide"}]}), encoding="utf-8")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     assert p.model_options() == [{"id": "gpt-6-luna", "label": "GPT-6 Luna", "efforts": ["low", "high"]}]
+
+
+def test_codex_token_count_is_read_from_its_output():
+    p = cli(CodexProvider)
+    assert p.usage("", "...\ntokens used\n2,658\n") == {"input": 2658}
+    assert p.usage("tokens used: 912", "") == {"input": 912}
+    assert p.usage("no count here", "") == {}
+
+
+async def test_codex_reply_carries_its_token_count(tmp_path):
+    p = cli(CodexProvider)
+    p.cfg.models = {"chat": ""}
+
+    async def run(cmd, prompt, cwd):
+        Path(cmd[cmd.index("--output-last-message") + 1]).write_text("hello", encoding="utf-8")
+        return "", "tokens used\n1,234\n", 0
+
+    p._run = run
+    assert (await p.complete("chat", [{"role": "user", "content": "hi"}], None)).usage == {"input": 1234}
