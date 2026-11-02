@@ -2,8 +2,8 @@
 # One click starts Delta with no console window and opens the dashboard; clicking again
 # while it runs just reopens the dashboard. Stop it with the dashboard's Shutdown button.
 $root = Split-Path $PSScriptRoot -Parent
-$pythonw = Join-Path $root ".venv\Scripts\pythonw.exe"
-if (-not (Test-Path $pythonw)) { throw "Run 'uv sync --extra all' first." }
+$python = Join-Path $root ".venv\Scripts\python.exe"
+if (-not (Test-Path $python)) { throw "Run 'uv sync --extra all' first." }
 
 $shell = New-Object -ComObject WScript.Shell
 $targets = @(
@@ -12,8 +12,8 @@ $targets = @(
 )
 foreach ($path in $targets) {
     $lnk = $shell.CreateShortcut($path)
-    $lnk.TargetPath = $pythonw
-    $lnk.Arguments = "-m delta app"
+    $lnk.TargetPath = Join-Path $env:WINDIR "System32\wscript.exe"
+    $lnk.Arguments = "`"" + (Join-Path $root "scripts\delta.vbs") + "`""
     $lnk.WorkingDirectory = $root
     $lnk.Description = "Delta personal AI agent"
     $icon = Join-Path $root "src\delta\api\static\delta.ico"
