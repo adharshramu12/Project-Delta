@@ -79,6 +79,18 @@ loop attempts ≤ max_attempts:
 - **Interrupted runs.** A run with progress but no `run.json` (Delta or the PC stopped) is offered once on the next start: *Resume* (with the finished steps listed, so nothing is repeated blindly) or *Dismiss*. Never resumed silently, because a half-done task may already have sent something.
 - **Live checklist.** The plan's steps are shown as a checklist; each tool call ticks the step that names it; a passed verification ticks the rest. No tokens.
 
+## Chats
+
+The dashboard has separate chats, like Claude's sidebar (`memory/chats.py`, `chats.db` on this PC).
+Each request carries a bounded recap of its own chat's last few turns (at most ~1.6k characters,
+newest first, long messages clipped) as `TaskRequest.history`; the planner, the agent and the
+verifier read `with_context`, while instant commands and skill matching read the bare request.
+So follow-ups ("add 10 to that", "send it to him") work, a chat never sees another chat's turns,
+and a long chat costs no more per request than a short one. Memory, learned skills, approvals
+and the audit log are shared by all chats. Greetings and thanks are answered on the spot (0 tokens)
+and never name a chat. A chat's work keeps running when you switch away; the sidebar shows a
+pulsing dot while it works and a green dot when an answer is waiting.
+
 ## Token strategy
 | Waste | Fix |
 |---|---|

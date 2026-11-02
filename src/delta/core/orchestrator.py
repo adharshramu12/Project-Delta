@@ -260,7 +260,7 @@ class Orchestrator:
                        f"Documents: {known_folder('Personal')}. Home: {Path.home()}.")
         # Boot the acting model (Claude Code: ~6 s) while the plan is being made, not after.
         warm = asyncio.create_task(self.router.prewarm("chat"))
-        plan = await make_plan(self.router, req.text, self.executor.registry.names(), memory_ctx,
+        plan = await make_plan(self.router, req.with_context, self.executor.registry.names(), memory_ctx,
                                self.s.agent.name, known, environment)
         with contextlib.suppress(Exception):
             await warm
@@ -301,7 +301,7 @@ class Orchestrator:
             final = final.removeprefix(DONE).strip()
             await self._fresh_media_status(req.id, steps)
             shot, target = await self._final_screenshot(steps)
-            verification = await verify(self.router, req.text, plan, steps, final, shot, target)
+            verification = await verify(self.router, req.with_context, plan, steps, final, shot, target)
             await self.events.publish("task.verify", task_id=req.id, attempt=attempt,
                                       passed=verification.passed, reason=verification.reason,
                                       checks=verification.checks, screenshot=verification.screenshot)
@@ -395,7 +395,7 @@ class Orchestrator:
             criteria="\n".join(f"- {c}" for c in plan.success_criteria), memory=memory_ctx or "(nothing yet)",
             skill=(f"\nFOLLOW LEARNED SKILL #{skill.id} ({skill.name}), adapting it to this request:\n"
                    + "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(skill.procedure)) + "\n") if skill else "")
-        return [{"role": "system", "content": system}, {"role": "user", "content": req.text}]
+        return [{"role": "system", "content": system}, {"role": "user", "content": req.with_context}]
 
     def _brain(self) -> str:
         """The provider that will most likely answer: the main AI, else the first on the route."""

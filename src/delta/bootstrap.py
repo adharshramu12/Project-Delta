@@ -20,6 +20,7 @@ from delta.learning.store import Learned, LearningStore
 from delta.llm.cli_providers import ClaudeCodeProvider, CodexProvider
 from delta.llm.providers import OpenAICompatProvider, Provider, lmstudio_base_url
 from delta.llm.router import ModelRouter
+from delta.memory.chats import ChatStore
 from delta.memory.skills import SkillStore
 from delta.memory.store import MemoryStore
 from delta.memory.tools import memory_tools
@@ -89,6 +90,7 @@ class Container:
     closers: list[tuple[str, Callable[[], Awaitable[None]]]] = field(default_factory=list)
     addon_infos: list[Any] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)  # setup problems shown to the user, not just logged
+    chats: ChatStore | None = None  # separate conversations (dashboard sidebar)
 
     def warn(self, message: str) -> None:
         if message not in self.warnings:
@@ -114,6 +116,8 @@ class Container:
             self.approvals.deny_all()
             await self.orchestrator.drain()  # let in-flight learning finish before closing stores
             self.memory.close()
+            if self.chats:
+                self.chats.close()
             if self.orchestrator.skills:
                 self.orchestrator.skills.close()
             if self.orchestrator.learning:
@@ -235,4 +239,4 @@ def build(settings: Settings) -> Container:
 
     governor.on_change(on_health)
     return Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
-                     Lifecycle(data), asyncio.Semaphore(1), closers)
+                     Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"))
