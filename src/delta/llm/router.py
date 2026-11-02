@@ -8,9 +8,11 @@ providers that are (a) unconfigured, (b) circuit-broken after repeated failures,
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from delta.llm.providers import Provider
 from delta.llm.schemas import AllProvidersFailedError, LLMError, LLMResponse, Message
@@ -180,5 +182,8 @@ class ModelRouter:
                 await p.unload()
 
     async def unload_local(self) -> None:
-        for p in self.providers.values():
-            await p.unload()
+        """Free every provider at once; a provider that is not running must not hold shutdown up."""
+        async def one(p: Any) -> None:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(p.unload(), timeout=2)
+        await asyncio.gather(*(one(p) for p in self.providers.values()))

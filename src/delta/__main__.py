@@ -132,6 +132,9 @@ def _secrets(action: str, name: str | None) -> int:
 def main() -> None:
     # Old third-party code (pywinauto) emits SyntaxWarnings on Python 3.12; users should never see them.
     warnings.filterwarnings("ignore", category=SyntaxWarning)
+    no_console = sys.stdout is None  # started by double-click (pythonw): give libraries a sink to write to
+    if no_console:
+        sys.stdout = sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
     if os.name == "nt":
         os.system("")  # enable ANSI colours in classic consoles
         reconfigure = getattr(sys.stdout, "reconfigure", None)
@@ -143,6 +146,7 @@ def main() -> None:
     sub.add_parser("cli", help="interactive terminal")
     rp = sub.add_parser("run", help="background service: dashboard API + Telegram/Slack")
     rp.add_argument("--open", action="store_true", help="open the dashboard window")
+    sub.add_parser("app", help="open Delta (starts the service in the background if needed)")
     sub.add_parser("doctor", help="check setup")
     sp = sub.add_parser("secrets", help="manage API keys and tokens")
     sp.add_argument("action", choices=["set", "delete", "list"])
@@ -161,13 +165,22 @@ def main() -> None:
         good = AuditLog(load_settings().data_dir / "audit.jsonl").verify()
         print("audit chain intact" if good else "AUDIT CHAIN BROKEN: log was modified")
         sys.exit(0 if good else 1)
+    if args.cmd == "app":
+        from delta.daemon import launch_app
+
+        sys.exit(launch_app())
     if args.cmd == "run":
-        from delta.daemon import run
+        from delta.daemon import alert, run
 
         try:
             sys.exit(asyncio.run(run(open_ui=args.open)))
         except KeyboardInterrupt:
             sys.exit(0)
+        except Exception as e:
+            if no_console:  # started from the shortcut (pythonw): no console to print to
+                alert(f"Delta could not start:\n\n{e}\n\nRun 'delta doctor' in a terminal for details.")
+                sys.exit(1)
+            raise
     try:
         sys.exit(asyncio.run(_cli()))
     except KeyboardInterrupt:

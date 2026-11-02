@@ -127,7 +127,7 @@ def ensure_desktop_shortcut(folder: Path) -> Path | None:
     desktop = known_folder("Desktop")
     if folder.parent == desktop or not desktop.exists():
         return None
-    link = desktop / "Delta.lnk"
+    link = desktop / "Delta files.lnk"
     if link.exists():
         return link
     import subprocess

@@ -13,9 +13,11 @@ $targets = @(
 foreach ($path in $targets) {
     $lnk = $shell.CreateShortcut($path)
     $lnk.TargetPath = $pythonw
-    $lnk.Arguments = "-m delta run --open"
+    $lnk.Arguments = "-m delta app"
     $lnk.WorkingDirectory = $root
     $lnk.Description = "Delta personal AI agent"
+    $icon = Join-Path $root "src\delta\api\static\delta.ico"
+    if (Test-Path $icon) { $lnk.IconLocation = "$icon,0" }
     $lnk.Save()
     Write-Host "created $path"
 }

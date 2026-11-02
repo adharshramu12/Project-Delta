@@ -35,5 +35,5 @@ def test_desktop_shortcut_points_to_local_folder(monkeypatch, tmp_path):
     folder.mkdir(parents=True)
     monkeypatch.setattr("delta.config.known_folder", lambda name: desktop)
     link = ensure_desktop_shortcut(folder)
-    assert link == desktop / "Delta.lnk" and link.exists()
+    assert link == desktop / "Delta files.lnk" and link.exists()
     assert ensure_desktop_shortcut(desktop / "Delta") is None  # folder already on the Desktop: no shortcut

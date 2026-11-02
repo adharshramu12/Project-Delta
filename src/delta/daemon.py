@@ -25,14 +25,42 @@ EDGE_PATHS = [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
 
 
 def open_dashboard(settings: Settings, token: str) -> None:
-    """Open the dashboard as a chromeless app window (Edge --app) or a normal browser tab."""
+    """Open the dashboard as its own app window (Edge --app with a private profile, so it gets its
+    own taskbar button and never mixes with the user's browser tabs), else a normal browser tab."""
     url = f"http://{settings.api.host}:{settings.api.port}/#token={token}"
     edge = shutil.which("msedge") or next(
         (p for p in (os.path.expandvars(x) for x in EDGE_PATHS) if Path(p).exists()), None)
     if edge:
-        subprocess.Popen([edge, f"--app={url}", "--window-size=1100,760"], close_fds=True)
+        profile = settings.data_dir / "app-window"
+        subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}", "--window-size=1180,800",
+                          "--no-first-run", "--no-default-browser-check", "--disable-features=Translate"],
+                         close_fds=True, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
     else:
         webbrowser.open(url)
+
+
+def _port_open(host: str, port: int, timeout: float = 0.3) -> bool:
+    import socket
+
+    with contextlib.suppress(OSError), socket.create_connection((host, port), timeout=timeout):
+        return True
+    return False
+
+
+async def _wait_for_port(host: str, port: int, seconds: float = 15) -> bool:
+    for _ in range(int(seconds / 0.1)):
+        if await asyncio.to_thread(_port_open, host, port, 0.2):
+            return True
+        await asyncio.sleep(0.1)
+    return False
+
+
+def alert(message: str) -> None:
+    """Started by double-click there is no console, so problems must show as a dialog."""
+    if os.name == "nt":
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, message, "Delta", 0x10)
 
 
 def _make_telegram(c: Container) -> object:
@@ -105,6 +133,9 @@ async def run(open_ui: bool = False) -> int:
     setup_logging(settings.data_dir)
     _quiet_connection_resets()
     token = load_token(settings.data_dir)
+    if open_ui and _port_open(settings.api.host, settings.api.port):
+        open_dashboard(settings, token)  # already running: a second double-click just shows the window
+        return 0
     c = build(settings)
     try:
         await c.start()
@@ -115,14 +146,14 @@ async def run(open_ui: bool = False) -> int:
         raise
 
     server = uvicorn.Server(uvicorn.Config(create_app(c, token), host=settings.api.host, port=settings.api.port,
-                                           log_level="warning", access_log=False, lifespan="off"))
+                                           log_level="warning", access_log=False, lifespan="off",
+                                           log_config=None))
     serve = asyncio.create_task(server.serve(), name="api")
     channels = await _start_channels(c)
     log.info("delta.running", api=f"{settings.api.host}:{settings.api.port}",
              channels=[getattr(x, "name", "") for x in channels])
     print(f"Delta is running → http://{settings.api.host}:{settings.api.port}  (Ctrl+C or dashboard Shutdown to stop)")
-    if open_ui:
-        await asyncio.sleep(0.8)
+    if open_ui and await _wait_for_port(settings.api.host, settings.api.port):
         open_dashboard(settings, token)
 
     stop = asyncio.create_task(c.lifecycle.stopping.wait())
@@ -136,3 +167,41 @@ async def run(open_ui: bool = False) -> int:
         await c.stop()
         print("Delta is fully stopped.")
     return 0
+
+
+def launch_app() -> int:
+    """Double-click entry (run by pythonw from the shortcut). Starts the service as a hidden console
+    process, so it and every helper it spawns get real stdin/stdout/stderr handles (pythonw has none,
+    which breaks logging setup and makes child processes hang), then opens the app window."""
+    import sys
+    import time
+
+    settings = load_settings()
+    from delta.api.server import load_token
+
+    token = load_token(settings.data_dir)
+    host, port = settings.api.host, settings.api.port
+    if _port_open(host, port):
+        open_dashboard(settings, token)
+        return 0
+    logs = settings.data_dir / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    console = logs / "service.log"
+    python = Path(sys.executable).with_name("python.exe")
+    if not python.exists():
+        python = Path(sys.executable)
+    with open(console, "w", encoding="utf-8") as out:
+        proc = subprocess.Popen([str(python), "-m", "delta", "run"], stdin=subprocess.DEVNULL, stdout=out,
+                                stderr=subprocess.STDOUT, cwd=str(Path.home()),
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        if _port_open(host, port, 0.2):
+            open_dashboard(settings, token)
+            return 0
+        if proc.poll() is not None:
+            break
+        time.sleep(0.2)
+    tail = console.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-8:]
+    alert("Delta could not start.\n\n" + "\n".join(tail) + f"\n\nFull log: {console}")
+    return 1

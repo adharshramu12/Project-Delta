@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Delta</title>
+<link rel="icon" href="/favicon.ico">
 <style>
 /* Delta design system: Apple's clarity, Claude's warmth.
    One accent (terracotta), warm neutrals, soft depth, generous space. Colours are tokens so a
@@ -637,7 +638,7 @@ async function showProof(r) {
 }
 
 function connect() {
-  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws?token=${encodeURIComponent(token)}`);
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws?token=${encodeURIComponent(token)}`);
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.type === "approval") renderApproval(m.approval);
@@ -675,7 +676,7 @@ function connect() {
       }
     }
   };
-  ws.onclose = () => setTimeout(connect, 2000);
+  ws.onclose = () => { if (!stopped) setTimeout(connect, 2000); };
 }
 
 $("send").onsubmit = async e => {
@@ -694,10 +695,14 @@ document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
   $("greet").textContent = (h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening") + ". What should we get done?"; })();
 $("addmem").onsubmit = e => { e.preventDefault(); const t = $("memtext").value.trim(); if (!t) return; $("memtext").value = "";
   api("/api/memory", {method: "POST", body: JSON.stringify({content: t})}).then(refreshMemory); };
+let stopped = false, ws = null;
 $("shutdown").onclick = async () => {
   if (!confirm("Shut Delta down completely? Models are unloaded and nothing keeps running.")) return;
+  stopped = true; setHealth("OFFLINE", "stopping");
   await api("/api/shutdown", {method: "POST"}).catch(() => {});
-  add("msg", "Delta is shutting down. You can close this window."); setHealth("OFFLINE", "stopped");
+  if (ws) ws.close();
+  document.body.innerHTML = '<div style="height:100vh;display:grid;place-items:center;font:15px system-ui;color:#6b6358;background:#faf9f5;text-align:center"><div><div style="font-size:44px;color:#c96442">&Delta;</div><h2 style="color:#1f1e1d;margin:8px 0">Delta is off</h2><p>Everything is stopped and memory is freed.<br>Open Delta from your Desktop or Start menu to start again.</p></div></div>';
+  setTimeout(() => window.close(), 1500);
 };
 // ---- first-run setup wizard ---------------------------------------------------------------
 const STEPS = ["welcome", "models", "trust", "telegram", "name", "done"];

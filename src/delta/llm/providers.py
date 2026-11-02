@@ -354,7 +354,11 @@ class OpenAICompatProvider:
         if not self.local or not self.cfg.keep_alive:  # keep_alive is an Ollama setting
             return
         root = self.cfg.base_url.removesuffix("/v1").rstrip("/")
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            try:  # nothing listening (Ollama not installed or stopped): nothing to free
+                await client.get(f"{root}/api/version")
+            except httpx.HTTPError:
+                return
             for model in set(self.cfg.models.values()):
                 with contextlib.suppress(httpx.HTTPError):
                     await client.post(f"{root}/api/generate", json={"model": model, "keep_alive": 0})

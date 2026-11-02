@@ -107,6 +107,10 @@ def create_app(c: Container, token: str) -> FastAPI:
     async def index() -> FileResponse:
         return FileResponse(STATIC / "index.html")
 
+    @app.get("/favicon.ico")
+    async def favicon() -> FileResponse:
+        return FileResponse(STATIC / "delta.ico")
+
     @app.get("/api/status", dependencies=[Depends(auth)])
     async def get_status() -> dict[str, Any]:
         return {"name": c.settings.agent.name, "governor": c.governor.status(),
