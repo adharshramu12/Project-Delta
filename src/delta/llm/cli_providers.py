@@ -28,13 +28,42 @@ from typing import Any
 from delta.config import ProviderConfig
 from delta.llm.providers import flatten_messages, inject_tool_prompt, parse_prompt_tools
 from delta.llm.schemas import LLMError, LLMResponse, Message
+from delta.system.logging import log
 
 # Replaces Claude Code's own (large, coding-focused) system prompt, which also saves plan quota.
 CLI_SYSTEM_PROMPT = ("You are the reasoning engine of a desktop assistant called Delta. You have no tools "
                      "of your own. Follow the instructions in the conversation below exactly and reply "
                      "only in the format it asks for.")
 
-SIGN_IN_HINTS = ("not logged in", "login", "log in", "authenticat", "unauthorized", "401", "api key")
+# Codex is only Delta's text model, but by default it brings its whole agent: shell, multi-agent,
+# browser and computer use, image generation, skills, the user's desktop-app plugins and MCP servers.
+# Their instructions and tool definitions ride along on EVERY call (measured: a one-word reply cost
+# ~11.7k tokens, ~4.8k with these off). Switched off for Delta's sessions only; the user's own Codex
+# keeps them. Unknown feature names are ignored by Codex, so older versions are fine.
+CODEX_FEATURES_OFF = ("apps", "browser_use", "browser_use_external", "computer_use", "goals", "image_generation",
+                      "in_app_browser", "multi_agent", "plugins", "shell_tool", "skill_search", "sleep_tool",
+                      "tool_suggest", "unified_exec", "view_image", "hooks", "code_mode_host", "remote_plugin",
+                      "plugin_discovery_prefetch", "mentions_v2", "workspace_dependencies")
+
+
+def lean_codex_args() -> list[str]:
+    """`-c` overrides that strip Codex down to a plain model for Delta (see CODEX_FEATURES_OFF)."""
+    sets = [f"features.{f}=false" for f in CODEX_FEATURES_OFF]
+    sets += ['web_search="disabled"', "include_permissions_instructions=false", "include_apps_instructions=false",
+             "include_environment_context=false", "project_doc_max_bytes=0"]
+    home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    with contextlib.suppress(OSError, ValueError):
+        import tomllib
+
+        cfg = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+        # Codex splits -c keys on dots and keeps quotes as part of the name, so keys go unquoted
+        # (a quoted one names a new, empty MCP server and Codex refuses to start); dotted names are skipped.
+        sets += [f"plugins.{p}.enabled=false" for p in cfg.get("plugins", {}) if "." not in p]
+        sets += [f"mcp_servers.{m}.enabled=false" for m in cfg.get("mcp_servers", {}) if "." not in m]
+    return [arg for s in sets for arg in ("-c", s)]
+
+
+SIGN_IN_HINTS =("not logged in", "login", "log in", "authenticat", "unauthorized", "401", "api key")
 LIMIT_HINTS = ("usage limit", "rate limit", "limit reached", "quota", "too many requests", "429")
 
 
@@ -483,9 +512,10 @@ class _CodexSession:
         self._next = 100
 
     @classmethod
-    async def start(cls, exe: str, model: str, key: str, limit_s: float = 30) -> _CodexSession:
+    async def start(cls, exe: str, model: str, key: str, limit_s: float = 30,
+                    extra: list[str] | None = None) -> _CodexSession:
         proc = await asyncio.create_subprocess_exec(
-            exe, "app-server", cwd=tempfile.gettempdir(), env={**os.environ, "NO_COLOR": "1"},
+            exe, "app-server", *(extra or []), cwd=tempfile.gettempdir(), env={**os.environ, "NO_COLOR": "1"},
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             limit=2**24)
         s = cls(proc, "", key)
@@ -603,16 +633,21 @@ class CodexProvider(CLIProvider):
         self._live: dict[str, _CodexSession] = {}
         self._spare: dict[str, _CodexSession] = {}
         self._no_server = False  # this Codex has no app server: one-shot only
+        self._plain = False  # this Codex refused lean_codex_args(): run it as configured
 
     async def _session(self, model: str) -> _CodexSession | None:
         exe = self.executable()
         if exe is None or self._no_server:
             return None
-        try:
-            return await _CodexSession.start(exe, model, model)
-        except (LLMError, OSError, TimeoutError, KeyError, ValueError):
-            self._no_server = True  # fall back to `codex exec` from now on
-            return None
+        for extra in ([] if self._plain else lean_codex_args(), []):
+            try:
+                return await _CodexSession.start(exe, model, model, extra=extra)
+            except (LLMError, OSError, TimeoutError, KeyError, ValueError):
+                if extra:  # this Codex rejects an override: keep working, just without the savings
+                    log.warning("codex.lean_rejected")
+                    self._plain = True
+        self._no_server = True  # fall back to `codex exec` from now on
+        return None
 
     async def prewarm(self, task: str) -> None:
         model = self.model_for(task)
@@ -684,7 +719,7 @@ class CodexProvider(CLIProvider):
     def command(self, exe: str, model: str, out_file: Path, effort: str = "",
                 images: list[Path] | None = None) -> list[str]:
         cmd = [exe, "exec", "--skip-git-repo-check", "--sandbox", "read-only",
-               "--output-last-message", str(out_file)]
+               "--output-last-message", str(out_file), *([] if self._plain else lean_codex_args())]
         for f in images or []:
             cmd += ["--image", str(f)]
         if model:

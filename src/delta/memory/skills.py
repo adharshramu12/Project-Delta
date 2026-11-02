@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import builtins
 import json
-import re
 import sqlite3
 import threading
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from delta.memory.keywords import keywords, overlap
 
 PROMOTE_AFTER = 2
 RETIRE_AFTER = 3
@@ -118,15 +119,20 @@ class SkillStore:
             return [self._row(r) for r in self._db.execute(q + " ORDER BY successes DESC, id DESC")]
 
     def relevant(self, query: str, k: int = 3) -> builtins.list[Skill]:
-        words = re.findall(r"\w{3,}", query.lower())[:12]
+        """Skills that really fit `query`: sharing content words with its name or when-to-use (two, or
+        all of them for a one-word query). A skill that does not fit costs prompt tokens, and for
+        replay an extra AI call, for nothing."""
+        words = keywords(query)
         if not words:
             return []
-        match = " OR ".join(f'"{w}"' for w in words)
+        match = " OR ".join(f'"{w}"*' for w in words)
         sql = (f"SELECT {', '.join('s.' + c.strip() for c in self._COLS.split(','))} FROM skills_fts f "
                "JOIN skills s ON s.id=f.rowid WHERE skills_fts MATCH ? AND s.status != 'retired' "
                "ORDER BY bm25(skills_fts) LIMIT ?")
         with self._lock:
-            return [self._row(r) for r in self._db.execute(sql, (match, k))]
+            found = [self._row(r) for r in self._db.execute(sql, (match, k * 3))]
+        need = min(2, len(words))
+        return [s for s in found if overlap(words, f"{s.name} {s.when_to_use}") >= need][:k]
 
     def learn(self, name: str, when_to_use: str, procedure: builtins.list[str], tools: builtins.list[str],
               source: str = "learned", recipe: str | None = None) -> SkillChange:

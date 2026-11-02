@@ -310,3 +310,18 @@ async def test_codex_reply_carries_its_token_count(tmp_path):
 
     p._run = run
     assert (await p.complete("chat", [{"role": "user", "content": "hi"}], None)).usage == {"input": 1234}
+
+
+def test_codex_runs_lean_for_delta(monkeypatch, tmp_path):
+    """Codex's own agent features and the user's desktop plugins/MCP servers cost ~7k tokens a call."""
+    from delta.llm.cli_providers import lean_codex_args
+
+    (tmp_path / "config.toml").write_text('[plugins."browser@openai-bundled"]\nenabled = true\n'
+                                          "[mcp_servers.node_repl]\ncommand = 'x'\n", encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    args = lean_codex_args()
+    sets = args[1::2]
+    assert set(args[0::2]) == {"-c"}
+    assert "features.shell_tool=false" in sets and "features.multi_agent=false" in sets
+    assert "plugins.browser@openai-bundled.enabled=false" in sets
+    assert "mcp_servers.node_repl.enabled=false" in sets

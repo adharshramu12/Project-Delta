@@ -5,6 +5,20 @@ $root = Split-Path $PSScriptRoot -Parent
 $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { throw "Run 'uv sync --extra all' first." }
 
+# A "Delta" folder on the Desktop shows up as a second "Delta" icon (Windows hides ".lnk"), and
+# double-clicking it opens an empty folder instead of the app. Older versions saved files there.
+$desktop = [Environment]::GetFolderPath("Desktop")
+$clash = Join-Path $desktop "Delta"
+if (Test-Path $clash -PathType Container) {
+    if (-not (Get-ChildItem $clash -Force)) {
+        Add-Type -AssemblyName Microsoft.VisualBasic
+        [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($clash, "OnlyErrorDialogs", "SendToRecycleBin")
+        Write-Host "moved the empty Desktop\Delta folder to the Recycle Bin (it hid the app icon)"
+    } else {
+        Write-Warning "Desktop\Delta is a folder with files; rename it so it is not confused with the Delta app icon."
+    }
+}
+
 $shell = New-Object -ComObject WScript.Shell
 $targets = @(
     (Join-Path ([Environment]::GetFolderPath("Desktop")) "Delta.lnk"),

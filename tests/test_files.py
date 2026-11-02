@@ -5,8 +5,17 @@ from delta.config import FilesConfig, ensure_desktop_shortcut, in_onedrive, save
 
 def test_local_desktop_gets_delta_folder(monkeypatch, tmp_path):
     monkeypatch.setattr("delta.config.known_folder", lambda name: tmp_path / "Desktop")
-    assert save_dir(FilesConfig(), create=False) == tmp_path / "Desktop" / "Delta"
+    assert save_dir(FilesConfig(), create=False) == tmp_path / "Desktop" / "Delta files"
     assert save_dir(FilesConfig()).is_dir()
+
+
+def test_save_folder_never_clashes_with_app_icon(monkeypatch, tmp_path):
+    """An empty Desktop\\Delta folder sits beside the 'Delta' app shortcut and steals the double-click."""
+    monkeypatch.setattr("delta.config.known_folder", lambda name: tmp_path / "Desktop")
+    (tmp_path / "Desktop" / "Delta").mkdir(parents=True)
+    assert save_dir(FilesConfig(), create=False).name == "Delta files"
+    (tmp_path / "Desktop" / "Delta" / "note.txt").write_text("kept")
+    assert save_dir(FilesConfig(), create=False).name == "Delta"  # a folder with files stays in use
 
 
 def test_onedrive_desktop_saves_locally_instead(monkeypatch, tmp_path):

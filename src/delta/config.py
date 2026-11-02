@@ -107,7 +107,9 @@ def in_onedrive(path: Path) -> bool:
 def save_dir(cfg: FilesConfig, create: bool = True) -> Path:
     """Default folder for files Delta creates for the user.
 
-    auto: <Desktop>\\Delta when the Desktop is a normal local folder. When OneDrive has taken over
+    auto: <Desktop>\\Delta files when the Desktop is a normal local folder. Not "Delta": that name is
+    the app's own shortcut, and two Desktop icons called "Delta" make a double-click open an empty
+    folder instead of the app. A Desktop\\Delta folder that already holds files is kept. When OneDrive has taken over
     the Desktop, files go to a local folder OneDrive never syncs (%USERPROFILE%\\Delta), so a full
     or offline OneDrive cannot break saving; a Desktop shortcut keeps it one click away
     (see ensure_desktop_shortcut).
@@ -116,7 +118,13 @@ def save_dir(cfg: FilesConfig, create: bool = True) -> Path:
         path = Path(os.path.expandvars(os.path.expanduser(cfg.save_dir)))
     else:
         desktop = known_folder("Desktop")
-        path = Path.home() / "Delta" if in_onedrive(desktop) else desktop / "Delta"
+        legacy = desktop / "Delta"
+        if in_onedrive(desktop):
+            path = Path.home() / "Delta"
+        elif legacy.is_dir() and any(legacy.iterdir()):
+            path = legacy
+        else:
+            path = desktop / "Delta files"
     if create:
         path.mkdir(parents=True, exist_ok=True)
     return path

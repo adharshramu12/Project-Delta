@@ -95,7 +95,9 @@ class ChatStore:
     def _chats(self, where: str, args: tuple[Any, ...], limit: int = 200) -> list[Chat]:
         sql = (f"SELECT c.*, (SELECT text FROM chat_messages m WHERE m.chat_id = c.id ORDER BY m.id DESC LIMIT 1)"
                f" AS preview, (SELECT COUNT(*) FROM chat_messages m WHERE m.chat_id = c.id) AS count"
-               f" FROM chats c {where} ORDER BY c.pinned DESC, c.updated DESC LIMIT ?")
+               f" FROM chats c {where} ORDER BY c.pinned DESC, c.updated DESC,"
+               # Windows clocks tick coarsely, so equal `updated` values happen: newest message breaks the tie
+               f" (SELECT COALESCE(MAX(m.id), 0) FROM chat_messages m WHERE m.chat_id = c.id) DESC LIMIT ?")
         with self._lock:
             rows = self._db.execute(sql, (*args, limit)).fetchall()
         return [Chat(r["id"], r["title"], r["created"], r["updated"], bool(r["pinned"]),

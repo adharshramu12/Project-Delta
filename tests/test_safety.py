@@ -96,3 +96,13 @@ def test_audit_chain_detects_tampering(tmp_path):
     lines[1] = lines[1].replace('"n": 1', '"n": 9')
     (tmp_path / "audit.jsonl").write_text("\n".join(lines) + "\n")
     assert not log.verify()
+
+
+def test_audit_chain_survives_two_writers(tmp_path):
+    """The daemon and the CLI each open the log; interleaved writes must still form one chain."""
+    daemon, cli = AuditLog(tmp_path / "audit.jsonl"), AuditLog(tmp_path / "audit.jsonl")
+    daemon.record("delta.start")
+    cli.record("task.start")
+    cli.record("task.end")
+    daemon.record("setup.complete")
+    assert AuditLog(tmp_path / "audit.jsonl").verify()

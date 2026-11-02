@@ -24,19 +24,81 @@ EDGE_PATHS = [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
               r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"]
 
 
+def _is_delta_title(title: str) -> bool:
+    # the dashboard sets "Delta", "<chat> · Delta" or "(2) Approval needed · Delta"
+    return title == "Delta" or title.endswith(" · Delta")
+
+
+def _find_app_window() -> int:
+    """Handle of the open Delta app window (an Edge --app window), or 0."""
+    if os.name != "nt":
+        return 0
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def check(hwnd: int, _: int) -> bool:
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        cls = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, cls, 64)
+        if cls.value != "Chrome_WidgetWin_1":
+            return True
+        title = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, title, 256)
+        if _is_delta_title(title.value):
+            found.append(hwnd)
+            return False
+        return True
+
+    user32.EnumWindows(check, 0)
+    return found[0] if found else 0
+
+
+def _bring_to_front(hwnd: int) -> None:
+    """Show the window on top. Windows refuses SetForegroundWindow to a process the user did not just
+    click (ours is launched hidden via wscript), unless a key event came from it: a lone Alt
+    press/release unlocks it without typing anything."""
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    alt, keyup = 0x12, 0x0002
+    user32.keybd_event(alt, 0, 0, 0)
+    user32.keybd_event(alt, 0, keyup, 0)
+    user32.SetForegroundWindow(hwnd)
+    user32.BringWindowToTop(hwnd)
+
+
 def open_dashboard(settings: Settings, token: str) -> None:
     """Open the dashboard as its own app window (Edge --app with a private profile, so it gets its
-    own taskbar button and never mixes with the user's browser tabs), else a normal browser tab."""
+    own taskbar button and never mixes with the user's browser tabs), else a normal browser tab.
+    The window always ends up in front: an already-open one is raised instead of opening a second."""
+    import time
+
+    if hwnd := _find_app_window():
+        _bring_to_front(hwnd)
+        return
     url = f"http://{settings.api.host}:{settings.api.port}/#token={token}"
     edge = shutil.which("msedge") or next(
         (p for p in (os.path.expandvars(x) for x in EDGE_PATHS) if Path(p).exists()), None)
-    if edge:
-        profile = settings.data_dir / "app-window"
-        subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}", "--window-size=1180,800",
-                          "--no-first-run", "--no-default-browser-check", "--disable-features=Translate"],
-                         close_fds=True, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
-    else:
+    if not edge:
         webbrowser.open(url)
+        return
+    profile = settings.data_dir / "app-window"
+    subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}", "--window-size=1180,800",
+                      "--no-first-run", "--no-default-browser-check", "--disable-features=Translate"],
+                     close_fds=True, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:  # Edge opens it behind the current app; pull it forward
+        if hwnd := _find_app_window():
+            _bring_to_front(hwnd)
+            return
+        time.sleep(0.2)
 
 
 def _port_open(host: str, port: int, timeout: float = 0.3) -> bool:
@@ -154,7 +216,7 @@ async def run(open_ui: bool = False) -> int:
              channels=[getattr(x, "name", "") for x in channels])
     print(f"Delta is running → http://{settings.api.host}:{settings.api.port}  (Ctrl+C or dashboard Shutdown to stop)")
     if open_ui and await _wait_for_port(settings.api.host, settings.api.port):
-        open_dashboard(settings, token)
+        await asyncio.to_thread(open_dashboard, settings, token)  # it waits for the page; keep serving it
 
     stop = asyncio.create_task(c.lifecycle.stopping.wait())
     try:
