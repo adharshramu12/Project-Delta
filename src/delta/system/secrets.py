@@ -19,6 +19,9 @@ KNOWN_SECRETS = {
     "slack_bot_token": "Slack bot token (xoxb-...)",
     "slack_app_token": "Slack app-level token for Socket Mode (xapp-...)",
     "vapi_api_key": "Vapi API key",
+    "google_client_id": "Google OAuth client ID (Desktop app) for Calendar",
+    "google_client_secret": "Google OAuth client secret (Desktop app)",
+    "google_refresh_token": "Google sign-in (set by Connected apps, not by hand)",
 }
 
 

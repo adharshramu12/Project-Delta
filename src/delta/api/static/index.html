@@ -547,6 +547,27 @@ function modelPicker(a, msg, rerender) {
                           efforts: Object.fromEntries(JOBS.map(([j]) => [j, pick[j][1].value]))});
   row.appendChild(s); wrap.append(grid, row); return wrap;
 }
+// Google: official Calendar API (exact, instant, no tokens) instead of driving its web page.
+async function googleCard(box) {
+  const g = await api("/api/google").catch(() => null); if (!g) return;
+  const el = document.createElement("div"); el.className = "app";
+  el.innerHTML = '<div class="top"><b>Google Calendar</b><span class="state"></span></div><div class="row"></div><div class="msg"></div>';
+  const state = el.querySelector(".state"), row = el.querySelector(".row"), msg = el.querySelector(".msg");
+  const act = async (path, opts) => { msg.textContent = "Working… (finish sign-in in the browser tab)"; const r = await api(path, opts); msg.textContent = r.message || (r.ok ? "Saved." : (r.detail ? "Please check the client ID." : "")); if (r.ok) renderApps(box); };
+  if (g.connected) {
+    state.className = "state ok-text"; state.textContent = "✓ connected: meetings use the official API";
+    const b = document.createElement("button"); b.textContent = "Disconnect"; b.onclick = () => act("/api/google/disconnect", {method: "POST"}); row.appendChild(b);
+  } else if (g.client) {
+    state.className = "state bad"; state.textContent = "not connected";
+    const b = document.createElement("button"); b.className = "primary"; b.textContent = "Connect Google"; b.onclick = () => act("/api/google/connect", {method: "POST"}); row.appendChild(b);
+  } else {
+    state.className = "state bad"; state.textContent = "needs a Google client ID (one-time)";
+    row.innerHTML = '<input placeholder="xxxx.apps.googleusercontent.com" style="flex:1;min-width:220px"><input type="password" placeholder="client secret" style="width:150px"><button class="primary">Save</button>';
+    const [id, secret] = row.querySelectorAll("input");
+    row.querySelector("button").onclick = () => act("/api/google/client", {method: "PUT", body: JSON.stringify({client_id: id.value.trim(), client_secret: secret.value.trim()})});
+  }
+  box.appendChild(el);
+}
 async function renderApps(box = $("s_appslist")) {
   if (box.id === "s_appslist") renderMain();
   const list = await api("/api/apps").catch(() => []); box.innerHTML = list.length ? "" : '<div class="empty">No connectable apps configured.</div>';
@@ -582,6 +603,7 @@ async function renderApps(box = $("s_appslist")) {
     }
     box.appendChild(el);
   }
+  await googleCard(box);
 }
 $("openapps").onclick = async () => { $("setup").hidden = true; await openSettings(); $("s_apps_h").scrollIntoView(); };
 $("s_close").onclick = () => { $("settings").hidden = true; };

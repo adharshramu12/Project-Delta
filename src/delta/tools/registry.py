@@ -5,11 +5,12 @@ validate args -> policy decision -> (approval) -> run -> audit. Nothing runs any
 
 from __future__ import annotations
 
+import difflib
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AliasChoices, BaseModel, ValidationError
 
 from delta.learning.store import TRUSTABLE_RISKS, Learned, LearningStore, is_folder_scope, split_key
 from delta.safety.approvals import ApprovalBroker, ApprovalRequest
@@ -17,6 +18,38 @@ from delta.safety.audit import AuditLog
 from delta.safety.policy import PolicyEngine, Verdict, norm_path
 from delta.system.logging import log
 from delta.tools.base import Tool, ToolResult
+
+
+def accepted_names(model: type[BaseModel]) -> set[str]:
+    """Every key a tool's Args accepts: field names plus their validation aliases."""
+    names: set[str] = set()
+    for field_name, info in model.model_fields.items():
+        names.add(field_name)
+        alias = info.validation_alias
+        if isinstance(alias, str):
+            names.add(alias)
+        elif isinstance(alias, AliasChoices):
+            names.update(c for c in alias.choices if isinstance(c, str))
+        if info.alias:
+            names.add(info.alias)
+    return names
+
+
+def unknown_arguments(model: type[BaseModel], raw: dict[str, Any]) -> str:
+    """'' when every key is known, else a fix-it message ('attendees' -> did you mean 'guests'?).
+    Models open to arbitrary keys (extra='allow' or no declared fields) are not checked."""
+    if not isinstance(raw, dict) or model.model_config.get("extra") == "allow" or not model.model_fields:
+        return ""
+    accepted = accepted_names(model)
+    unknown = [k for k in raw if k not in accepted]
+    if not unknown:
+        return ""
+    hints = []
+    for key in unknown:
+        close = difflib.get_close_matches(key, sorted(accepted), n=1, cutoff=0.5)
+        hints.append(f"'{key}' (did you mean '{close[0]}'?)" if close else f"'{key}'")
+    return (f"unknown argument {', '.join(hints)}. Valid arguments: {', '.join(sorted(model.model_fields))}. "
+            "Call the tool again with the right names.")
 
 
 class ToolRegistry:
@@ -121,6 +154,10 @@ class ToolExecutor:
         tool = self.registry.get(name)
         if tool is None:
             return ToolResult(False, f"unknown tool '{name}'. Available: {', '.join(self.registry.names())}")
+        if problem := unknown_arguments(tool.Args, raw_args):
+            # Pydantic ignores unknown keys: a guest list sent as "attendees" would simply vanish.
+            self.audit.record("tool.bad_args", task=task_id, tool=name, problem=problem)
+            return ToolResult(False, f"invalid arguments for {name}: {problem}")
         try:
             args: BaseModel = tool.Args.model_validate(raw_args)
         except ValidationError as e:

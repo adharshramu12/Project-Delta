@@ -232,17 +232,21 @@ async def test_json_protocol_final_counts_as_done(tmp_path):
     assert r.status == "done" and r.answer == "Song is playing"
 
 
-class FakePlay(Tool[Args]):
+class PlayArgs(BaseModel):
+    query: str
+
+
+class FakePlay(Tool[PlayArgs]):
     name = "play_youtube"
     description = "play"
     risk = Risk.READ
-    Args = Args
+    Args = PlayArgs
 
     def __init__(self, proved=True):
         self.proved = proved
 
-    async def run(self, args: Args) -> ToolResult:
-        return ToolResult(True, f'PLAYING on YouTube: "{args.target}"', {"verified": self.proved})
+    async def run(self, args: PlayArgs) -> ToolResult:
+        return ToolResult(True, f'PLAYING on YouTube: "{args.query}"', {"verified": self.proved})
 
 
 def make_direct(tmp_path, proved, script):
@@ -253,7 +257,7 @@ def make_direct(tmp_path, proved, script):
 
 
 DIRECT = js({"needs_tools": True, "goal": "play", "steps": ["play it"], "success_criteria": ["song is playing"],
-             "direct": {"tool": "play_youtube", "args": {"target": "Kaanunna Kalyanam"}}})
+             "direct": {"tool": "play_youtube", "args": {"query": "Kaanunna Kalyanam"}}})
 
 
 async def test_one_call_job_with_proof_needs_only_the_planner(tmp_path):
@@ -292,3 +296,18 @@ def test_instant_command_patterns_are_strict():
     for vague in ["play chess with me", "schedule a meeting tomorrow at 5 with Ravi", "stop", "open meet notes"]:
         assert match_intent(vague, tools) is None, vague
     assert match_intent("pause the music", {"media_status"}) is None  # tool not installed
+
+
+async def test_unknown_argument_names_are_rejected_with_a_hint(tmp_path):
+    """A guest list sent as 'attendees' must not silently vanish."""
+    from delta.tools.registry import unknown_arguments
+
+    orch, _ = make(tmp_path, "claude_code", {}, [])
+    orch.executor.registry.register(FakePlay())
+    r = await orch.executor.execute("play_youtube", {"querry": "x"})
+    assert not r.ok and "did you mean 'query'" in r.output
+    assert unknown_arguments(PlayArgs, {"query": "x"}) == ""
+
+    from delta.tools.meetings import ScheduleArgs
+    assert unknown_arguments(ScheduleArgs, {"title": "t", "start": "s", "attendees": []}) == ""  # an alias
+    assert "did you mean 'guests'" in unknown_arguments(ScheduleArgs, {"title": "t", "start": "s", "guest": []})

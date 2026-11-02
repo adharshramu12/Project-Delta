@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS skills(
   failures INTEGER NOT NULL DEFAULT 0,
   source TEXT NOT NULL DEFAULT 'learned',
   created TEXT NOT NULL,
-  last_used TEXT
+  last_used TEXT,
+  recipe TEXT                   -- JSON {"steps": [{tool, args}], "slots": {...}}: replay without AI
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS skills_fts USING fts5(name, when_to_use, content='skills', content_rowid='id');
 CREATE TRIGGER IF NOT EXISTS skills_ai AFTER INSERT ON skills BEGIN
@@ -60,6 +61,7 @@ class Skill:
     source: str
     created: str
     last_used: str | None
+    recipe: str | None = None  # JSON, see delta.core.replay.Recipe
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -84,7 +86,15 @@ class SkillStore:
     def __init__(self, path: Path) -> None:
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.executescript(SCHEMA)
+        self._migrate()
         self._lock = threading.Lock()
+
+    def _migrate(self) -> None:
+        """Databases created before recipes existed get the column added (data kept)."""
+        cols = {r[1] for r in self._db.execute("PRAGMA table_info(skills)")}
+        if "recipe" not in cols:
+            with self._db:
+                self._db.execute("ALTER TABLE skills ADD COLUMN recipe TEXT")
 
     def close(self) -> None:
         self._db.close()
@@ -92,7 +102,8 @@ class SkillStore:
     def _row(self, r: tuple[Any, ...]) -> Skill:
         return Skill(r[0], r[1], r[2], json.loads(r[3]), json.loads(r[4]), *r[5:])
 
-    _COLS = "id, name, when_to_use, procedure, tools, status, successes, failures, source, created, last_used"
+    _COLS = ("id, name, when_to_use, procedure, tools, status, successes, failures, source, created, last_used, "
+             "recipe")
 
     def get(self, skill_id: int) -> Skill | None:
         with self._lock:
@@ -118,16 +129,20 @@ class SkillStore:
             return [self._row(r) for r in self._db.execute(sql, (match, k))]
 
     def learn(self, name: str, when_to_use: str, procedure: builtins.list[str], tools: builtins.list[str],
-              source: str = "learned") -> SkillChange:
-        """Add a skill, or reinforce an existing one that does the same job with the same tools."""
+              source: str = "learned", recipe: str | None = None) -> SkillChange:
+        """Add a skill, or reinforce an existing one that does the same job with the same tools
+        (giving it a replay recipe if it had none yet)."""
         for s in self.relevant(f"{name} {when_to_use}", k=5):
             if s.tools == tools:
+                if recipe and not s.recipe:
+                    self.set_recipe(s.id, recipe)
                 return self.record(s.id, success=True)
         with self._lock, self._db:
             cur = self._db.execute(
-                "INSERT INTO skills(name, when_to_use, procedure, tools, source, created) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO skills(name, when_to_use, procedure, tools, source, created, recipe) "
+                "VALUES (?,?,?,?,?,?,?)",
                 (name.strip()[:80], when_to_use.strip()[:300], json.dumps(procedure[:15]), json.dumps(tools),
-                 source, _now()))
+                 source, _now(), recipe))
             sid = int(cur.lastrowid or 0)
         skill = self.get(sid)
         assert skill
@@ -149,6 +164,14 @@ class SkillStore:
         updated = self.get(skill_id)
         assert updated
         return SkillChange(updated, change)
+
+    def set_recipe(self, skill_id: int, recipe: str | None) -> bool:
+        with self._lock, self._db:
+            return self._db.execute("UPDATE skills SET recipe=? WHERE id=?", (recipe, skill_id)).rowcount > 0
+
+    def replayable(self, query: str, k: int = 3) -> builtins.list[Skill]:
+        """Proven (active) skills with a recipe that may fit `query`, best match first."""
+        return [s for s in self.relevant(query, k=k) if s.status == "active" and s.recipe]
 
     def set_status(self, skill_id: int, status: str) -> bool:
         if status not in {"candidate", "active", "retired"}:

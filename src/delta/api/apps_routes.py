@@ -14,12 +14,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from delta.bootstrap import Container
 from delta.config import write_user_settings
 from delta.llm.cli_providers import CLIProvider
 from delta.llm.schemas import LLMError
+from delta.system.secrets import get_secret, set_secret
 
 LABELS = {"claude_code": "Claude Code (your Claude plan)", "codex": "Codex (your ChatGPT plan)",
           "lmstudio": "LM Studio (on this PC)", "ollama": "Ollama (on this PC)",
@@ -28,6 +29,11 @@ LABELS = {"claude_code": "Claude Code (your Claude plan)", "codex": "Codex (your
 
 class PreferredIn(BaseModel):
     name: str
+
+
+class GoogleClientIn(BaseModel):
+    client_id: str = Field(min_length=20, max_length=200, pattern=r"^[\w.-]+\.apps\.googleusercontent\.com$")
+    client_secret: str = Field(default="", max_length=200)
 
 
 JOBS = ("plan", "chat", "verify")
@@ -111,6 +117,40 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
                                 {"llm": {"providers": {name: {"models": models, "efforts": efforts}}}})
         c.audit.record("apps.models", app=name, models=models, efforts=efforts)
         return {"ok": True}
+
+    # --- Google (official Calendar API) ---------------------------------------------------------
+    @app.get("/api/google", dependencies=[Depends(auth)])
+    async def google_status() -> dict[str, Any]:
+        has_client = bool(await asyncio.to_thread(get_secret, "google_client_id"))
+        has_token = bool(await asyncio.to_thread(get_secret, "google_refresh_token"))
+        return {"client": has_client, "connected": has_client and has_token}
+
+    @app.put("/api/google/client", dependencies=[Depends(auth)])
+    async def google_client(body: GoogleClientIn) -> dict[str, Any]:
+        await asyncio.to_thread(set_secret, "google_client_id", body.client_id.strip())
+        if body.client_secret.strip():
+            await asyncio.to_thread(set_secret, "google_client_secret", body.client_secret.strip())
+        c.audit.record("google.client_set")
+        return {"ok": True}
+
+    @app.post("/api/google/connect", dependencies=[Depends(auth)])
+    async def google_connect() -> dict[str, Any]:
+        from delta.integrations import google
+
+        try:
+            account = await google.sign_in()
+        except google.GoogleError as e:
+            return {"ok": False, "message": str(e)}
+        c.audit.record("google.connected", account=account)
+        return {"ok": True, "message": f"Connected to Google Calendar ({account}). Meetings now use the official API."}
+
+    @app.post("/api/google/disconnect", dependencies=[Depends(auth)])
+    async def google_disconnect() -> dict[str, Any]:
+        from delta.integrations import google
+
+        await google.sign_out()
+        c.audit.record("google.disconnected")
+        return {"ok": True, "message": "Disconnected; Delta's access was revoked at Google."}
 
     @app.post("/api/apps/{name}/login", dependencies=[Depends(auth)])
     async def login(name: str) -> dict[str, Any]:

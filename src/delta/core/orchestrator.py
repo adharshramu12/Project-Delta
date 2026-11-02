@@ -17,6 +17,7 @@ from delta.core.events import EventBus
 from delta.core.intents import match_intent
 from delta.core.planner import make_plan
 from delta.core.proof import ProofRecorder
+from delta.core.replay import Recipe, fill, match_slots
 from delta.core.state import Plan, StepRecord, TaskRequest, TaskResult, Verification
 from delta.core.verifier import verify
 from delta.learning.corrections import learn_corrections, standing_instructions
@@ -235,6 +236,8 @@ class Orchestrator:
             await self.events.publish("task.plan", task_id=req.id, plan=quick.__dict__)
             if done := await self._direct(req, quick, steps):
                 return done
+        if not steps and (done := await self._replay(req, steps)):
+            return done
         memory_ctx = self.memory.context_for(req.text, self.s.memory.recall_k) if self.memory else ""
         if self.learning and (rules := standing_instructions(self.learning)):
             memory_ctx = (f"STANDING INSTRUCTIONS FROM THE USER (always follow these):\n{rules}\n\n"
@@ -302,6 +305,49 @@ class Orchestrator:
                   f"{self.s.agent.max_attempts} attempts: {verification.reason if verification else ''}")
         return TaskResult(req.id, "failed", answer.strip(), self.s.agent.max_attempts, steps, verification,
                           self.router.last_provider or "", plan.skill_id)
+
+    async def _replay(self, req: TaskRequest, steps: list[StepRecord]) -> TaskResult | None:
+        """A proven skill with a recipe: one small call to fill its slots, then its tool calls run
+        back to back with no AI in between (each still under the user's approval rules). Proof is
+        the last tool's own evidence or the final-screenshot check. Anything off: the normal agent
+        continues from here, and the skill's record notes the failure."""
+        if not self.skills:
+            return None
+        for skill in self.skills.replayable(req.text):
+            recipe = Recipe.from_json(skill.recipe)
+            if recipe is None:
+                continue
+            values = await match_slots(self.router, req.text, skill.name, skill.when_to_use, recipe)
+            if values is None:
+                continue
+            plan = Plan(True, goal=req.text, steps=[f"{s['tool']}" for s in recipe.steps],
+                        success_criteria=[f"The request is fulfilled: {req.text}"], skill_id=skill.id)
+            await self.events.publish("task.plan", task_id=req.id, plan={**plan.__dict__, "replay": skill.name})
+            for step in recipe.steps:
+                args = fill(step["args"], values)
+                await self.events.publish("task.step", task_id=req.id, tool=step["tool"], args=args)
+                result = await self.executor.execute(step["tool"], args, task_id=req.id)
+                steps.append(StepRecord(step["tool"], args, result.ok, result.output[:2000], result.evidence))
+                if result.evidence.get("user_denied"):
+                    return TaskResult(req.id, "cancelled", "OK, I didn't do it.", 1, steps)
+                if not result.ok:
+                    break
+            if all(s.ok for s in steps) and steps and steps[-1].evidence.get("verified"):
+                verification = Verification(True, f"replayed skill '{skill.name}'", [], [], False)
+            elif all(s.ok for s in steps) and steps:
+                shot, target = await self._final_screenshot(steps)
+                verification = await verify(self.router, req.text, plan, steps, "", shot, target)
+            else:
+                verification = Verification(False, "a replayed step failed")
+            change = self.skills.record(skill.id, success=verification.passed)
+            await self.events.publish("skill.changed", change=change.change, skill=change.skill.to_dict())
+            if verification.passed:
+                return TaskResult(req.id, "done", f"Done using the learned skill \"{skill.name}\": "
+                                  + "; ".join(s.output[:120] for s in steps[-2:]), 1, steps, verification,
+                                  self.router.last_provider or "", skill.id, fast=True)
+            log.info("orchestrator.replay_fallback", task=req.id, skill=skill.id)
+            return None  # the agent continues; `steps` tells it what already happened
+        return None
 
     async def _direct(self, req: TaskRequest, plan: Plan, steps: list[StepRecord]) -> TaskResult | None:
         """Fast path: the planner named one tool call that does the whole job. If the tool proves its
@@ -541,7 +587,8 @@ class Orchestrator:
             draft = await distill(self.router, req.text, result.steps)
             if draft is None:
                 return
-            change = self.skills.learn(draft.name, draft.when_to_use, draft.procedure, draft.tools)
+            change = self.skills.learn(draft.name, draft.when_to_use, draft.procedure, draft.tools,
+                                       recipe=draft.recipe.to_json() if draft.recipe else None)
         else:
             return
         self.audit.record("skill", task=req.id, skill=change.skill.id, change=change.change)

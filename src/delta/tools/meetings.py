@@ -226,6 +226,9 @@ class ScheduleMeeting(Tool[ScheduleArgs]):
     risk = Risk.EXTERNAL  # guests are emailed: always asks the user first
     Args = ScheduleArgs
 
+    async def _via_api(self, args: ScheduleArgs, start: datetime) -> ToolResult:
+        return await _api_schedule(args, start)
+
     def domains(self, args: ScheduleArgs) -> list[str]:
         return ["https://calendar.google.com", "https://meet.google.com"]
 
@@ -240,6 +243,8 @@ class ScheduleMeeting(Tool[ScheduleArgs]):
             return ToolResult(False, f"start '{args.start}' is not a date-time like 2026-11-03T17:00")
         if start < datetime.now() - timedelta(minutes=5):
             return ToolResult(False, f"{start:%d %b %Y %H:%M} is in the past: ask the user for the right time.")
+        if await asyncio.to_thread(_google_connected):
+            return await self._via_api(args, start)
         link = await _new_meet_link()
         if link is None:
             return ToolResult(False, "Could not create a Google Meet link (not signed in to Google?).")
@@ -386,6 +391,32 @@ def _press_named(names: tuple[str, ...], wait_s: float = 6) -> str | None:
     return None
 
 
+def _google_connected() -> bool:
+    from delta.integrations import google  # loaded on use: keeps httpx out of Delta's startup
+
+    return google.connected()
+
+
+async def _api_schedule(args: ScheduleArgs, start: datetime) -> ToolResult:
+    """Google Calendar API: create with a Meet link, then read it back from Google as proof."""
+    from delta.integrations import google
+
+    when = f"{start:%a %d %b %Y, %H:%M} ({args.minutes} min)"
+    try:
+        cal = google.GoogleCalendar()
+        made = await cal.create(args.title, start, start + timedelta(minutes=args.minutes), args.guests, args.details)
+        check = await cal.get(made.id)
+    except google.GoogleError as e:
+        return ToolResult(False, f"Google Calendar did not schedule it: {e}")
+    ok = check.title == args.title and check.start == start.replace(second=0, microsecond=0)
+    copied = await asyncio.to_thread(copy_to_clipboard, check.meet_link) if check.meet_link else False
+    guests = f" Google emailed the invite to {', '.join(check.guests)}." if check.guests else ""
+    return ToolResult(ok, f"Scheduled '{check.title}' on {when}, confirmed by Google Calendar. Meet link: "
+                          f"{check.meet_link or '(none)'}{' (copied)' if copied else ''}.{guests}",
+                      {"event_id": check.id, "link": check.meet_link, "guests": check.guests, "via": "api",
+                       "verified": ok and bool(check.meet_link)})
+
+
 class EditArgs(BaseModel):
     title: str = Field(description="Current title of the meeting to change")
     on: str | None = Field(default=None, description="Its current date (ISO), if several share the title")
@@ -433,6 +464,8 @@ class EditMeeting(Tool[EditArgs]):
                 return ToolResult(False, f"{new:%d %b %H:%M} is in the past: ask the user for the right time.")
         if not (args.cancel or args.new_start or args.minutes or args.new_title):
             return ToolResult(False, "Nothing to change: give new_start, minutes, new_title or cancel.")
+        if await asyncio.to_thread(_google_connected):
+            return await _api_edit(args, new)
         return await asyncio.to_thread(self._run_sync, args, new)
 
     def _run_sync(self, args: EditArgs, new: datetime | None) -> ToolResult:
@@ -486,8 +519,9 @@ class EditMeeting(Tool[EditArgs]):
             want = [title.lower()]
             if new:
                 want += [f"{time_label(new)} to".lower(), long_date(new).lower()]
-            if args.minutes and (new or _current_start(event)):
-                want.append(f"to {time_label((new or _current_start(event)) + timedelta(minutes=args.minutes))}")
+            begins = new or _current_start(event)
+            if args.minutes and begins is not None:
+                want.append(f"to {time_label(begins + timedelta(minutes=args.minutes))}")
             seen = next((h for h in after if all(x in h.lower() for x in want)), None)
             if seen is None:
                 return ToolResult(False, f"Saved, but the check did not find '{title}' with the new details in "
@@ -498,6 +532,45 @@ class EditMeeting(Tool[EditArgs]):
             return ToolResult(False, f"Could not edit the meeting: {e}")
         except Exception as e:  # Calendar changed its page, window closed mid-edit
             return ToolResult(False, f"Editing failed ({type(e).__name__}: {str(e)[:160]})")
+
+
+async def _api_edit(args: EditArgs, new: datetime | None) -> ToolResult:
+    """Google Calendar API: find the event, change or cancel it, then read it back as proof."""
+    from delta.integrations import google
+
+    cal = google.GoogleCalendar()
+    try:
+        hits = await cal.find(args.title, datetime.fromisoformat(args.on) if args.on else None)
+        if not hits:
+            return ToolResult(False, f"No upcoming meeting called '{args.title}' in Google Calendar.")
+        if len(hits) > 1:
+            listing = "\n".join(f"- {e.title}: {e.start:%a %d %b %H:%M}" for e in hits[:5])
+            return ToolResult(False, f"Several meetings match '{args.title}':\n{listing}\nAsk the user which one "
+                                     "(then pass its date as 'on').", {"matches": [e.id for e in hits]})
+        event = hits[0]
+        if args.cancel:
+            await cal.delete(event.id)
+            gone = not [e for e in await cal.find(args.title, event.start) if e.id == event.id]
+            return ToolResult(gone, f"Cancelled '{event.title}' ({event.start:%a %d %b %H:%M}), confirmed by Google "
+                                    "Calendar." if gone else "Google still lists the meeting after cancelling.",
+                              {"cancelled": event.id, "via": "api", "verified": gone})
+        if args.new_start and new is None:  # a time only: keep the meeting's day
+            hh, mm = (int(x) for x in args.new_start.strip().split(":"))
+            new = event.start.replace(hour=hh, minute=mm)
+            if new < datetime.now() - timedelta(minutes=5):
+                return ToolResult(False, f"{new:%d %b %H:%M} is in the past: ask the user for the right time.")
+        start = new or event.start
+        length = timedelta(minutes=args.minutes) if args.minutes else event.end - event.start
+        changed = await cal.update(event.id, title=args.new_title, start=start if new else None,
+                                   end=start + length if (new or args.minutes) else None)
+        check = await cal.get(changed.id)
+    except google.GoogleError as e:
+        return ToolResult(False, f"Google Calendar did not make the change: {e}")
+    ok = (check.start == start and check.end == start + length
+          and (not args.new_title or check.title == args.new_title))
+    return ToolResult(ok, f"Updated, confirmed by Google Calendar: '{check.title}' {check.start:%a %d %b %H:%M}–"
+                          f"{check.end:%H:%M}. The Meet link is unchanged.",
+                      {"event_id": check.id, "via": "api", "verified": ok})
 
 
 def _current_start(event_name: str) -> datetime | None:
