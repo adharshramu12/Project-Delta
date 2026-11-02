@@ -55,9 +55,9 @@ def _doctor() -> int:
     print("Model providers:")
     for name, p in s.llm.providers.items():
         if p.kind != "openai":
-            from delta.llm.cli_providers import ClaudeCodeProvider, CodexProvider
+            from delta.llm.cli_providers import CLI_KINDS
 
-            cli = (ClaudeCodeProvider if p.kind == "claude_code" else CodexProvider)(name, p)
+            cli = CLI_KINDS[p.kind](name, p)
             exe = cli.executable()
             state = f"found {exe}" if exe else f"not installed (optional: uses your {cli.label} plan)"
             print(f"  {name:<8} {state}")

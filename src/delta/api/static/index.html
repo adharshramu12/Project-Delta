@@ -736,7 +736,7 @@ function renderAnswer(r, live) {
   const t = r.tokens || {}, k = n => n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
   const cost = t.calls ? ` · ${t.calls} AI calls · ${k((t.input || 0) + (t.output || 0))} tokens${t.cached ? " (+" + k(t.cached) + " cached)" : ""}`
              : r.status === "done" ? " · instant, 0 tokens" : "";
-  add("msg" + (r.status === "done" || r.status === "needs_user" ? "" : " failed"), (r.status === "needs_user" ? "❓ " : "") + r.answer, `${r.status}${r.provider ? " · via " + r.provider : ""}${r.attempts ? " · " + r.attempts + " attempt(s)" : ""}${cost}`);
+  add("msg" + (r.status === "done" || r.status === "needs_user" ? "" : " failed"), (r.status === "needs_user" ? "❓ " : "") + r.answer, `${r.status}${r.provider ? " · via " + r.provider : ""}${r.fallback ? " · " + r.fallback : ""}${r.attempts ? " · " + r.attempts + " attempt(s)" : ""}${cost}`);
   if (r.checks && r.checks.length) showProof(r);
   if (live && r.status === "needs_user" && r.asked_about) showOptions(r);
 }
@@ -1089,6 +1089,7 @@ async function renderApps(box = $("s_appslist")) {
       state.textContent = a.running ? `✓ server running (${a.url})` : (a.installed ? "installed, server off" : "not installed");
       if (a.installed && !a.running) button("Start server", async () => ({...await post(`/api/apps/${a.name}/start`), refresh: true}), true);
       if (a.running) button("Send test message", () => post(`/api/apps/${a.name}/test`));
+      if (a.running) button("⏻ Stop server", async () => ({...await post(`/api/apps/${a.name}/stop`), refresh: true}));
       button("Check", async () => ({ok: true, refresh: true, message: ""}));
     }
     box.appendChild(el);

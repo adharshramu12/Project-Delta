@@ -49,6 +49,7 @@ class CircuitBreaker:
 MAX_RATE_LIMIT_WAIT_S = 20.0  # waiting this long beats switching to a weaker model
 LAST_RESORT_WAIT_S = 60.0     # when no other provider is left
 DEFAULT_RATE_WAIT_S = 15.0    # rate limited but the provider gave no "try again in" hint
+QUOTA_COOLDOWN_S = 600.0  # out of credits/quota: no point asking again on every message
 UNREACHABLE_COOLDOWN_S = 300.0  # local servers only; cloud blips use the normal breaker
 NETWORK_RETRY_DELAY_S = 1.5
 
@@ -68,6 +69,8 @@ class ModelRouter:
         self.allow_local = allow_local
         self.breakers = {name: CircuitBreaker() for name in providers}
         self.last_provider: str | None = None
+        self.why_down: dict[str, str] = {}  # last reason each provider failed, in plain words
+        self.skipped: dict[str, str] = {}   # providers passed over since reset_meter(): name -> why
 
     def refresh(self) -> None:
         """Pick up new or changed keys immediately and forget earlier failures."""
@@ -101,7 +104,10 @@ class ModelRouter:
         out = []
         for name in self.route(task):
             p = self.providers.get(name)
-            if p is None or not p.supports(task) or not self.breakers[name].available():
+            if p is None or not p.supports(task):
+                continue
+            if not self.breakers[name].available():
+                self.skipped.setdefault(name, self.why_down.get(name, "resting after errors"))
                 continue
             if p.local and not self.allow_local():
                 log.info("router.skip_local", provider=name, reason="governor")
@@ -142,10 +148,16 @@ class ModelRouter:
                     else:
                         raise
             except LLMError as e:
-                if e.kind == "unreachable" and p.local:
+                reason = str(e).split(": ", 1)[-1]
+                self.why_down[p.name] = reason
+                self.skipped.setdefault(p.name, reason)
+                if e.kind == "quota":
+                    # Out of credits: rest it instead of paying a failed call on every message.
+                    self.breakers[p.name].trip(QUOTA_COOLDOWN_S)
+                elif e.kind == "unreachable" and p.local:
                     # Nothing listening on this PC (e.g. Ollama not installed): stop trying for a while.
                     self.breakers[p.name].trip(UNREACHABLE_COOLDOWN_S)
-                elif e.kind not in ("rate_limit", "too_large", "bad_tool_call"):  # not a provider health issue
+                elif e.kind not in ("rate_limit", "too_large", "bad_tool_call", "quota"):  # not a provider health issue
                     self.breakers[p.name].record_failure()
                 errors.append(str(e))
                 kinds.append(e.kind)
@@ -168,6 +180,13 @@ class ModelRouter:
 
     def reset_meter(self) -> None:
         self.meter = {}
+        self.skipped = {}
+
+    def fallback_note(self) -> str:
+        """Why the user's chosen main AI did not answer this task (e.g. out of credits), or ""."""
+        if self.preferred in self.skipped and self.last_provider != self.preferred:
+            return f"{self.preferred} skipped: {self.skipped[self.preferred]}"
+        return ""
 
     async def prewarm(self, task: str) -> None:
         """Let the provider that will answer `task` start up now (Claude Code boots in ~6 s)."""

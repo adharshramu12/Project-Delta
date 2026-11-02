@@ -141,6 +141,17 @@ CONTINUE_NUDGE = ("Not finished yet: that reply had no tool call and did not sta
                   "Continue with the next unmet success criterion now (call a tool). Reply DONE: only when "
                   "every criterion is met, or NEED_USER: if only the user can unblock you.")
 
+# A model judging by its own sandbox may stop with "this environment doesn't provide desktop tools"
+# while Delta's tools are right there. That is never a real blocker: say which tools it has.
+_NO_TOOLS = re.compile(r"(environment|sandbox|don['’]?t|doesn['’]?t|do not|does not|no|not|unable|cannot|can['’]?t)\b"
+                       r"[^.]{0,60}\b(tools?|desktop[- ]control|access to (the |your )?(pc|computer|screen|browser))",
+                       re.I)
+
+
+def claims_no_tools(text: str) -> bool:
+    return bool(_NO_TOOLS.search(text))
+
+
 LOOKING = {"read_window", "list_windows", "path_info", "look_at_screen", "media_status"}
 
 
@@ -178,6 +189,11 @@ def proof_target(steps: list[StepRecord]) -> str | None:
 ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "web_search", "recall",
                 "list_windows", "read_window", "focus_window", "look_at_screen", "browser_read",
                 "media_status", "do_actions", "scroll"}
+BROWSER_TOOLS = BROWSER_ACTIONS | {"browser_read"}
+SCREEN_TOOLS = {"click_element", "click_at", "type_text", "press_keys", "set_field"}
+WEBSITE = re.compile(r"https?://|www\.|\b[\w-]+\.(com|org|net|in|io|ai|dev|app)\b|\b(website|web ?site|web ?page|"
+                     r"browser|chrome|edge|youtube|gmail|notebooklm|google (docs|drive|sheets|slides)|gemini|"
+                     r"chatgpt|amazon|flipkart|linkedin|twitter|instagram|facebook|wikipedia)\b", re.I)
 
 
 class Orchestrator:
@@ -223,6 +239,7 @@ class Orchestrator:
             self.executor.forget_task(req.id)
             await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
         result.tokens = dict(self.router.meter)
+        result.fallback = self.router.fallback_note()
         if self.proof:
             self.proof.finish(result)
         self.audit.record("task.end", task=req.id, status=result.status, attempts=result.attempts)
@@ -290,7 +307,7 @@ class Orchestrator:
             # Only the tools the plan needs (plus looking/checking helpers), on every attempt: the
             # same tool list keeps a Claude Code session and its prompt cache alive across retries,
             # where switching to all ~30 tools would restart it and re-send everything.
-            tools = self._tool_specs(plan.tools)
+            tools = self._tool_specs(plan.tools, req.text)
             final, stopped = await self._act(req, messages, steps, tools, budget)
             if stopped:
                 return TaskResult(req.id, "cancelled", stopped, attempt, steps)
@@ -482,13 +499,19 @@ class Orchestrator:
             self.proof.save_image(b64, f"{label} {target}")
         return b64, target
 
-    def _tool_specs(self, wanted: list[str]) -> list[dict[str, Any]]:
+    def _tool_specs(self, wanted: list[str], request: str = "") -> list[dict[str, Any]]:
         """Specs for the planned tools plus a few cheap read-only helpers; all tools if none planned.
-        Sending 6 tool descriptions instead of 30+ cuts most of the tokens of every call."""
+        Sending 6 tool descriptions instead of 30+ cuts most of the tokens of every call. A tool group
+        is sent whole (half a browser kit makes the agent fall back to pixel clicks), and a request
+        about a website always gets the browser tools."""
         specs = self.executor.registry.specs()
         if not wanted:
             return specs
         keep = set(wanted) | ALWAYS_TOOLS
+        if set(wanted) & BROWSER_TOOLS or WEBSITE.search(request):  # not ALWAYS_TOOLS' browser_read
+            keep |= BROWSER_TOOLS
+        if set(wanted) & SCREEN_TOOLS:
+            keep |= SCREEN_TOOLS
         return [s for s in specs if s["function"]["name"] in keep]
 
     async def _complete_with_recovery(self, messages: list[Message], tools: list[dict[str, Any]]) -> Any:
@@ -527,6 +550,14 @@ class Orchestrator:
                 if getattr(resp, "final", False) and not content.startswith((DONE, NEED_USER)):
                     content = f"{DONE} {content}"  # {"final": ...} is an explicit "I am finished"
                 messages.append({"role": "assistant", "content": content})
+                if content.startswith(NEED_USER) and claims_no_tools(content) and nudges < MAX_NUDGES:
+                    nudges += 1
+                    names = ", ".join(t["function"]["name"] for t in tools)
+                    log.info("orchestrator.false_no_tools", task=req.id, said=content[:160])
+                    messages.append({"role": "user", "content": (
+                        f"You DO have working tools for this: {names}. They act on the user's PC right now. "
+                        "Continue the task with them (call a tool). Do not say tools are missing.")})
+                    continue
                 if content.startswith((DONE, NEED_USER)) or nudges >= MAX_NUDGES:
                     return content, ""
                 # A progress note or "should I continue?" is not the end of the task.

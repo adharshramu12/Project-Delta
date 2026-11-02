@@ -17,7 +17,7 @@ from delta.core.orchestrator import Orchestrator
 from delta.core.proof import ProofRecorder
 from delta.core.state import TaskRequest, TaskResult
 from delta.learning.store import Learned, LearningStore
-from delta.llm.cli_providers import ClaudeCodeProvider, CodexProvider
+from delta.llm.cli_providers import CLI_KINDS
 from delta.llm.providers import OpenAICompatProvider, Provider, lmstudio_base_url
 from delta.llm.router import ModelRouter
 from delta.memory.chats import ChatStore
@@ -59,11 +59,8 @@ def make_policy(settings: Settings) -> PolicyEngine:
 def build_providers(settings: Settings) -> dict[str, Provider]:
     providers: dict[str, Provider] = {}
     for name, cfg in settings.llm.providers.items():
-        if cfg.kind == "claude_code":
-            providers[name] = ClaudeCodeProvider(name, cfg)
-            continue
-        if cfg.kind == "codex":
-            providers[name] = CodexProvider(name, cfg)
+        if cfg.kind in CLI_KINDS:
+            providers[name] = CLI_KINDS[cfg.kind](name, cfg)
             continue
         if cfg.discover == "lmstudio":
             cfg = cfg.model_copy(update={"base_url": lmstudio_base_url(cfg.base_url)})

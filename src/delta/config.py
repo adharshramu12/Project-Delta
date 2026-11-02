@@ -18,8 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 class ProviderConfig(BaseModel):
     # "openai": any OpenAI-compatible server (Ollama, LM Studio, Groq, NIM, ...).
-    # "claude_code" / "codex": the user's own signed-in CLI, so their existing plan pays.
-    kind: Literal["openai", "claude_code", "codex"] = "openai"
+    # "claude_code" / "codex" / "cline": the user's own signed-in AI app, so their plan or credits pay.
+    kind: Literal["openai", "claude_code", "codex", "cline"] = "openai"
     base_url: str = ""
     command: str | None = None  # CLI kinds: path to the executable (default: found automatically)
     discover: Literal["lmstudio"] | None = None  # read the server's port from the app's own settings

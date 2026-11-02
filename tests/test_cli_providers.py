@@ -325,3 +325,91 @@ def test_codex_runs_lean_for_delta(monkeypatch, tmp_path):
     assert "features.shell_tool=false" in sets and "features.multi_agent=false" in sets
     assert "plugins.browser@openai-bundled.enabled=false" in sets
     assert "mcp_servers.node_repl.enabled=false" in sets
+
+
+CLINE_OK = "\n".join([
+    '{"type":"agent_event","event":{"type":"text","text":"O"}}',
+    '{"type":"run_result","finishReason":"stop","text":"OK","usage":{"inputTokens":900,"outputTokens":3,'
+    '"cacheReadTokens":4000,"cacheWriteTokens":100}}'])
+CLINE_BROKE = ('{"type":"run_result","finishReason":"error","text":"Insufficient balance. Your Cline Credits '
+               'balance is $-0.02"}')
+
+
+def _cline(tmp_path):
+    from delta.config import ProviderConfig
+    from delta.llm.cli_providers import ClineProvider
+
+    p = ClineProvider("cline", ProviderConfig(kind="cline", models={"chat": ""}))
+    p._path = "cline"
+    return p
+
+
+def test_cline_reads_answer_and_usage_from_its_json_events(tmp_path):
+    p = _cline(tmp_path)
+    assert p.reply(CLINE_OK, tmp_path / "x") == "OK"
+    assert p.usage(CLINE_OK, "") == {"input": 1000, "cached": 4000, "output": 3}
+    cmd = p.command("cline", "", tmp_path / "reply.txt")
+    assert "--json" in cmd and cmd[cmd.index("-s") + 1].startswith("You are the reasoning engine of")
+    assert cmd[cmd.index("--auto-approve") + 1] == "false"
+
+
+def test_cline_out_of_credits_moves_on_instead_of_waiting(tmp_path):
+    from delta.llm.schemas import LLMError
+
+    p = _cline(tmp_path)
+    with pytest.raises(LLMError) as e:
+        p.reply(CLINE_BROKE, tmp_path / "x")
+    assert e.value.kind == "quota" and "credits are used up" in str(e.value)
+
+
+async def test_cline_gets_the_prompt_as_an_argument_and_refuses_oversize(tmp_path, monkeypatch):
+    from delta.llm import cli_providers
+    from delta.llm.schemas import LLMError
+
+    p = _cline(tmp_path)
+    seen = {}
+
+    async def fake_run(self, cmd, prompt, cwd):
+        seen["cmd"], seen["stdin"] = cmd, prompt
+        return CLINE_OK, "", 0
+
+    monkeypatch.setattr(cli_providers.CLIProvider, "_run", fake_run)
+    r = await p.complete("chat", [{"role": "user", "content": "say OK"}], None)
+    assert r.content == "OK" and "say OK" in seen["cmd"][-1] and seen["stdin"] == ""
+    with pytest.raises(LLMError) as e:
+        await p.complete("chat", [{"role": "user", "content": "x" * 40000}], None)
+    assert e.value.kind == "too_large"
+    assert not p.supports("vision")
+
+
+CATALOG = {"free": [{"id": "reflection/beam-free", "name": "Beam"},
+                    {"id": "cline-free/solar-mini4", "name": "Solar Mini 4"}],
+           "recommended": [{"id": "anthropic/claude-sonnet-5.5", "name": "claude-sonnet-5.5"}]}
+
+
+def test_cline_lists_free_models_first(tmp_path, monkeypatch):
+    p = _cline(tmp_path)
+    monkeypatch.setattr(p, "catalog", lambda: CATALOG)
+    labels = [o["label"] for o in p.model_options()]
+    assert labels == ["Beam (free)", "Solar Mini 4 (free)", "claude sonnet 5.5 (uses credits)"]
+
+
+async def test_cline_out_of_credits_on_a_paid_model_answers_with_a_free_one(tmp_path, monkeypatch):
+    from delta.config import ProviderConfig
+    from delta.llm import cli_providers
+    from delta.llm.cli_providers import ClineProvider
+
+    p = ClineProvider("cline", ProviderConfig(kind="cline", models={"chat": "anthropic/claude-sonnet-5.5"}))
+    p._path = "cline"
+    monkeypatch.setattr(p, "catalog", lambda: CATALOG)
+    models = []
+
+    async def fake_run(self, cmd, prompt, cwd):
+        model = cmd[cmd.index("-m") + 1]
+        models.append(model)
+        return (CLINE_BROKE, "", 1) if model == "anthropic/claude-sonnet-5.5" else (CLINE_OK, "", 0)
+
+    monkeypatch.setattr(cli_providers.CLIProvider, "_run", fake_run)
+    r = await p.complete("chat", [{"role": "user", "content": "say OK"}], None)
+    assert r.content == "OK" and models == ["anthropic/claude-sonnet-5.5", "reflection/beam-free"]
+    assert p.model_for("chat") == "anthropic/claude-sonnet-5.5"  # the user's choice is kept for next time

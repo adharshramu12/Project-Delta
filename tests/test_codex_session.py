@@ -120,3 +120,25 @@ async def test_without_an_app_server_it_falls_back_to_exec(monkeypatch):
     monkeypatch.setattr(cli_providers.CLIProvider, "complete", one_shot)
     assert (await p.complete("chat", [{"role": "user", "content": "hi"}], None)).content == "hi"
     assert used == ["exec"] and p._no_server
+
+
+async def test_screenshot_turns_stay_in_the_live_session(server):
+    """A one-shot `codex exec` per screenshot re-sent the whole task uncached and lost the framing."""
+    server["replies"] = ['{"tool_calls": [{"name": "click_at", "arguments": {}}]}', '{"final": "DONE: clicked"}']
+    p = CodexProvider("codex", ProviderConfig(kind="codex", models={"chat": "gpt-5.6-terra"}))
+    p._path = "codex"
+    tools = [{"type": "function", "function": {"name": "click_at", "parameters": {"type": "object"}}}]
+    convo = [{"role": "system", "content": "You are Delta."}, {"role": "user", "content": "click new notebook"}]
+    await p.complete("chat", convo, tools)
+    shot = "data:image/jpeg;base64,AAAA"
+    convo += [{"role": "assistant", "content": "", "tool_calls": [
+                  {"id": "c1", "type": "function", "function": {"name": "click_at", "arguments": "{}"}}]},
+              {"role": "tool", "tool_call_id": "c1", "name": "click_at", "content": "clicked"},
+              {"role": "user", "content": [{"type": "text", "text": "AFTER screenshot:"},
+                                           {"type": "image_url", "image_url": {"url": shot}}]}]
+    second = await p.complete("chat", convo, tools)
+    turns = server["server"].turns
+    assert second.final and len(turns) == 2  # same server, no exec process
+    assert turns[1]["input"][1] == {"type": "image", "url": shot}
+    assert "they all work" in turns[1]["input"][0]["text"]
+    await p.unload()

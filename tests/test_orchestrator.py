@@ -101,3 +101,40 @@ async def test_no_actions_taken_fails_verification(tmp_path):
     r = await orch.run(TaskRequest("make file"))
     assert r.status == "failed"
     assert r.verification and r.verification.reason == "no actions were taken"
+
+
+async def test_a_false_no_tools_answer_is_not_accepted(tmp_path):
+    """Codex once stopped mid-task with 'this environment doesn't provide the desktop-control tools'."""
+    target = str(tmp_path / "notes.txt")
+    orch, _, _ = make(tmp_path, {
+        "plan": [js({"needs_tools": True, "goal": "make notes", "steps": ["write"], "tools": ["write_file"],
+                     "success_criteria": [f"{target} exists"]})],
+        "chat": [text("NEED_USER: I'm unable to continue because this environment doesn't provide the tools."),
+                 call("write_file", path=target, content="hi"), text("DONE: Created notes.txt")],
+        "verify": [js({"passed": True, "reason": "written"})],
+    })
+    r = await orch.run(TaskRequest("create notes"))
+    assert r.status == "done", r.answer
+    assert Path(target).read_text() == "hi"
+
+
+def test_real_blockers_still_reach_the_user():
+    from delta.core.orchestrator import claims_no_tools
+
+    assert claims_no_tools("NEED_USER: I don’t have access to the browser here")
+    assert not claims_no_tools("NEED_USER: You are not signed in to NotebookLM. Please sign in.")
+    assert not claims_no_tools("NEED_USER: Which Ravi do you mean, Ravi K or Ravi S?")
+
+
+def test_website_requests_get_the_whole_browser_kit(tmp_path, monkeypatch):
+    orch, _, _ = make(tmp_path, {})
+    every = ["run_shell", "write_file", "browser_open", "browser_click", "browser_fill", "browser_read",
+             "click_at", "click_element", "type_text"]
+    monkeypatch.setattr(orch.executor.registry, "specs", lambda: [{"function": {"name": n}} for n in every])
+
+    def names(wanted, text):
+        return {s["function"]["name"] for s in orch._tool_specs(wanted, text)}
+
+    assert {"browser_open", "browser_click", "browser_fill"} <= names(["run_shell"], "Open Chrome, then NotebookLM")
+    assert {"click_element", "type_text"} <= names(["click_at"], "click OK in Paint")  # the whole group
+    assert not {"browser_click", "click_at"} & names(["write_file"], "create notes.txt")

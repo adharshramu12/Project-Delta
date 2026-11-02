@@ -29,7 +29,8 @@ Message = dict[str, Any]  # {"role": ..., "content": ..., optional "tool_calls"/
 class LLMError(RuntimeError):
     """Raised when a provider fails in a way that should trigger fallback.
 
-    kind: "unreachable" (nothing listening, e.g. Ollama not installed), "rate_limit", or "error".
+    kind: "unreachable" (nothing listening, e.g. Ollama not installed), "rate_limit", "quota" (out of
+    credits: skip this provider for a while), or "error".
     retry_after_s: for rate limits, how long the provider asked us to wait (if it said).
     """
 

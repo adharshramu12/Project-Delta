@@ -69,6 +69,7 @@ class TaskResult:
     provider: str = ""
     skill_id: int | None = None
     tokens: dict[str, int] = field(default_factory=dict)  # input / cached / output / calls for this task
+    fallback: str = ""  # why the user's chosen main AI did not answer, e.g. "cline skipped: credits used up"
     fast: bool = False  # finished by the planner's one direct tool call
     options: list[str] = field(default_factory=list)  # needs_user: quick answers the user can tap
     asked_about: str = ""  # needs_user: the original request, so an answer can continue it

@@ -23,6 +23,7 @@ from delta.llm.schemas import LLMError
 from delta.system.secrets import get_secret, set_secret
 
 LABELS = {"claude_code": "Claude Code (your Claude plan)", "codex": "Codex (your ChatGPT plan)",
+          "cline": "Cline (your Cline account)", "deepseek": "DeepSeek (your API key)",
           "lmstudio": "LM Studio (on this PC)", "ollama": "Ollama (on this PC)",
           "groq": "Groq (free cloud key)", "nim": "NVIDIA NIM (free cloud key)"}
 
@@ -175,6 +176,27 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
                                     timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         p._ping_at = -1e9  # check again now, not in 30 s
         return {"ok": r.returncode == 0, "message": (r.stdout or r.stderr).strip()[-300:]}
+
+    @app.post("/api/apps/{name}/stop", dependencies=[Depends(auth)])
+    async def stop(name: str) -> dict[str, Any]:
+        """Unload every model (frees its RAM/VRAM), then stop the server. LM Studio itself stays
+        installed; Start server brings it back."""
+        p = get(name)
+        lms = find_lms()
+        if isinstance(p, CLIProvider) or lms is None:
+            return {"ok": False, "message": "LM Studio is not installed."}
+
+        def run(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run([lms, *args], capture_output=True, text=True, timeout=60,
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+        await asyncio.to_thread(run, "unload", "--all")
+        r = await asyncio.to_thread(run, "server", "stop")
+        p._ping_at = -1e9
+        c.audit.record("apps.stopped", app=name)
+        ok = r.returncode == 0
+        return {"ok": ok, "message": "Server stopped and models unloaded: memory is free again."
+                if ok else (r.stdout or r.stderr).strip()[-300:]}
 
     @app.post("/api/apps/{name}/test", dependencies=[Depends(auth)])
     async def test(name: str) -> dict[str, Any]:

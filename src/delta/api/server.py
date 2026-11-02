@@ -85,6 +85,7 @@ def _result_json(r: TaskResult) -> dict[str, Any]:
     return {"task_id": r.task_id, "status": r.status, "answer": r.answer, "attempts": r.attempts,
             "provider": r.provider, "steps": [{"tool": s.tool, "ok": s.ok} for s in r.steps],
             "checks": v.checks if v else [], "seen_screen": bool(v and v.screenshot), "tokens": r.tokens,
+            "fallback": r.fallback,
             "options": r.options, "asked_about": r.asked_about}
 
 

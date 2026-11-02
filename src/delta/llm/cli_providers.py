@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import contextvars
 import hashlib
 import json
 import os
@@ -31,9 +32,9 @@ from delta.llm.schemas import LLMError, LLMResponse, Message
 from delta.system.logging import log
 
 # Replaces Claude Code's own (large, coding-focused) system prompt, which also saves plan quota.
-CLI_SYSTEM_PROMPT = ("You are the reasoning engine of a desktop assistant called Delta. You have no tools "
-                     "of your own. Follow the instructions in the conversation below exactly and reply "
-                     "only in the format it asks for.")
+CLI_SYSTEM_PROMPT = ("You are the reasoning engine of a desktop assistant called Delta. Delta's tools (listed "
+                     "in the conversation when a step needs them) are how you act on the user's PC; you call them "
+                     "by replying in the format the conversation asks for. Follow its instructions exactly.")
 
 # Codex is only Delta's text model, but by default it brings its whole agent: shell, multi-agent,
 # browser and computer use, image generation, skills, the user's desktop-app plugins and MCP servers.
@@ -63,7 +64,13 @@ def lean_codex_args() -> list[str]:
     return [arg for s in sets for arg in ("-c", s)]
 
 
-SIGN_IN_HINTS =("not logged in", "login", "log in", "authenticat", "unauthorized", "401", "api key")
+# Said on every turn that offers tools. Without it a CLI model judges by its own sandbox and may
+# answer "this environment doesn't provide desktop tools" while Delta's tools are right there.
+TOOLS_ONLY_REMINDER = ("\n\nYou act on the user's PC ONLY through the tools listed above, and they all work: "
+                       "use them, never say tools are missing. Do not run commands yourself. Reply with the "
+                       'JSON {"tool_calls": [...]} or {"final": "..."} described above.')
+
+SIGN_IN_HINTS = ("not logged in", "login", "log in", "authenticat", "unauthorized", "401", "api key")
 LIMIT_HINTS = ("usage limit", "rate limit", "limit reached", "quota", "too many requests", "429")
 
 
@@ -186,6 +193,8 @@ class CLIProvider:
         model = self.model_for(task)
         msgs = inject_tool_prompt(messages, tools) if tools else list(messages)
         prompt = self.preamble + render_transcript(msgs)
+        if tools:
+            prompt += TOOLS_ONLY_REMINDER
         if json_mode and not tools:
             prompt += "\n\nReply with ONLY a JSON object."
         # An empty scratch folder as working dir: no project files, CLAUDE.md or AGENTS.md leak in.
@@ -486,8 +495,13 @@ class _Session:
 
 
 def _has_images(messages: list[Message]) -> bool:
-    return any(isinstance(m.get("content"), list) and any(
-        isinstance(p, dict) and p.get("type") == "image_url" for p in m["content"]) for m in messages)
+    return bool(_image_urls(messages))
+
+
+def _image_urls(messages: list[Message]) -> list[str]:
+    """The data: URLs of the screenshots in these messages, in order."""
+    return [str(p["image_url"]["url"]) for m in messages if isinstance(m.get("content"), list)
+            for p in m["content"] if isinstance(p, dict) and p.get("type") == "image_url"]
 
 
 def _usage(u: dict) -> dict[str, int]:
@@ -572,11 +586,14 @@ class _CodexSession:
 
         return await asyncio.wait_for(wait(), limit_s)
 
-    async def ask(self, text: str, model: str, effort: str, limit_s: float) -> tuple[str, dict[str, int]]:
-        """One turn: send the new messages, return (reply, token usage for this turn)."""
+    async def ask(self, text: str, model: str, effort: str, limit_s: float,
+                  images: list[str] | None = None) -> tuple[str, dict[str, int]]:
+        """One turn: send the new messages (and any new screenshots, as data: URLs), return
+        (reply, token usage for this turn)."""
         async with self._lock:
             self.last_used = time.monotonic()
-            params: dict[str, Any] = {"threadId": self.thread_id, "input": [{"type": "text", "text": text}]}
+            params: dict[str, Any] = {"threadId": self.thread_id, "input": [
+                {"type": "text", "text": text}, *({"type": "image", "url": u} for u in images or [])]}
             if model:
                 params["model"] = model
             if effort:
@@ -657,7 +674,9 @@ class CodexProvider(CLIProvider):
     async def complete(
         self, task: str, messages: list[Message], tools: list[dict] | None, json_mode: bool = False
     ) -> LLMResponse:
-        if _has_images(messages) or self._no_server:
+        # Screenshots go into the live conversation too: a one-shot `codex exec` per screenshot turn
+        # re-sent the whole task uncached (a NotebookLM task: 40.9k tokens) and lost the session's framing.
+        if self._no_server:
             return await super().complete(task, messages, tools, json_mode)
         model, effort = self.model_for(task), self.effort_for(task)
         full = inject_tool_prompt(messages, tools) if tools else list(messages)
@@ -665,8 +684,10 @@ class CodexProvider(CLIProvider):
         convo = f"{model}/" + hashlib.sha1(system[:20000].encode()).hexdigest()
         sess = self._live.get(convo)
         if sess is not None and sess.alive() and sess.continues(messages):
+            images = _image_urls(messages[sess.sent + 1:])
             new = flatten_messages(messages[sess.sent + 1:])
         else:
+            images = _image_urls(messages)
             if sess is not None:
                 sess.close()
             sess = self._spare.pop(model, None)
@@ -683,12 +704,11 @@ class CodexProvider(CLIProvider):
         # so the first turn says so in full and every turn with tools repeats it briefly.
         prompt = (self.preamble if new is full else "") + render_transcript(new)
         if tools:
-            prompt += ("\n\nYou cannot run commands or touch the PC yourself. Act only by replying with the "
-                       'JSON {"tool_calls": [...]} or {"final": "..."} described above.')
+            prompt += TOOLS_ONLY_REMINDER
         if json_mode and not tools:
             prompt += "\n\nReply with ONLY a JSON object."
         try:
-            content, usage = await sess.ask(prompt, model, effort, self.cfg.timeout_s)
+            content, usage = await sess.ask(prompt, model, effort, self.cfg.timeout_s, images)
         except LLMError:
             sess.close()
             self._live.pop(convo, None)
@@ -755,3 +775,142 @@ def _json_or_none(line: str) -> object:
         return json.loads(line)
     except json.JSONDecodeError:
         return None
+
+
+class ClineProvider(CLIProvider):
+    """Cline with the user's Cline account (its free credits, or any provider they set up in Cline).
+    The Cline desktop app ships `cline-cli.exe`; one run per call, with Delta's system prompt in
+    place of Cline's coding one and Cline's tool approvals off, so it only answers in text."""
+
+    names = ("cline", "cline-cli")
+    label = "Cline"
+
+    def supports(self, task: str) -> bool:
+        return task != "vision" and super().supports(task)  # its CLI takes no screenshots
+    MAX_PROMPT_CHARS = 30000  # the prompt is a command-line argument; Windows allows ~32k characters
+    # The list the Cline app shows (free, recommended, ...). Free models cost the user nothing.
+    MODELS_URL = "https://api.cline.bot/api/v1/ai/cline/recommended-models"
+    FREE_OFFLINE = ("reflection/beam-free", "cline-free/solar-mini4", "cline-free/nemotron-3.5-super-vl",
+                    "nvidia/nemotron-3.5-lightning-free")  # Cline's free list on 2026-11-02, if offline
+    EFFORTS = ("low", "medium", "high")
+    CATALOG_TTL_S = 3600
+
+    def __init__(self, name: str, cfg: ProviderConfig) -> None:
+        super().__init__(name, cfg)
+        self._catalog: tuple[float, dict[str, Any]] | None = None
+        self._force_model: contextvars.ContextVar[str] = contextvars.ContextVar(f"{name}_model", default="")
+
+    def catalog(self) -> dict[str, Any]:
+        """Cline's current model list ({"free": [...], "recommended": [...], ...}), cached for an hour."""
+        if self._catalog and time.monotonic() - self._catalog[0] < self.CATALOG_TTL_S:
+            return self._catalog[1]
+        data: dict[str, Any] = {"free": [{"id": m, "name": m.split("/")[-1]} for m in self.FREE_OFFLINE]}
+        with contextlib.suppress(Exception):
+            import httpx
+
+            got = httpx.get(self.MODELS_URL, timeout=5).json()
+            if isinstance(got, dict) and got.get("free"):
+                data = got
+        self._catalog = (time.monotonic(), data)
+        return data
+
+    def free_models(self) -> list[str]:
+        return [str(m["id"]) for m in self.catalog().get("free", []) if isinstance(m, dict) and m.get("id")]
+
+    def model_options(self) -> list[dict]:
+        """Free models first (no credits needed), then the paid ones Cline recommends."""
+        def label(m: dict[str, Any]) -> str:
+            return str(m.get("name") or m["id"]).split("/")[-1].replace("-", " ").strip()
+
+        cat = self.catalog()
+        free = [{"id": m["id"], "label": f"{label(m)} (free)", "efforts": list(self.EFFORTS)}
+                for m in cat.get("free", []) if isinstance(m, dict) and m.get("id")]
+        paid = [{"id": m["id"], "label": f"{label(m)} (uses credits)", "efforts": list(self.EFFORTS)}
+                for m in cat.get("recommended", []) if isinstance(m, dict) and m.get("id")]
+        return free + paid
+
+    def model_for(self, task: str) -> str:
+        return self._force_model.get() or super().model_for(task)
+
+    async def complete(
+        self, task: str, messages: list[Message], tools: list[dict] | None, json_mode: bool = False
+    ) -> LLMResponse:
+        """Out of credits on a paid model: answer with a free Cline model instead of giving up."""
+        try:
+            return await super().complete(task, messages, tools, json_mode)
+        except LLMError as e:
+            free = await asyncio.to_thread(self.free_models)
+            if e.kind != "quota" or not free or self.model_for(task) in free:
+                raise
+            log.info("cline.free_fallback", task=task, model=free[0])
+            token = self._force_model.set(free[0])
+            try:
+                return await super().complete(task, messages, tools, json_mode)
+            finally:
+                self._force_model.reset(token)
+
+    def executable(self) -> str | None:
+        found = super().executable()
+        if found is None and (local := os.environ.get("LOCALAPPDATA")):
+            app = Path(local) / "Cline" / "cline-cli.exe"  # the desktop app's own copy
+            if app.is_file():
+                self._path = found = str(app)
+        return found
+
+    def command(self, exe: str, model: str, out_file: Path, effort: str = "",
+                images: list[Path] | None = None) -> list[str]:
+        cmd = [exe, "--json", "--auto-approve", "false", "--compaction", "off", "-c", str(out_file.parent),
+               "-s", CLI_SYSTEM_PROMPT]
+        if model:
+            cmd += ["-m", model]
+        if effort:
+            cmd += ["--thinking", effort]
+        return cmd
+
+    async def _run(self, cmd: list[str], prompt: str, cwd: str) -> tuple[str, str, int]:
+        # Cline reads its prompt only from the command line (piped input is not detected on Windows).
+        if len(prompt) > self.MAX_PROMPT_CHARS:
+            raise LLMError(f"{self.name}: prompt too long for Cline's command line", kind="too_large")
+        return await super()._run([*cmd, prompt], "", cwd) if prompt else await super()._run(cmd, "", cwd)
+
+    def _result(self, stdout: str) -> dict[str, Any]:
+        events = [e for e in map(_json_or_none, stdout.splitlines()) if isinstance(e, dict)]
+        return next((e for e in reversed(events) if e.get("type") == "run_result"), {})
+
+    def reply(self, stdout: str, out_file: Path) -> str:
+        result = self._result(stdout)
+        if result.get("finishReason") == "error":
+            raise self._error(str(result.get("text") or "Cline reported an error"), 1)
+        return str(result.get("text") or "").strip()
+
+    def usage(self, stdout: str, stderr: str) -> dict[str, int]:
+        u = self._result(stdout).get("usage") or {}
+        return {"input": int(u.get("inputTokens") or 0) + int(u.get("cacheWriteTokens") or 0),
+                "cached": int(u.get("cacheReadTokens") or 0), "output": int(u.get("outputTokens") or 0)}
+
+    def _error(self, text: str, code: int) -> LLMError:
+        if "insufficient balance" in text.lower() or "credits balance" in text.lower():
+            # Not a wait-and-retry limit: move on to the next AI at once.
+            return LLMError(f"{self.name}: your Cline credits are used up (add credits in the Cline app)",
+                            kind="quota")
+        last = next((e for e in reversed([_json_or_none(x) for x in text.splitlines()])
+                     if isinstance(e, dict) and e.get("type") == "error"), None)
+        return super()._error(str(last.get("message")) if last else text, code)
+
+    def login_args(self) -> list[str]:
+        return ["auth"]
+
+    async def signed_in(self) -> bool | None:
+        """Cline's status command needs a terminal, so read its sign-in file instead (never the token)."""
+        if self.executable() is None:
+            return None
+        with contextlib.suppress(OSError, ValueError):
+            data = json.loads((Path.home() / ".cline" / "data" / "settings" / "providers.json")
+                              .read_text(encoding="utf-8"))
+            return bool(data.get("providers", {}).get(data.get("lastUsedProvider", ""), {}).get("settings"))
+        return False
+
+
+# Provider kinds that run an AI app the user already has, by `kind` in config/delta.yaml.
+CLI_KINDS: dict[str, type[CLIProvider]] = {"claude_code": ClaudeCodeProvider, "codex": CodexProvider,
+                                           "cline": ClineProvider}

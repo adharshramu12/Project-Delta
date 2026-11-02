@@ -53,6 +53,23 @@ llm:
       timeout_s: 240
       models:
         chat: ""          # empty = Codex's default model
+    # Your Cline account, through the cline-cli that the Cline desktop app installs. Uses one of
+    # Cline's FREE models by default (no credits needed); pick others in Settings > Connected apps.
+    # Skipped when Cline is not installed.
+    cline:
+      kind: cline
+      timeout_s: 240
+      models:
+        chat: reflection/beam-free   # Cline's free Beam model; "" = the model you last chose in Cline
+    # DeepSeek's own API (very low cost). Key: `delta secrets set deepseek_api_key`.
+    deepseek:
+      base_url: https://api.deepseek.com/v1
+      secret: deepseek_api_key
+      timeout_s: 90
+      models:
+        chat: deepseek-chat
+        plan: deepseek-chat
+        verify: deepseek-chat
     groq:
       base_url: https://api.groq.com/openai/v1
       secret: groq_api_key
@@ -70,9 +87,9 @@ llm:
         vision: meta/llama-3.2-90b-vision-instruct
   # Provider order per job. The first healthy, allowed provider wins.
   routes:
-    chat: [ollama, lmstudio, claude_code, codex, groq, nim]
-    plan: [claude_code, codex, groq, nim, lmstudio, ollama]
-    verify: [groq, nim, claude_code, codex, lmstudio, ollama]
+    chat: [ollama, lmstudio, claude_code, codex, cline, deepseek, groq, nim]
+    plan: [claude_code, codex, cline, deepseek, groq, nim, lmstudio, ollama]
+    verify: [groq, nim, deepseek, claude_code, codex, cline, lmstudio, ollama]
     vision: [ollama, lmstudio, claude_code, codex, nim]
 
 search:
