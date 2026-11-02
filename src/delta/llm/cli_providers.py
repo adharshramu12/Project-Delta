@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from delta.config import ProviderConfig
 from delta.llm.providers import flatten_messages, inject_tool_prompt, parse_prompt_tools
@@ -466,12 +467,210 @@ def _usage(u: dict) -> dict[str, int]:
             "cached": int(u.get("cache_read_input_tokens") or 0), "output": int(u.get("output_tokens") or 0)}
 
 
+class _CodexSession:
+    """One `codex app-server` (JSON-RPC over stdio) holding one conversation ("thread").
+
+    `codex exec` starts a process per call (~16 s each). The app server stays up: after the first
+    turn, each turn takes ~1.5 s and earlier turns come from the prompt cache. Read-only sandbox and
+    approval policy "never": Codex runs nothing on the PC; Delta's own tools do all the work."""
+
+    def __init__(self, proc: asyncio.subprocess.Process, thread_id: str, key: str) -> None:
+        self.proc, self.thread_id, self.key = proc, thread_id, key
+        self.sent = 0
+        self.system: object = None
+        self.last_used = time.monotonic()
+        self._lock = asyncio.Lock()
+        self._next = 100
+
+    @classmethod
+    async def start(cls, exe: str, model: str, key: str, limit_s: float = 30) -> _CodexSession:
+        proc = await asyncio.create_subprocess_exec(
+            exe, "app-server", cwd=tempfile.gettempdir(), env={**os.environ, "NO_COLOR": "1"},
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            limit=2**24)
+        s = cls(proc, "", key)
+        try:
+            await s._call("initialize", {"clientInfo": {"name": "delta", "version": "1"}}, limit_s)
+            s._write({"jsonrpc": "2.0", "method": "initialized", "params": {}})
+            params: dict[str, Any] = {"sandbox": "read-only", "approvalPolicy": "never", "ephemeral": True,
+                                      "baseInstructions": CLI_SYSTEM_PROMPT + " Do not run commands or read files."}
+            if model:
+                params["model"] = model
+            result = await s._call("thread/start", params, limit_s)
+            s.thread_id = str(result["thread"]["id"])
+        except Exception:
+            s.close()
+            raise
+        return s
+
+    def alive(self) -> bool:
+        return self.proc.returncode is None
+
+    def continues(self, messages: list[Message]) -> bool:
+        return _Session.continues(self, messages)  # type: ignore[arg-type]
+
+    def _write(self, msg: dict[str, Any]) -> None:
+        assert self.proc.stdin is not None
+        self.proc.stdin.write((json.dumps(msg) + "\n").encode("utf-8"))
+
+    async def _read(self) -> dict[str, Any]:
+        assert self.proc.stdout is not None
+        while True:
+            raw = await self.proc.stdout.readline()
+            if not raw:
+                raise LLMError("codex: app server stopped", kind="unreachable")
+            msg = _json_or_none(raw.decode("utf-8", "replace"))
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("method") and "id" in msg:  # a request from Codex (e.g. approval): always no
+                self._write({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32000, "message": "not allowed"}})
+                continue
+            return msg
+
+    async def _call(self, method: str, params: dict[str, Any], limit_s: float) -> dict[str, Any]:
+        self._next += 1
+        rid = self._next
+        self._write({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
+
+        async def wait() -> dict[str, Any]:
+            while True:
+                msg = await self._read()
+                if msg.get("id") == rid:
+                    if "error" in msg:
+                        raise LLMError(f"codex: {method} failed: {str(msg['error'])[:200]}")
+                    return dict(msg.get("result") or {})
+
+        return await asyncio.wait_for(wait(), limit_s)
+
+    async def ask(self, text: str, model: str, effort: str, limit_s: float) -> tuple[str, dict[str, int]]:
+        """One turn: send the new messages, return (reply, token usage for this turn)."""
+        async with self._lock:
+            self.last_used = time.monotonic()
+            params: dict[str, Any] = {"threadId": self.thread_id, "input": [{"type": "text", "text": text}]}
+            if model:
+                params["model"] = model
+            if effort:
+                params["effort"] = effort
+            self._next += 1
+            rid = self._next
+            self._write({"jsonrpc": "2.0", "id": rid, "method": "turn/start", "params": params})
+            reply: list[str] = []
+            usage: dict[str, int] = {}
+
+            async def collect() -> None:
+                while True:
+                    msg = await self._read()
+                    method, p = msg.get("method"), msg.get("params") or {}
+                    if msg.get("id") == rid and "error" in msg:
+                        raise LLMError(f"codex: {str(msg['error'])[:200]}")
+                    if method == "item/completed" and (p.get("item") or {}).get("type") == "agentMessage":
+                        reply.append(str(p["item"].get("text", "")))
+                    elif method == "thread/tokenUsage/updated":
+                        last = (p.get("tokenUsage") or {}).get("last") or {}
+                        cached = int(last.get("cachedInputTokens") or 0)
+                        usage.update(input=int(last.get("inputTokens") or 0) - cached, cached=cached,
+                                     output=int(last.get("outputTokens") or 0))
+                    elif method == "error":
+                        raise LLMError(f"codex: {str(p)[:200]}", kind="rate_limit" if "limit" in str(p).lower()
+                                       else "error")
+                    elif method == "turn/completed":
+                        return
+
+            try:
+                await asyncio.wait_for(collect(), limit_s)
+            except TimeoutError as e:
+                raise LLMError(f"codex: timed out after {limit_s}s") from e
+            return "\n".join(reply).strip(), usage
+
+    def close(self) -> None:
+        if self.alive():
+            with contextlib.suppress(ProcessLookupError, OSError):
+                if self.proc.stdin is not None:
+                    self.proc.stdin.close()
+                self.proc.kill()
+
+
 class CodexProvider(CLIProvider):
-    """`codex exec` with the user's ChatGPT plan login, sandboxed read-only."""
+    """Codex with the user's ChatGPT plan login. A live `codex app-server` conversation per task
+    (fast, cached); turns with screenshots, or an older Codex without the server, use `codex exec`."""
 
     names = ("codex",)
     label = "Codex"
     preamble = CLI_SYSTEM_PROMPT + " Do not run commands or read files.\n\n"
+
+    def __init__(self, name: str, cfg: ProviderConfig) -> None:
+        super().__init__(name, cfg)
+        self._live: dict[str, _CodexSession] = {}
+        self._spare: dict[str, _CodexSession] = {}
+        self._no_server = False  # this Codex has no app server: one-shot only
+
+    async def _session(self, model: str) -> _CodexSession | None:
+        exe = self.executable()
+        if exe is None or self._no_server:
+            return None
+        try:
+            return await _CodexSession.start(exe, model, model)
+        except (LLMError, OSError, TimeoutError, KeyError, ValueError):
+            self._no_server = True  # fall back to `codex exec` from now on
+            return None
+
+    async def prewarm(self, task: str) -> None:
+        model = self.model_for(task)
+        if model not in self._spare and (s := await self._session(model)):
+            self._spare[model] = s
+
+    async def complete(
+        self, task: str, messages: list[Message], tools: list[dict] | None, json_mode: bool = False
+    ) -> LLMResponse:
+        if _has_images(messages) or self._no_server:
+            return await super().complete(task, messages, tools, json_mode)
+        model, effort = self.model_for(task), self.effort_for(task)
+        full = inject_tool_prompt(messages, tools) if tools else list(messages)
+        system = str(full[0].get("content", "")) if full else ""
+        convo = f"{model}/" + hashlib.sha1(system[:20000].encode()).hexdigest()
+        sess = self._live.get(convo)
+        if sess is not None and sess.alive() and sess.continues(messages):
+            new = flatten_messages(messages[sess.sent + 1:])
+        else:
+            if sess is not None:
+                sess.close()
+            sess = self._spare.pop(model, None)
+            if sess is None or not sess.alive():
+                sess = await self._session(model)
+            if sess is None:
+                return await super().complete(task, messages, tools, json_mode)
+            new = full
+            self._live[convo] = sess
+            while len(self._live) > 2:  # each server holds RAM: keep at most two conversations
+                oldest = min(self._live, key=lambda k: self._live[k].last_used)
+                self._live.pop(oldest).close()
+        # Codex keeps its own shell tool in server mode; it must act only through Delta's tools,
+        # so the first turn says so in full and every turn with tools repeats it briefly.
+        prompt = (self.preamble if new is full else "") + render_transcript(new)
+        if tools:
+            prompt += ("\n\nYou cannot run commands or touch the PC yourself. Act only by replying with the "
+                       'JSON {"tool_calls": [...]} or {"final": "..."} described above.')
+        if json_mode and not tools:
+            prompt += "\n\nReply with ONLY a JSON object."
+        try:
+            content, usage = await sess.ask(prompt, model, effort, self.cfg.timeout_s)
+        except LLMError:
+            sess.close()
+            self._live.pop(convo, None)
+            raise
+        sess.sent = len(messages)
+        sess.system = messages[0].get("content") if messages else None
+        if tools:
+            resp = parse_prompt_tools(content, self.name, model or "default")
+            resp.usage = usage
+            return resp
+        return LLMResponse(content=content, provider=self.name, model=model or "default", usage=usage)
+
+    async def unload(self) -> None:
+        for s in [*self._live.values(), *self._spare.values()]:
+            s.close()
+        self._live.clear()
+        self._spare.clear()
 
     def model_options(self) -> list[dict]:
         """The models this user's ChatGPT plan offers, from the list Codex itself keeps."""
