@@ -5,94 +5,260 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Delta</title>
 <style>
-:root{--bg:#f6f7f9;--panel:#fff;--ink:#14161a;--muted:#6b7280;--line:#e5e7eb;--accent:#2563eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--me:#eef2ff}
-@media (prefers-color-scheme:dark){:root{--bg:#0d0f13;--panel:#151821;--ink:#e8eaf0;--muted:#8b93a7;--line:#252a36;--accent:#6b9bff;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--me:#1c2340}}
+/* Delta design system: Apple's clarity, Claude's warmth.
+   One accent (terracotta), warm neutrals, soft depth, generous space. Colours are tokens so a
+   theme or brand change is one block. */
+:root{
+  --paper:#f7f5f0; --surface:#ffffff; --surface-2:#f1eee7; --ink:#1f1e1c; --ink-2:#4a4741; --muted:#7d7972;
+  --line:rgba(31,30,28,.09); --line-strong:rgba(31,30,28,.16);
+  --accent:#c96442; --accent-ink:#ffffff; --accent-soft:rgba(201,100,66,.10); --accent-ring:rgba(201,100,66,.35);
+  --ok:#2f8a57; --ok-soft:rgba(47,138,87,.10); --warn:#b7791f; --warn-soft:rgba(183,121,31,.12);
+  --bad:#c9443a; --bad-soft:rgba(201,68,58,.10);
+  --me:#efe7dc; --shadow-1:0 1px 2px rgba(31,30,28,.05),0 1px 1px rgba(31,30,28,.03);
+  --shadow-2:0 8px 28px rgba(31,30,28,.10),0 2px 6px rgba(31,30,28,.05);
+  --shadow-3:0 24px 64px rgba(31,30,28,.18);
+  --r-sm:10px; --r-md:14px; --r-lg:20px; --r-pill:999px;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",Inter,system-ui,sans-serif;
+  --display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI Variable Display","Segoe UI",Inter,system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#171615; --surface:#201f1d; --surface-2:#2a2826; --ink:#ede9e3; --ink-2:#c9c4bc; --muted:#948f87;
+  --line:rgba(237,233,227,.08); --line-strong:rgba(237,233,227,.15);
+  --accent:#d97757; --accent-soft:rgba(217,119,87,.14); --accent-ring:rgba(217,119,87,.4);
+  --ok:#5bbf86; --ok-soft:rgba(91,191,134,.12); --warn:#e0a84a; --warn-soft:rgba(224,168,74,.14);
+  --bad:#ef7268; --bad-soft:rgba(239,114,104,.12); --me:#33302c;
+  --shadow-1:0 1px 2px rgba(0,0,0,.3); --shadow-2:0 10px 30px rgba(0,0,0,.35); --shadow-3:0 24px 64px rgba(0,0,0,.5);
+}}
 *{box-sizing:border-box}html,body{margin:0;height:100%}
-body{background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
-header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
-.logo{font-weight:700;font-size:18px}.logo b{color:var(--accent)}
-.pill{padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid var(--line)}
-.pill.NORMAL{color:var(--ok)}.pill.THROTTLE{color:var(--warn)}.pill.CRITICAL{color:var(--bad)}.pill.OFFLINE{color:var(--muted)}
-.stats{color:var(--muted);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer}
-button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.danger{color:var(--bad)}
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:10;padding:16px}
-.overlay[hidden]{display:none}
-.wiz h3{margin:10px 0 0;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-.wiz textarea{font:13px ui-monospace,Consolas,monospace;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical}
-.wiz select{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
-.time{width:64px;font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
-.krow{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line)}
+body{background:var(--paper);color:var(--ink);font:15px/1.55 var(--font);-webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;letter-spacing:-.003em}
+::selection{background:var(--accent-ring)}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* --- top bar --------------------------------------------------------------------------------- */
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:10px 18px;
+  background:color-mix(in srgb,var(--paper) 78%,transparent);backdrop-filter:saturate(1.6) blur(18px);
+  -webkit-backdrop-filter:saturate(1.6) blur(18px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:9px;font:600 16px/1 var(--display);letter-spacing:-.01em}
+.mark{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;color:#fff;font:700 15px/1 var(--display);
+  background:linear-gradient(145deg,#d9805f,#b5512f);box-shadow:inset 0 1px 0 rgba(255,255,255,.25),var(--shadow-1)}
+.status{position:relative;display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:var(--r-pill);
+  font-size:12.5px;color:var(--ink-2);background:var(--surface);box-shadow:var(--shadow-1);cursor:default}
+.status .dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.pill.NORMAL .dot{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+.pill.THROTTLE .dot{background:var(--warn);box-shadow:0 0 0 3px var(--warn-soft)}
+.pill.CRITICAL .dot{background:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+.status .tip{position:absolute;top:calc(100% + 8px);left:0;width:max-content;max-width:420px;white-space:normal;
+  background:var(--surface);color:var(--ink-2);padding:10px 12px;border-radius:var(--r-md);box-shadow:var(--shadow-2);
+  font-size:12.5px;line-height:1.5;opacity:0;pointer-events:none;transform:translateY(-4px);transition:.18s var(--ease)}
+.status:hover .tip{opacity:1;transform:none}
+.spacer{flex:1}
+.iconbtn{position:relative;display:grid;place-items:center;width:36px;height:36px;border-radius:11px;border:0;
+  background:transparent;color:var(--ink-2);transition:background .15s,color .15s}
+.iconbtn:hover{background:var(--surface-2);color:var(--ink)}
+.iconbtn svg{width:19px;height:19px}
+.iconbtn.danger:hover{color:var(--bad);background:var(--bad-soft)}
+.iconbtn.on{color:var(--accent);background:var(--accent-soft)}
+.bell .count{position:absolute;top:3px;right:2px;min-width:17px;height:17px;padding:0 5px;border-radius:var(--r-pill);
+  background:var(--bad);color:#fff;font:700 10.5px/17px var(--font);text-align:center;box-shadow:0 0 0 2px var(--paper);
+  transform:scale(0);transition:transform .25s var(--ease)}
+.bell.has .count{transform:scale(1)}
+.bell.has{color:var(--accent)}
+.bell.ring svg{animation:ring 1s var(--ease) 2;transform-origin:50% 10%}
+@keyframes ring{0%,100%{transform:rotate(0)}15%{transform:rotate(16deg)}30%{transform:rotate(-14deg)}45%{transform:rotate(10deg)}
+  60%{transform:rotate(-6deg)}75%{transform:rotate(3deg)}}
+.sep{width:1px;height:20px;background:var(--line-strong);margin:0 4px}
+
+#warnings{margin:10px auto 0;width:min(760px,calc(100% - 32px));white-space:pre-wrap;padding:10px 14px;border-radius:var(--r-md);
+  background:var(--warn-soft);color:var(--warn);font-size:13px}
+
+/* --- toast (approval needed) ------------------------------------------------------------------- */
+.toast{position:fixed;top:66px;left:50%;z-index:20;display:flex;align-items:center;gap:12px;max-width:min(560px,calc(100% - 32px));
+  padding:10px 10px 10px 16px;border-radius:var(--r-lg);background:var(--surface);box-shadow:var(--shadow-3);
+  border:1px solid var(--accent-ring);transform:translate(-50%,-140%);opacity:0;transition:.4s var(--ease)}
+.toast.show{transform:translate(-50%,0);opacity:1}
+.toast .ic{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);flex:none}
+.toast .ic svg{width:16px;height:16px}
+.toast .tx{font-size:13.5px;line-height:1.35;min-width:0}.toast .tx b{display:block;font-weight:600}
+.toast .tx span{color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* --- layout ----------------------------------------------------------------------------------- */
+main{flex:1;display:flex;min-height:0;overflow:hidden}
+#chat{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+#log{flex:1;overflow-y:auto;padding:28px 20px 140px;display:flex;flex-direction:column;gap:14px;scroll-behavior:smooth}
+#log>*{width:100%;max-width:760px;margin-left:auto;margin-right:auto}
+
+/* empty state */
+.hero{margin-top:12vh !important;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
+.hero .mark{width:52px;height:52px;border-radius:16px;font-size:26px;margin-bottom:6px}
+.hero h1{margin:0;font:600 30px/1.2 var(--display);letter-spacing:-.02em}
+.hero p{margin:0;color:var(--muted);font-size:15.5px}
+.chips{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:18px;max-width:620px}
+.chip{display:flex;align-items:center;gap:8px;padding:10px 15px;border-radius:var(--r-pill);border:1px solid var(--line);
+  background:var(--surface);box-shadow:var(--shadow-1);font-size:14px;color:var(--ink-2);transition:.18s var(--ease)}
+.chip:hover{border-color:var(--accent-ring);color:var(--ink);transform:translateY(-1px);box-shadow:var(--shadow-2)}
+
+/* messages */
+.msg{white-space:pre-wrap;word-wrap:break-word;font-size:15px;line-height:1.6;animation:rise .35s var(--ease)}
+.msg:not(.me){padding:2px 2px}
+.msg.me{align-self:flex-end;width:auto !important;max-width:min(560px,85%) !important;margin-right:max(0px,calc((100% - 760px)/2)) !important;
+  background:var(--me);padding:10px 16px;border-radius:20px 20px 6px 20px}
+.msg.failed{padding:12px 16px;border-radius:var(--r-md);background:var(--bad-soft);color:var(--ink)}
+.msg .meta{margin-top:8px;color:var(--muted);font-size:12px;letter-spacing:.01em}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.step{color:var(--muted);font:12.5px/1.5 var(--mono);padding:0 2px 0 14px;position:relative;white-space:pre-wrap;word-break:break-word}
+.step::before{content:"";position:absolute;left:3px;top:.62em;width:5px;height:5px;border-radius:50%;background:var(--line-strong)}
+.step.ok{color:var(--ok)}.step.ok::before{background:var(--ok)}.step.bad{color:var(--bad)}.step.bad::before{background:var(--bad)}
+
+/* cards in the conversation */
+.checklist,.proof{background:var(--surface);border-radius:var(--r-md);padding:14px 16px;box-shadow:var(--shadow-1);border:1px solid var(--line);
+  font-size:14px;animation:rise .35s var(--ease)}
+.chead{font-weight:600;margin-bottom:8px;letter-spacing:-.005em}
+.citem{display:flex;gap:10px;align-items:flex-start;color:var(--muted);padding:3px 0;transition:color .2s}
+.citem span{flex:none;width:18px;height:18px;margin-top:1px;border-radius:50%;border:1.5px solid var(--line-strong);display:grid;place-items:center;
+  font-size:11px;color:transparent;transition:.25s var(--ease)}
+.citem.done{color:var(--ink)}.citem.done span{background:var(--ok);border-color:var(--ok);color:#fff}
+.checklist .row button,.card .row button{flex:none}
+.stopbtn{align-self:flex-start;width:auto !important;margin-left:max(0px,calc((100% - 760px)/2)) !important;display:inline-flex;gap:6px;align-items:center;
+  padding:6px 13px;border-radius:var(--r-pill);border:1px solid var(--line-strong);background:var(--surface);color:var(--ink-2);font-size:12.5px;
+  box-shadow:var(--shadow-1)}
+.stopbtn:hover{color:var(--bad);border-color:var(--bad)}
+.qopts{display:flex;gap:8px;flex-wrap:wrap}
+.qopts button{padding:8px 15px;border-radius:var(--r-pill);border:1px solid var(--accent-ring);background:var(--surface);color:var(--ink);
+  box-shadow:var(--shadow-1);transition:.15s var(--ease)}
+.qopts button:hover{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.proof .phead{color:var(--muted);font-size:12.5px;margin-bottom:8px}
+.pcheck{padding:3px 0;line-height:1.45}.pcheck b{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;font-size:11px;margin-right:6px;color:#fff}
+.pcheck.ok b{background:var(--ok)}.pcheck.bad b{background:var(--bad)}.pcheck small{color:var(--muted)}
+.pimgs{display:flex;gap:8px;overflow-x:auto;margin-top:12px;padding-bottom:4px}
+.pimgs img{height:96px;border-radius:var(--r-sm);box-shadow:var(--shadow-1);border:1px solid var(--line);transition:transform .2s var(--ease)}
+.pimgs img:hover{transform:scale(1.03)}
+
+/* approval card: the one thing that must never be missed */
+.card{background:var(--surface);border-radius:var(--r-md);padding:14px 16px;display:flex;flex-direction:column;gap:8px;
+  border:1px solid var(--accent-ring);box-shadow:0 0 0 4px var(--accent-soft),var(--shadow-1);animation:rise .35s var(--ease)}
+.card .ttl{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
+.card .ttl svg{width:14px;height:14px}
+.card b{font-weight:600;line-height:1.45}.card .why{color:var(--muted);font-size:12.5px}
+.card .row{display:flex;gap:8px;margin-top:2px}
+
+/* composer */
+form#send{position:absolute;left:0;right:0;bottom:0;padding:16px 20px 22px;
+  background:linear-gradient(to top,var(--paper) 60%,transparent);display:flex;justify-content:center}
+.composer{width:100%;max-width:760px;display:flex;align-items:flex-end;gap:8px;padding:8px 8px 8px 18px;border-radius:24px;
+  background:var(--surface);box-shadow:var(--shadow-2);border:1px solid var(--line);transition:border-color .2s,box-shadow .2s}
+.composer:focus-within{border-color:var(--accent-ring);box-shadow:0 0 0 4px var(--accent-soft),var(--shadow-2)}
+#text{flex:1;resize:none;border:0;outline:0;background:transparent;color:var(--ink);font:15px/1.5 var(--font);padding:8px 0;max-height:180px;height:40px}
+#text::placeholder{color:var(--muted)}
+.send{width:38px;height:38px;flex:none;border-radius:50%;border:0;display:grid;place-items:center;background:var(--accent);color:#fff;
+  transition:transform .15s var(--ease),opacity .2s}
+.send:hover{transform:scale(1.06)}.send svg{width:18px;height:18px}
+.hint{position:absolute;bottom:4px;left:0;right:0;text-align:center;font-size:11.5px;color:var(--muted);pointer-events:none}
+
+/* --- Activity drawer ---------------------------------------------------------------------------- */
+aside{width:340px;flex:none;border-left:1px solid var(--line);background:var(--surface);overflow-y:auto;padding:18px 18px 24px;
+  display:flex;flex-direction:column;gap:22px;transition:margin .3s var(--ease),opacity .25s,visibility .3s}
+body.drawer-closed aside{margin-right:-340px;opacity:0;pointer-events:none;visibility:hidden}
+aside .dhead{display:flex;align-items:center;justify-content:space-between}
+aside .dhead h2{margin:0;font:600 15px/1 var(--display)}
+h3{margin:0 0 10px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:flex;align-items:center;gap:6px}
+#approvals .card{box-shadow:var(--shadow-1)}
+.mem{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;padding:9px 0;border-bottom:1px solid var(--line);line-height:1.45}
+.mem:last-child{border-bottom:0}.mem span{flex:1}
+aside div.mem > button{border:0;background:none;color:var(--muted);border-radius:8px;width:26px;height:26px;flex:none;padding:0;font-size:16px;line-height:1}
+aside div.mem > button:hover{background:var(--bad-soft);color:var(--bad)}
+.count{text-transform:none;letter-spacing:0;font-weight:500}
+.badge{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:var(--r-pill);margin-left:6px;vertical-align:1px}
+.badge.active{color:var(--ok);background:var(--ok-soft)}.badge.candidate{color:var(--warn);background:var(--warn-soft)}.badge.retired{color:var(--muted);background:var(--surface-2)}
+.skill small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.learn{border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px;font-size:13.5px;background:var(--surface-2)}
+.learn.pending{background:var(--accent-soft)}.learn.undone{opacity:.5}
+.learn .kind{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:2px}
+.learn .row{display:flex;gap:6px;margin-top:8px}
+.empty{color:var(--muted);font-size:13px;line-height:1.5}
+#addmem{display:flex;gap:6px;margin-top:10px}
+#memtext{flex:1;resize:none;height:38px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--paper);color:var(--ink);font:13.5px/1.4 var(--font);padding:9px 11px}
+
+/* --- shared controls --------------------------------------------------------------------------- */
+.btn,aside button:not(.iconbtn),.wiz button,.card button,.checklist button,.learn button,.app button{
+  border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);border-radius:var(--r-sm);padding:7px 14px;font-size:13.5px;
+  font-weight:500;transition:.15s var(--ease)}
+.btn:hover,.wiz button:hover,.card button:hover,.checklist button:hover,.learn button:hover,.app button:hover{background:var(--surface-2)}
+button.primary,.wiz button.primary,.card button.primary,.checklist button.primary,.learn button.primary,.app button.primary{
+  background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.primary:hover{filter:brightness(1.06);background:var(--accent)}
+.mem button{padding:0}
+input,select,textarea{font:inherit}
+.time{width:70px;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px;background:var(--paper);color:var(--ink)}
 .ok-text{color:var(--ok)}
-.app{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}
+
+/* --- dialogs (Settings, Setup) ------------------------------------------------------------------ */
+.overlay{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:20px;
+  background:rgba(20,18,16,.32);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:fade .2s}
+.overlay[hidden]{display:none}
+@keyframes fade{from{opacity:0}}
+.wiz{background:var(--surface);border-radius:22px;width:min(640px,100%);max-height:calc(100vh - 40px);overflow-y:auto;
+  padding:28px 30px;display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow-3);animation:pop .3s var(--ease)}
+@keyframes pop{from{opacity:0;transform:scale(.97) translateY(8px)}}
+.wiz h2{margin:0;font:600 22px/1.25 var(--display);letter-spacing:-.015em}
+.wiz .lead{color:var(--muted);margin:0 0 4px}
+.wiz h3{margin:16px 0 2px}
+.wiz section{display:none;flex-direction:column;gap:12px}.wiz section.on{display:flex}
+.wiz textarea,.wiz select,.field input,.kin input{padding:9px 12px;border:1px solid var(--line-strong);border-radius:var(--r-sm);
+  background:var(--paper);color:var(--ink);font:14px/1.45 var(--font)}
+.wiz textarea{font:13px/1.5 var(--mono);resize:vertical}
+.wiz textarea:focus,.wiz select:focus,.field input:focus,.kin input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.dots{display:flex;gap:6px}.dots span{height:4px;flex:1;border-radius:4px;background:var(--surface-2);transition:background .3s}.dots span.on{background:var(--accent)}
+.box{border-radius:var(--r-md);padding:12px 14px;background:var(--surface-2);font-size:13.5px;white-space:pre-wrap;line-height:1.5}
+.tag{font-size:11px;padding:2px 8px;border-radius:var(--r-pill);background:var(--surface-2);color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0}
+.mono{font-family:var(--mono);font-size:.92em}.small{font-size:13px;color:var(--muted);margin:0;padding-left:20px}
+.keyrow,.app{border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px;display:flex;flex-direction:column;gap:8px;background:var(--surface)}
+.app{margin-bottom:10px}
 .app .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
-.app .state{font-size:12px}.app .state.bad{color:var(--muted)}
-.app .row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.app button{padding:3px 10px;font-size:12px}
-.checklist{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:4px 0 8px;font-size:13px}
-.chead{font-weight:600;margin-bottom:4px}.citem{color:var(--muted);padding:1px 0}.citem span{display:inline-block;width:16px}
-.citem.done{color:var(--ink)}.citem.done span{color:var(--ok)}
-.stopbtn{margin:4px 0 8px;padding:4px 12px;border-radius:999px;border:1px solid var(--bad);color:var(--bad);background:none;cursor:pointer;font-size:12px}
-.qopts{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 12px}
-.qopts button{padding:6px 14px;border-radius:999px;border:1px solid var(--accent);background:none;color:var(--ink);cursor:pointer}
-.qopts button:hover{background:var(--accent);color:#fff}
-.proof{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:4px 0 10px;font-size:13px}
-.proof .phead{color:var(--muted);font-size:12px;margin-bottom:4px}.pcheck small{color:var(--muted)}
-.pcheck.ok b{color:var(--ok)}.pcheck.bad b{color:#f87171}
-.pimgs{display:flex;gap:6px;overflow-x:auto;margin-top:8px}.pimgs img{height:90px;border-radius:6px;border:1px solid var(--line)}
-.app .jobs{display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:center;margin-top:8px;font-size:12px}
-.app .jobs select{padding:3px 6px;font-size:12px}.app .jobs small{color:var(--muted)}
-.app .msg{font-size:12px;color:var(--muted);margin-top:6px;white-space:pre-wrap;border:0;background:none;padding:0;min-height:0}.app .msg:empty{display:none}
-.nav.sticky{position:sticky;bottom:-22px;background:var(--panel);padding:10px 0}
-.wiz{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:min(620px,100%);max-height:calc(100vh - 32px);overflow-y:auto;padding:22px 24px;display:flex;flex-direction:column;gap:10px}
-.wiz h2{margin:0;font-size:20px}.wiz .lead{color:var(--muted);margin:0 0 6px}.wiz section{display:none;flex-direction:column;gap:10px}.wiz section.on{display:flex}
-.dots{display:flex;gap:6px}.dots span{height:4px;flex:1;border-radius:4px;background:var(--line)}.dots span.on{background:var(--accent)}
-.box{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg);font-size:13px;white-space:pre-wrap}
-.tag{font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--line);color:var(--muted);font-weight:400}
-.mono{font-family:ui-monospace,Consolas,monospace}.small{font-size:13px;color:var(--muted);margin:0;padding-left:20px}
-.keyrow{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.app .state{font-size:12.5px}.app .state.bad{color:var(--muted)}
+.app .row{display:flex;gap:6px;flex-wrap:wrap}.app button{padding:5px 12px;font-size:12.5px}
+.app .jobs{display:grid;grid-template-columns:auto 1fr auto;gap:8px 10px;align-items:center;font-size:12.5px}
+.app .jobs select{padding:5px 8px;font-size:12.5px;border-radius:8px;border:1px solid var(--line-strong);background:var(--paper);color:var(--ink)}
+.app .jobs small{color:var(--muted)}
+.app .msg{font-size:12.5px;color:var(--muted);white-space:pre-wrap;padding:0;animation:none}.app .msg:empty{display:none}
 .keyrow small,.field small,.choice small{color:var(--muted);font-weight:400}
-.kin{display:flex;gap:8px}.kin input,.field input{flex:1;font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);min-width:0}
-.msg{font-size:13px}.msg.ok{color:var(--ok)}.msg.bad{color:var(--bad)}
-.field{display:flex;flex-direction:column;gap:6px;font-size:14px}.check{display:flex;gap:8px;align-items:center}
-.choice{display:grid;grid-template-columns:auto 1fr;column-gap:10px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer}
-.choice small{grid-column:2}.choice:has(input:checked){border-color:var(--accent)}
-.nav{display:flex;align-items:center;gap:10px;margin-top:6px}.nav .err{flex:1;color:var(--bad);font-size:13px}
-#warnings{white-space:pre-wrap;padding:8px 16px;border-bottom:1px solid var(--warn);color:var(--warn);background:var(--panel);font-size:13px}
-main{flex:1;display:grid;grid-template-columns:1fr 320px;min-height:0}
-#chat{display:flex;flex-direction:column;min-height:0}
-#log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
-.msg{max-width:760px;padding:10px 14px;border-radius:12px;background:var(--panel);border:1px solid var(--line);white-space:pre-wrap;word-wrap:break-word}
-.msg.me{align-self:flex-end;background:var(--me)}.msg .meta{color:var(--muted);font-size:12px;margin-top:4px}
-.msg.failed{border-color:var(--bad)}.step{color:var(--muted);font-size:12px;font-family:ui-monospace,Consolas,monospace;padding-left:8px}
-.step.ok{color:var(--ok)}.step.bad{color:var(--bad)}
-form{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line);background:var(--panel)}
-textarea{flex:1;resize:none;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);height:42px}
-aside{border-left:1px solid var(--line);overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:16px;background:var(--panel)}
-h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-.card{border:1px solid var(--warn);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px}
-.card .why{color:var(--muted);font-size:12px}.card .row{display:flex;gap:8px}
-.mem{display:flex;gap:6px;align-items:flex-start;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line)}
-.mem span{flex:1}.count{text-transform:none;letter-spacing:0;font-weight:400}
-.badge{font-size:11px;padding:0 6px;border-radius:99px;border:1px solid var(--line);margin-left:4px}
-.badge.active{color:var(--ok);border-color:var(--ok)}.badge.candidate{color:var(--warn)}.badge.retired{color:var(--muted)}
-.skill small{display:block;color:var(--muted);font-size:12px}
-.learn{border:1px solid var(--line);border-radius:10px;padding:8px;margin-bottom:6px;font-size:13px}
-.learn.pending{border-color:var(--accent)}.learn.undone{opacity:.5}
-.learn .kind{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
-.learn .row{display:flex;gap:6px;margin-top:6px}.learn button{padding:2px 10px;font-size:12px}.mem button{padding:0 6px;font-size:12px}.empty{color:var(--muted);font-size:13px}
-@media (max-width:820px){main{grid-template-columns:1fr}aside{border-left:0;border-top:1px solid var(--line);max-height:40vh}}
+.kin{display:flex;gap:8px}.kin input,.field input{flex:1;min-width:0}
+.keyrow .msg{font-size:13px;animation:none}.msg.ok{color:var(--ok)}.msg.bad{color:var(--bad)}
+.field{display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500}
+.check{display:flex;gap:9px;align-items:center;font-size:14px}
+.check input,.choice input{accent-color:var(--accent);width:16px;height:16px}
+.choice{display:grid;grid-template-columns:auto 1fr;column-gap:12px;row-gap:2px;align-items:center;border:1px solid var(--line);border-radius:var(--r-md);
+  padding:12px 14px;cursor:pointer;transition:.15s var(--ease)}
+.choice small{grid-column:2}.choice:hover{border-color:var(--line-strong)}
+.choice:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.krow{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13.5px;padding:8px 0;border-bottom:1px solid var(--line)}
+.nav{display:flex;align-items:center;gap:10px;margin-top:8px}.nav .err{flex:1;color:var(--bad);font-size:13px}
+.nav.sticky{position:sticky;bottom:-28px;background:var(--surface);padding:14px 0 6px;margin-top:4px;border-top:1px solid var(--line)}
+
+@media (max-width:980px){aside{position:fixed;right:0;top:57px;bottom:0;z-index:15;box-shadow:var(--shadow-3)}}
+@media (max-width:640px){header{padding:8px 12px}.status .lbl{display:none}#log{padding:18px 14px 140px}.hero h1{font-size:24px}
+  form#send{padding:12px 12px 20px}aside{width:100%}body.drawer-closed aside{margin-right:-100%}}
+@media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+
 </style>
 </head>
 <body>
 <header>
-  <div class="logo"><b>Δ</b> Delta</div>
-  <span id="health" class="pill OFFLINE">offline</span>
-  <div id="stats" class="stats"></div>
-  <button id="opensetup" title="Models, permissions, Telegram">Setup</button>
-  <button id="openapps" title="Use Claude Code, Codex or LM Studio you already have">Connected apps</button>
-  <button id="opensettings" title="Folders, apps, learning, add-ons, keys">Settings</button>
-  <button class="danger" id="shutdown" title="Stop Delta completely and free memory/GPU">Shutdown</button>
+  <div class="brand"><span class="mark">&Delta;</span>Delta</div>
+  <span id="health" class="pill OFFLINE status"><span class="dot"></span><span class="lbl">offline</span><span id="stats" class="tip"></span></span>
+  <div class="spacer"></div>
+  <button id="bell" class="iconbtn bell" title="Approvals" aria-label="Approvals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="count" id="bellcount">0</span></button>
+  <button id="openapps" class="iconbtn" title="Connected apps: Claude Code, Codex, LM Studio, Google" aria-label="Connected apps"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button>
+  <button id="opensettings" class="iconbtn" title="Settings: permissions, folders, learning, keys" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  <button id="opensetup" class="iconbtn" title="Setup: models, permissions, Telegram" aria-label="Setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M17.8 6.2 19 5M3 21l9-9M12.2 6.2 11 5"/></svg></button>
+  <button id="drawerbtn" class="iconbtn on" title="Activity: approvals, learning, skills, memory" aria-label="Activity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M15 3v18"/></svg></button>
+  <span class="sep"></span>
+  <button class="iconbtn danger" id="shutdown" title="Shut Delta down and free memory/GPU" aria-label="Shut down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg></button>
 </header>
+<div class="toast" id="toast" role="alert"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span><div class="tx"><b>Delta needs your OK</b><span id="toasttext"></span></div><button class="primary" id="toastgo">Review</button></div>
 <div id="warnings" hidden></div>
 <div id="settings" class="overlay" hidden>
   <div class="wiz">
@@ -194,16 +360,31 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
 </div>
 <main>
   <section id="chat">
-    <div id="log"></div>
-    <form id="send"><textarea id="text" placeholder="Ask Delta to do something…  (Enter to send, Shift+Enter for new line)"></textarea>
-      <button class="primary">Send</button></form>
+    <div id="log">
+      <div class="hero" id="hero">
+        <span class="mark">&Delta;</span>
+        <h1 id="greet">What should we get done?</h1>
+        <p>Ask in plain words. Anything risky waits for your OK.</p>
+        <div class="chips">
+          <button class="chip" data-q="Play Oh Sita Hey Rama from Sita Ramam on YouTube">&#9835; Play a song</button>
+          <button class="chip" data-q="Start a Google Meet">&#127909; Start a Google Meet</button>
+          <button class="chip" data-q="Schedule a meeting">&#128197; Schedule a meeting</button>
+          <button class="chip" data-q="Send a message on WhatsApp to ">&#128172; Send a WhatsApp</button>
+          <button class="chip" data-q="Open a new Notepad window and type: ">&#9998; Write a note</button>
+        </div>
+      </div>
+    </div>
+    <form id="send"><div class="composer"><textarea id="text" rows="1" placeholder="Message Delta…"></textarea>
+      <button class="send" title="Send (Enter)" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div>
+      <div class="hint">Enter to send · Shift+Enter for a new line</div></form>
   </section>
-  <aside>
+  <aside id="drawer">
+    <div class="dhead"><h2>Activity</h2><button class="iconbtn" id="mute" title="Approval sound on" aria-label="Approval sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg></button></div>
     <div><h3>Approvals</h3><div id="approvals"><div class="empty">Nothing waiting.</div></div></div>
     <div><h3>Delta learned</h3><div id="learned"></div></div>
     <div><h3>Learned skills <span id="skillcount" class="count"></span></h3><div id="skills"></div></div>
     <div><h3>Memory</h3><div id="memory"></div>
-      <form id="addmem" style="padding:8px 0 0;border:0;background:none"><textarea id="memtext" placeholder="Remember that…" style="height:34px"></textarea><button>Add</button></form></div>
+      <form id="addmem"><textarea id="memtext" placeholder="Remember that…"></textarea><button>Add</button></form></div>
   </aside>
 </main>
 <script>
@@ -216,34 +397,45 @@ const api = (path, opts = {}) => fetch(path, {...opts, headers: {"Authorization"
   .then(r => { if (r.status === 401) throw new Error("unauthorized"); return r.json(); });
 
 function add(cls, text, meta) {
+  $("hero")?.remove();
   const d = document.createElement("div"); d.className = cls; d.textContent = text;
   if (meta) { const m = document.createElement("div"); m.className = "meta"; m.textContent = meta; d.appendChild(m); }
   $("log").appendChild(d); $("log").scrollTop = $("log").scrollHeight; return d;
 }
 
+function setHealth(state, label) {
+  $("health").className = "pill status " + state; $("health").querySelector(".lbl").textContent = label;
+}
 async function refreshStatus() {
   try {
     const s = await api("/api/status"), g = s.governor;
-    $("health").className = "pill " + g.health; $("health").textContent = g.health.toLowerCase();
+    setHealth(g.health, g.health === "NORMAL" ? "Ready" : g.health.toLowerCase());
     const gpu = g.gpu_temp_c == null ? "" : ` · GPU ${g.gpu_temp_c}°C ${g.vram_pct ?? "?"}% VRAM`;
     $("warnings").hidden = !s.warnings?.length;
     $("warnings").textContent = (s.warnings || []).map(w => "⚠ " + w).join("\n");
     $("stats").textContent = `RAM ${g.ram_pct}% · CPU ${g.cpu_pct}%${gpu} · Delta ${g.process_rss_mb} MB · models: ${s.providers.join(" › ") || "none"}`
       + (g.reasons.length ? " · " + g.reasons.join(", ") : "");
-  } catch (e) { $("health").className = "pill OFFLINE"; $("health").textContent = e.message === "unauthorized" ? "no token" : "offline"; }
+  } catch (e) { setHealth("OFFLINE", e.message === "unauthorized" ? "no token" : "offline"); }
 }
 
+const BELL_SVG = $("bell").querySelector("svg").outerHTML;
+function approvalCard(a) {
+  const c = document.createElement("div"); c.className = "card"; c.dataset.approval = a.id; if (a.task_id) c.dataset.task = a.task_id;
+  c.innerHTML = `<div class="ttl">${BELL_SVG} Needs your OK</div><b></b><div class="why"></div><div class="row"><button class="primary">Approve</button><button>Deny</button></div>`;
+  c.querySelector("b").textContent = a.summary; c.querySelector(".why").textContent = `${a.risk} · ${a.reason}`;
+  const [yes, no] = c.querySelectorAll("button");
+  const answer = ok => { yes.disabled = no.disabled = true;
+    api(`/api/approvals/${a.id}`, {method: "POST", body: JSON.stringify({approved: ok})}).finally(() => dropApproval(a.id)); };
+  yes.onclick = () => answer(true); no.onclick = () => answer(false);
+  return c;
+}
 function renderApproval(a) {
   if (document.querySelector(`[data-approval="${a.id}"]`)) return;
   $("approvals").querySelector(".empty")?.remove();
-  const c = document.createElement("div"); c.className = "card"; c.dataset.approval = a.id; if (a.task_id) c.dataset.task = a.task_id;
-  c.innerHTML = `<b></b><div class="why"></div><div class="row"><button class="primary">Approve</button><button>Deny</button></div>`;
-  c.querySelector("b").textContent = a.summary; c.querySelector(".why").textContent = `${a.risk} · ${a.reason}`;
-  const [yes, no] = c.querySelectorAll("button");
-  const answer = ok => api(`/api/approvals/${a.id}`, {method: "POST", body: JSON.stringify({approved: ok})}).finally(() => dropApproval(a.id));
-  yes.onclick = () => answer(true); no.onclick = () => answer(false);
-  $("approvals").appendChild(c);
-  if (document.hidden && "Notification" in window && Notification.permission === "granted") new Notification("Delta needs approval", {body: a.summary});
+  $("approvals").appendChild(approvalCard(a));
+  $("hero")?.remove();
+  const inline = approvalCard(a); $("log").appendChild(inline); inline.scrollIntoView({block: "end", behavior: "smooth"});
+  alertApproval(a);
 }
 // A task Delta was doing when it (or the PC) stopped: offer to resume. Never resumed silently:
 // a half-done task may already have sent something.
@@ -301,9 +493,60 @@ function taskEnded(taskId) {
   document.querySelectorAll(`[data-task="${taskId}"]`).forEach(c => dropApproval(c.dataset.approval));
 }
 function dropApproval(id) {
-  document.querySelector(`[data-approval="${id}"]`)?.remove();
+  document.querySelectorAll(`[data-approval="${id}"]`).forEach(el => el.remove());
   if (!$("approvals").children.length) $("approvals").innerHTML = '<div class="empty">Nothing waiting.</div>';
+  updateBell();
 }
+
+// --- the approval bell: count badge, ring, chime, toast, tab title, system notification -------
+let muted = false; try { muted = localStorage.getItem("delta_mute") === "1"; } catch {}
+function pendingCount() { return $("approvals").querySelectorAll("[data-approval]").length; }
+function updateBell() {
+  const n = pendingCount();
+  $("bell").classList.toggle("has", n > 0); $("bellcount").textContent = n > 9 ? "9+" : String(n);
+  $("bell").title = n ? `${n} approval${n > 1 ? "s" : ""} waiting` : "Approvals";
+  document.title = n ? `(${n}) Approval needed · Delta` : "Delta";
+  if (!n) $("toast").classList.remove("show");
+}
+let audio;
+function chime() {
+  if (muted) return;
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const t = audio.currentTime;
+    [[659.25, 0], [880, .14]].forEach(([f, d]) => {   // E5 then A5: a soft, friendly two-note bell
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "sine"; o.frequency.value = f; o.connect(g); g.connect(audio.destination);
+      g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.18, t + d + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.55); o.start(t + d); o.stop(t + d + 0.6);
+    });
+  } catch {}
+}
+function alertApproval(a) {
+  updateBell();
+  const bell = $("bell"); bell.classList.remove("ring"); void bell.offsetWidth; bell.classList.add("ring");
+  chime();
+  $("toasttext").textContent = a.summary; $("toast").classList.add("show");
+  clearTimeout(alertApproval.t); alertApproval.t = setTimeout(() => $("toast").classList.remove("show"), 9000);
+  if ((document.hidden || !document.hasFocus()) && "Notification" in window && Notification.permission === "granted") {
+    const n = new Notification("Delta needs your OK", {body: a.summary, tag: "delta-approval-" + a.id, requireInteraction: true});
+    n.onclick = () => { window.focus(); openApprovals(); n.close(); };
+  }
+}
+function openApprovals() {
+  document.body.classList.remove("drawer-closed"); $("drawerbtn").classList.add("on");
+  $("toast").classList.remove("show");
+  const first = document.querySelector("#log [data-approval]") || document.querySelector("#approvals [data-approval]");
+  first?.scrollIntoView({block: "center", behavior: "smooth"});
+}
+$("bell").onclick = openApprovals; $("toastgo").onclick = openApprovals;
+$("mute").onclick = () => { muted = !muted; try { localStorage.setItem("delta_mute", muted ? "1" : "0"); } catch {}
+  $("mute").classList.toggle("on", !muted); $("mute").title = muted ? "Approval sound off" : "Approval sound on"; };
+$("mute").classList.toggle("on", !muted);
+$("drawerbtn").onclick = () => { const closed = document.body.classList.toggle("drawer-closed"); $("drawerbtn").classList.toggle("on", !closed);
+  try { localStorage.setItem("delta_drawer", closed ? "closed" : "open"); } catch {} };
+try { if (localStorage.getItem("delta_drawer") === "closed" || (!localStorage.getItem("delta_drawer") && innerWidth < 980)) {
+  document.body.classList.add("drawer-closed"); $("drawerbtn").classList.remove("on"); } } catch {}
 
 async function refreshMemory() {
   const items = await api("/api/memory").catch(() => []);
@@ -437,17 +680,24 @@ function connect() {
 
 $("send").onsubmit = async e => {
   e.preventDefault(); const text = $("text").value.trim(); if (!text) return;
-  $("text").value = ""; add("msg me", text);
+  $("text").value = ""; $("text").oninput(); add("msg me", text);
   const started = await api("/api/tasks", {method: "POST", body: JSON.stringify({text})}).catch(err => { add("msg failed", "Could not reach Delta: " + err.message); return null; });
   if (started && started.task_id) showStop(started.task_id);
 };
 $("text").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("send").requestSubmit(); } };
+$("text").oninput = () => { const t = $("text"); t.style.height = "40px"; t.style.height = Math.min(t.scrollHeight, 180) + "px"; };
+document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+  const q = c.dataset.q; $("text").value = q; $("text").focus(); $("text").oninput();
+  if (!q.endsWith(" ")) $("send").requestSubmit();
+});
+(() => { const h = new Date().getHours();
+  $("greet").textContent = (h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening") + ". What should we get done?"; })();
 $("addmem").onsubmit = e => { e.preventDefault(); const t = $("memtext").value.trim(); if (!t) return; $("memtext").value = "";
   api("/api/memory", {method: "POST", body: JSON.stringify({content: t})}).then(refreshMemory); };
 $("shutdown").onclick = async () => {
   if (!confirm("Shut Delta down completely? Models are unloaded and nothing keeps running.")) return;
   await api("/api/shutdown", {method: "POST"}).catch(() => {});
-  add("msg", "Delta is shutting down. You can close this window."); $("health").className = "pill OFFLINE"; $("health").textContent = "stopped";
+  add("msg", "Delta is shutting down. You can close this window."); setHealth("OFFLINE", "stopped");
 };
 // ---- first-run setup wizard ---------------------------------------------------------------
 const STEPS = ["welcome", "models", "trust", "telegram", "name", "done"];
@@ -694,7 +944,7 @@ api("/api/setup").then(s => { if (!s.completed) openSetup(); }).catch(() => {});
 if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
 checkInterrupted(); refreshStatus(); refreshMemory(); refreshSkills(); refreshLearned(); connect(); api("/api/approvals").then(a => a.forEach(renderApproval)).catch(() => {});
 setInterval(() => { if (!document.hidden) refreshStatus(); }, 5000);
-add("msg", "Hi, I'm Delta. Tell me what to do. Anything risky will show up on the right for your approval.");
+
 </script>
 </body>
 </html>
