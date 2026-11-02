@@ -38,6 +38,9 @@ _RULES: list[tuple[re.Pattern[str], Any]] = [
      lambda m: Intent("play_youtube", {"query": _clean(m["q"])}, f"'{_clean(m['q'])}' is playing on YouTube")),
     (re.compile(POLITE + r"(?:play|put on)\s+(?P<q>.+?\b(?:song|songs|video|music|trailer)\b.*?)\s*[.!]*$", re.I),
      lambda m: Intent("play_youtube", {"query": _clean(m["q"])}, f"'{_clean(m['q'])}' is playing on YouTube")),
+    (re.compile(POLITE + r"stop (?:chatting|replying|talking)(?: (?:with|to) (?P<who>.+?))?\s*[.!]*$", re.I),
+     lambda m: Intent("chat_for_me", {"stop": True, **({"person": m["who"].strip()} if m["who"] else {})},
+                      "Delta stopped chatting")),
     # "start / create / open a (new / instant) google meet (meeting)"
     (re.compile(POLITE + r"(?:start|create|open|make|set\s*up|begin)\s+(?:an?\s+)?(?:new\s+|instant\s+|quick\s+)*"
                 r"(?P<p>google\s+meet|gmeet|meet|zoom|teams|microsoft\s+teams)(?:\s+(?:meeting|call|link))?\s*[.!]*$",

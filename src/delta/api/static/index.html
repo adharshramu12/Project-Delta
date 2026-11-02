@@ -351,6 +351,10 @@ function connect() {
       const d = m.data;
       if (m.event === "task.plan" && d.plan.needs_tools) add("step", "plan: " + (d.plan.steps || []).join(" → "));
       if (m.event === "task.step") add("step", "· " + d.tool + " " + JSON.stringify(d.args).slice(0, 140));
+      if (m.event === "chat.replied") add("step ok", `💬 replied to ${d.person} on ${d.app}: “${d.text}”`);
+      if (m.event === "chat.skipped") add("step", `💬 you skipped a reply to ${d.person}: “${d.text}”`);
+      if (m.event === "chat.handoff") { add("step bad", `✋ stopped chatting with ${d.person} (${d.app}): ${d.reason}. Please reply yourself.`); if (window.Notification && Notification.permission === "granted") new Notification(`Delta: ${d.person} needs you`, {body: d.reason}); }
+      if (m.event === "chat.ended") add("step", `💬 finished chatting with ${d.person} on ${d.app}: ${d.reason}`);
       if (m.event === "task.verify") add("step " + (d.passed ? "ok" : "bad"), (d.passed ? "✓ verified: " : "✗ not verified: ") + d.reason);
       if (m.event === "governor.health") refreshStatus();
       if (m.event === "skill.changed") {

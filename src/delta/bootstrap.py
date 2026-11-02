@@ -23,6 +23,7 @@ from delta.llm.router import ModelRouter
 from delta.memory.skills import SkillStore
 from delta.memory.store import MemoryStore
 from delta.memory.tools import memory_tools
+from delta.messaging.tools import ChatSessions, messaging_tools
 from delta.safety.approvals import ApprovalBroker
 from delta.safety.audit import AuditLog
 from delta.safety.policy import PolicyEngine
@@ -173,12 +174,14 @@ def build(settings: Settings) -> Container:
     audit = AuditLog(data / "audit.jsonl")
     approvals = ApprovalBroker(settings.agent.approval_timeout_s)
 
+    chats = ChatSessions(router, events, audit)
     registry = ToolRegistry([
         *filesystem_tools(),
         RunShell(),
         *app_tools(settings.apps),
         *media_tools(),
         *meeting_tools(),
+        *messaging_tools(chats),
         WebSearch(SearchRouter.from_order(settings.search.order)),
         FetchPage(),
         *(memory_tools(memory) if settings.memory.enabled else []),
@@ -222,6 +225,7 @@ def build(settings: Settings) -> Container:
         await events.publish("learning.added", item=item.to_dict())
 
     executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
+    chats.executor = executor  # each delegated reply goes through the same approval rules
     skills = SkillStore(data / "skills.db")
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
                                 governor, events, audit, skills, learning, proof)

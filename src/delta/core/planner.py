@@ -32,7 +32,10 @@ with it and keep steps short. E.g. "play <song> on YouTube" -> {{"tool": "play_y
 x@y.com tomorrow 5pm" -> schedule_meeting (start in ISO local time, from Now above);
 "start a meet and send the link to x@y.com" -> start_meeting with invite; "move my standup to 3pm" /
 "make the review 1 hour" / "cancel the sync" -> edit_meeting (title = the meeting's name; new_start
-is just "HH:MM" when no day is given, so the meeting keeps its own day). Leave it null when the
+is just "HH:MM" when no day is given, so the meeting keeps its own day).
+"send hi to Ravi on WhatsApp" -> send_message (write the text the way the user texts: short, natural);
+"chat with Priya on Telegram for me, be funny" -> chat_for_me (goal and mood from the request).
+If the person or app is not clear, ask instead of guessing. Leave it null when the
 job needs several steps or looking at the screen.
 
 Skills the agent learned from earlier verified successes on this PC (reuse one when it fits;
