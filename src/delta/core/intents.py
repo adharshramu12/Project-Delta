@@ -68,3 +68,21 @@ def match_intent(text: str, available: set[str]) -> Intent | None:
             intent = build(m)
             return intent if intent.tool in available else None
     return None
+
+
+# Greetings and thanks: answered on the spot. Sending "hi" to an AI app costs ~12k tokens of its
+# fixed instructions and 10-20 seconds, for a reply anyone can write.
+_GREETING = re.compile(POLITE + r"(hi+|hey+|hello+|hii+|yo|namaste|vanakkam|good\s+(?:morning|afternoon|evening))"
+                       r"(?:\s+(?:there|delta|buddy|bro|da))?\s*[!.]*\s*$", re.I)
+_THANKS = re.compile(POLITE + r"(thanks?|thank\s+you|thx|ty|ok(?:ay)?\s+thanks?|great,?\s+thanks?|super|nice|cool)"
+                     r"(?:\s+(?:so\s+much|a\s+lot|delta|buddy|bro|da))?\s*[!.]*\s*$", re.I)
+
+
+def small_talk(text: str, owner: str = "") -> str | None:
+    t = " ".join(text.split())
+    name = f", {owner}" if owner else ""
+    if _GREETING.match(t):
+        return f"Hi{name}! What should I do for you?"
+    if _THANKS.match(t):
+        return "Anytime! Tell me if you need anything else."
+    return None

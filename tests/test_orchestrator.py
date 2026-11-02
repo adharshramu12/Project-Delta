@@ -41,7 +41,7 @@ def make(tmp_path: Path, script: dict[str, list], approve: bool | None = True):
 
 async def test_direct_answer_skips_tools(tmp_path):
     orch, _, _ = make(tmp_path, {"plan": [js({"needs_tools": False, "answer": "Hello!"})]})
-    r = await orch.run(TaskRequest("hi"))
+    r = await orch.run(TaskRequest("what is 2+2"))
     assert r.status == "done" and r.answer == "Hello!"
 
 

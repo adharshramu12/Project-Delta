@@ -14,7 +14,7 @@ from typing import Any
 from delta.config import Settings, known_folder, save_dir
 from delta.core.clarify import ask_first
 from delta.core.events import EventBus
-from delta.core.intents import match_intent
+from delta.core.intents import match_intent, small_talk
 from delta.core.planner import make_plan
 from delta.core.proof import ProofRecorder
 from delta.core.replay import Recipe, fill, match_slots
@@ -234,6 +234,8 @@ class Orchestrator:
         return result
 
     async def _run(self, req: TaskRequest) -> TaskResult:
+        if reply := small_talk(req.text, self.s.agent.owner_name):  # "hi", "thanks": 0 tokens, instant
+            return TaskResult(req.id, "done", reply, fast=True)
         # Never guess what only the user can decide (e.g. a meeting's day/time): ask first, 0 tokens.
         if question := ask_first(req.text):
             return TaskResult(req.id, "needs_user", question.text, options=question.options,
