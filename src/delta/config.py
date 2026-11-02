@@ -17,24 +17,36 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class ProviderConfig(BaseModel):
-    base_url: str
+    # "openai": any OpenAI-compatible server (Ollama, LM Studio, Groq, NIM, ...).
+    # "claude_code" / "codex": the user's own signed-in CLI, so their existing plan pays.
+    kind: Literal["openai", "claude_code", "codex"] = "openai"
+    base_url: str = ""
+    command: str | None = None  # CLI kinds: path to the executable (default: found automatically)
+    discover: Literal["lmstudio"] | None = None  # read the server's port from the app's own settings
     secret: str | None = None  # name of the secret holding the API key
     local: bool = False
     native_tools: bool = True
     keep_alive: str | None = None
+    # Local servers that load models on demand (LM Studio): skip them when the model is not loaded
+    # yet and less RAM than this is free, instead of freezing the PC while it loads.
+    min_free_ram_gb: float = 0
     timeout_s: float = 60
     models: dict[str, str] = Field(default_factory=dict)
+    # CLI kinds: thinking effort per job (plan/chat/verify; "chat" is the default for the others)
+    efforts: dict[str, str] = Field(default_factory=dict)
 
 
 class LLMConfig(BaseModel):
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     routes: dict[str, list[str]] = Field(default_factory=dict)
+    preferred: str = "auto"  # provider tried first for every job; "auto" = follow `routes`
 
 
 class AgentConfig(BaseModel):
     name: str = "Delta"
     owner_name: str = ""
-    max_steps: int = 15
+    max_steps: int = 15  # scaled by the brain: frontier models get more, small local ones fewer
+    auto_observe: bool = True  # after each mouse/keyboard/browser action, show the model the result
     max_attempts: int = 3
     approval_timeout_s: float = 300
 

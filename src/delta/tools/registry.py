@@ -34,7 +34,15 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def specs(self) -> list[dict[str, Any]]:
-        return [t.spec() for t in self._tools.values()]
+        """Specs of the tools usable right now; unusable ones are not offered to the model."""
+        out = []
+        for t in self._tools.values():
+            try:
+                if t.available():
+                    out.append(t.spec())
+            except Exception:  # a broken availability check must not hide every other tool
+                continue
+        return out
 
     def names(self) -> list[str]:
         return list(self._tools)

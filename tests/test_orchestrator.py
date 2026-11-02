@@ -51,7 +51,7 @@ async def test_write_file_with_approval_and_verification(tmp_path):
         "plan": [js({"needs_tools": True, "goal": "make notes", "steps": ["write", "check"],
                      "success_criteria": [f"{target} exists"]})],
         "chat": [call("write_file", path=target, content="hello"), call("path_info", path=target),
-                 text("Created notes.txt")],
+                 text("DONE: Created notes.txt")],
         "verify": [js({"passed": True, "reason": "path_info shows it exists"})],
     })
     r = await orch.run(TaskRequest("create notes"))
@@ -82,8 +82,8 @@ async def test_unverified_task_retries_then_fails(tmp_path):
     target = str(tmp_path / "x.txt")
     orch, _, _ = make(tmp_path, script={
         "plan": [js({"needs_tools": True, "success_criteria": [f"{target} contains 'y'"]})],
-        "chat": [call("write_file", path=target, content="x"), text("done!"),
-                 call("path_info", path=target), text("Done again.")],
+        "chat": [call("write_file", path=target, content="x"), text("DONE: done!"),
+                 call("path_info", path=target), text("DONE: Done again.")],
         "verify": [js({"passed": False, "reason": "wrong content", "missing": ["contains y"]}),
                    js({"passed": False, "reason": "still wrong"})],
     })
@@ -95,7 +95,7 @@ async def test_unverified_task_retries_then_fails(tmp_path):
 async def test_no_actions_taken_fails_verification(tmp_path):
     orch, _, _ = make(tmp_path, {
         "plan": [js({"needs_tools": True, "success_criteria": ["file exists"]})],
-        "chat": [text("I did it!"), text("I did it again!")],
+        "chat": [text("DONE: I did it!"), text("DONE: I did it again!")],
         "verify": [],
     })
     r = await orch.run(TaskRequest("make file"))

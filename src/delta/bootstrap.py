@@ -14,9 +14,11 @@ from typing import Any
 from delta.config import Settings, ensure_desktop_shortcut, save_dir
 from delta.core.events import EventBus
 from delta.core.orchestrator import Orchestrator
+from delta.core.proof import ProofRecorder
 from delta.core.state import TaskRequest, TaskResult
 from delta.learning.store import Learned, LearningStore
-from delta.llm.providers import OpenAICompatProvider, Provider
+from delta.llm.cli_providers import ClaudeCodeProvider, CodexProvider
+from delta.llm.providers import OpenAICompatProvider, Provider, lmstudio_base_url
 from delta.llm.router import ModelRouter
 from delta.memory.skills import SkillStore
 from delta.memory.store import MemoryStore
@@ -31,6 +33,8 @@ from delta.system.logging import log
 from delta.system.secrets import get_secret
 from delta.tools.apps import app_tools
 from delta.tools.filesystem import filesystem_tools
+from delta.tools.media import media_tools
+from delta.tools.meetings import meeting_tools
 from delta.tools.registry import ToolExecutor, ToolRegistry
 from delta.tools.shell import RunShell
 from delta.tools.web_search import FetchPage, SearchRouter, WebSearch
@@ -53,6 +57,14 @@ def make_policy(settings: Settings) -> PolicyEngine:
 def build_providers(settings: Settings) -> dict[str, Provider]:
     providers: dict[str, Provider] = {}
     for name, cfg in settings.llm.providers.items():
+        if cfg.kind == "claude_code":
+            providers[name] = ClaudeCodeProvider(name, cfg)
+            continue
+        if cfg.kind == "codex":
+            providers[name] = CodexProvider(name, cfg)
+            continue
+        if cfg.discover == "lmstudio":
+            cfg = cfg.model_copy(update={"base_url": lmstudio_base_url(cfg.base_url)})
         # Keys are looked up on first use (not at startup); providers without one are skipped
         # by the router and reported by `delta doctor`.
         key = (lambda s=cfg.secret: get_secret(s)) if cfg.secret else None
@@ -118,8 +130,9 @@ class Container:
             return
         local = [p for p in self.router.providers.values() if p.local]
         if not any(callable(ping := getattr(p, "ping", None)) and ping() for p in local):
-            self.warn("No AI model is available. Add a free Groq key (delta secrets set groq_api_key) "
-                      "or install Ollama to run models on this PC.")
+            self.warn("No AI model is available. Add a free Groq key (delta secrets set groq_api_key), "
+                      "sign in to Claude Code or Codex to use your existing plan, or start Ollama / "
+                      "LM Studio to run models on this PC.")
 
     async def _start_addons(self) -> None:
         cfg = self.settings.addons
@@ -154,7 +167,8 @@ def build(settings: Settings) -> Container:
     data.mkdir(parents=True, exist_ok=True)  # first run: databases need the folder to exist
     events = EventBus()
     governor = Governor(settings.governor)
-    router = ModelRouter(build_providers(settings), settings.llm.routes, allow_local=governor.allow_local)
+    router = ModelRouter(build_providers(settings), settings.llm.routes, allow_local=governor.allow_local,
+                         preferred=settings.llm.preferred)
     memory = MemoryStore(data / "memory.db")
     audit = AuditLog(data / "audit.jsonl")
     approvals = ApprovalBroker(settings.agent.approval_timeout_s)
@@ -163,11 +177,14 @@ def build(settings: Settings) -> Container:
         *filesystem_tools(),
         RunShell(),
         *app_tools(settings.apps),
+        *media_tools(),
+        *meeting_tools(),
         WebSearch(SearchRouter.from_order(settings.search.order)),
         FetchPage(),
         *(memory_tools(memory) if settings.memory.enabled else []),
     ])
     closers: list[tuple[str, Callable[[], Awaitable[None]]]] = []
+    proof = ProofRecorder(data / "runs")
     desktop_ok = _installed("pywinauto", "pyautogui", "mss")
     if desktop_ok:
         from delta.system.agent_cursor import AgentCursor
@@ -177,7 +194,7 @@ def build(settings: Settings) -> Container:
         AgentCursor.recover(data)  # a previous run that died while orange gives the cursor back
         cursor = AgentCursor(data, enabled=settings.browser.orange_cursor)
         ctl = DesktopController(cursor)
-        for t in [*desktop_tools(ctl), *screen_tools(router, governor)]:
+        for t in [*desktop_tools(ctl), *screen_tools(router, governor, proof)]:
             registry.register(t)
 
         async def close_desktop() -> None:
@@ -207,7 +224,7 @@ def build(settings: Settings) -> Container:
     executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
     skills = SkillStore(data / "skills.db")
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
-                                governor, events, audit, skills, learning)
+                                governor, events, audit, skills, learning, proof)
 
     async def on_health(a: Assessment) -> None:
         await events.publish("governor.health", health=a.health.name, reasons=a.reasons)

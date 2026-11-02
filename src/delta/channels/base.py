@@ -27,7 +27,8 @@ def approval_text(req: ApprovalRequest) -> str:
 
 
 def result_text(res: TaskResult) -> str:
-    tail = {"done": "", "failed": "\n\n❌ not verified", "cancelled": "\n\n⏸ paused"}[res.status]
+    tail = {"done": "", "failed": "\n\n❌ not verified", "cancelled": "\n\n⏸ paused",
+            "needs_user": "\n\n❓ waiting for your answer"}[res.status]
     return (res.answer or "(no answer)") + tail
 
 

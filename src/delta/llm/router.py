@@ -46,6 +46,7 @@ class CircuitBreaker:
 
 MAX_RATE_LIMIT_WAIT_S = 20.0  # waiting this long beats switching to a weaker model
 LAST_RESORT_WAIT_S = 60.0     # when no other provider is left
+DEFAULT_RATE_WAIT_S = 15.0    # rate limited but the provider gave no "try again in" hint
 UNREACHABLE_COOLDOWN_S = 300.0  # local servers only; cloud blips use the normal breaker
 NETWORK_RETRY_DELAY_S = 1.5
 
@@ -56,9 +57,12 @@ class ModelRouter:
         providers: dict[str, Provider],
         routes: dict[str, list[str]],
         allow_local: Callable[[], bool] = lambda: True,
+        preferred: str = "auto",
     ) -> None:
         self.providers = providers
         self.routes = routes
+        self.preferred = preferred  # the user's main AI: first for every task, others only as fallback
+        self.meter: dict[str, int] = {}  # tokens since reset_meter(): input / cached / output / calls
         self.allow_local = allow_local
         self.breakers = {name: CircuitBreaker() for name in providers}
         self.last_provider: str | None = None
@@ -70,11 +74,20 @@ class ModelRouter:
                 refresh()
             self.breakers[name] = CircuitBreaker()
 
+    def route(self, task: str) -> list[str]:
+        route = self.routes.get(task) or self.routes.get("chat") or list(self.providers)
+        if self.preferred in self.providers:
+            route = [self.preferred, *(n for n in route if n != self.preferred)]
+        return route
+
     def usable(self) -> list[str]:
-        """Providers that can serve chat right now, for status displays: cloud ones need a key,
-        local ones (Ollama) must actually be running."""
+        """Providers that can serve chat right now, in the order they are tried: cloud ones need
+        a key, local ones (Ollama) must actually be running."""
         out = []
-        for name, p in self.providers.items():
+        for name in self.route("chat"):
+            p = self.providers.get(name)
+            if p is None:
+                continue
             if not p.supports("chat") or not self.breakers[name].available():
                 continue
             if p.local and callable(ping := getattr(p, "ping", None)) and not ping():
@@ -83,9 +96,8 @@ class ModelRouter:
         return out
 
     def candidates(self, task: str) -> list[Provider]:
-        route = self.routes.get(task) or self.routes.get("chat") or list(self.providers)
         out = []
-        for name in route:
+        for name in self.route(task):
             p = self.providers.get(name)
             if p is None or not p.supports(task) or not self.breakers[name].available():
                 continue
@@ -118,10 +130,12 @@ class ModelRouter:
                         log.info("router.network_retry", provider=p.name)
                         await asyncio.sleep(NETWORK_RETRY_DELAY_S)
                         resp = await p.complete(task, messages, tools, json_mode)
-                    elif e.kind == "rate_limit" and e.retry_after_s and e.retry_after_s <= max_wait:
+                    elif e.kind == "rate_limit" and (e.retry_after_s or DEFAULT_RATE_WAIT_S) <= max_wait:
                         # Free tiers often say "try again in 6s": a short wait beats failing the task.
-                        log.info("router.rate_limit_wait", provider=p.name, seconds=round(e.retry_after_s, 1))
-                        await asyncio.sleep(e.retry_after_s + 0.5)
+                        # No hint given: a per-minute limit clears within a minute, so wait a bit anyway.
+                        wait = e.retry_after_s or DEFAULT_RATE_WAIT_S
+                        log.info("router.rate_limit_wait", provider=p.name, seconds=round(wait, 1))
+                        await asyncio.sleep(wait + 0.5)
                         resp = await p.complete(task, messages, tools, json_mode)
                     else:
                         raise
@@ -129,13 +143,16 @@ class ModelRouter:
                 if e.kind == "unreachable" and p.local:
                     # Nothing listening on this PC (e.g. Ollama not installed): stop trying for a while.
                     self.breakers[p.name].trip(UNREACHABLE_COOLDOWN_S)
-                elif e.kind != "rate_limit":  # being throttled says nothing about provider health
+                elif e.kind not in ("rate_limit", "too_large", "bad_tool_call"):  # not a provider health issue
                     self.breakers[p.name].record_failure()
                 errors.append(str(e))
                 kinds.append(e.kind)
                 log.warning("router.fallback", provider=p.name, task=task, error=str(e))
                 continue
             self.breakers[p.name].record_success()
+            self.meter["calls"] = self.meter.get("calls", 0) + 1
+            for k, v in resp.usage.items():
+                self.meter[k] = self.meter.get(k, 0) + v
             if self.last_provider != p.name:
                 log.info("router.provider", provider=p.name, model=resp.model, task=task)
             self.last_provider = p.name
@@ -146,6 +163,21 @@ class ModelRouter:
             f"'{task}'. Errors: {'; '.join(errors) or 'none configured (add API keys or start Ollama)'}",
             kinds,
         )
+
+    def reset_meter(self) -> None:
+        self.meter = {}
+
+    async def prewarm(self, task: str) -> None:
+        """Let the provider that will answer `task` start up now (Claude Code boots in ~6 s)."""
+        first = self.candidates(task)
+        if first and callable(warm := getattr(first[0], "prewarm", None)):
+            await warm(task)
+
+    async def release(self) -> None:
+        """End of a task: close long-lived CLI sessions so they do not hold RAM."""
+        for p in self.providers.values():
+            if hasattr(p, "_live"):
+                await p.unload()
 
     async def unload_local(self) -> None:
         for p in self.providers.values():

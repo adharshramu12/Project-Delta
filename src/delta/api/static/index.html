@@ -24,6 +24,20 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#fff}bu
 .time{width:64px;font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
 .krow{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line)}
 .ok-text{color:var(--ok)}
+.app{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}
+.app .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.app .state{font-size:12px}.app .state.bad{color:var(--muted)}
+.app .row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.app button{padding:3px 10px;font-size:12px}
+.qopts{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 12px}
+.qopts button{padding:6px 14px;border-radius:999px;border:1px solid var(--accent);background:none;color:var(--ink);cursor:pointer}
+.qopts button:hover{background:var(--accent);color:#fff}
+.proof{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:4px 0 10px;font-size:13px}
+.proof .phead{color:var(--muted);font-size:12px;margin-bottom:4px}.pcheck small{color:var(--muted)}
+.pcheck.ok b{color:var(--ok)}.pcheck.bad b{color:#f87171}
+.pimgs{display:flex;gap:6px;overflow-x:auto;margin-top:8px}.pimgs img{height:90px;border-radius:6px;border:1px solid var(--line)}
+.app .jobs{display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:center;margin-top:8px;font-size:12px}
+.app .jobs select{padding:3px 6px;font-size:12px}.app .jobs small{color:var(--muted)}
+.app .msg{font-size:12px;color:var(--muted);margin-top:6px;white-space:pre-wrap;border:0;background:none;padding:0;min-height:0}.app .msg:empty{display:none}
 .nav.sticky{position:sticky;bottom:-22px;background:var(--panel);padding:10px 0}
 .wiz{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:min(620px,100%);max-height:calc(100vh - 32px);overflow-y:auto;padding:22px 24px;display:flex;flex-direction:column;gap:10px}
 .wiz h2{margin:0;font-size:20px}.wiz .lead{color:var(--muted);margin:0 0 6px}.wiz section{display:none;flex-direction:column;gap:10px}.wiz section.on{display:flex}
@@ -71,6 +85,7 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
   <span id="health" class="pill OFFLINE">offline</span>
   <div id="stats" class="stats"></div>
   <button id="opensetup" title="Models, permissions, Telegram">Setup</button>
+  <button id="openapps" title="Use Claude Code, Codex or LM Studio you already have">Connected apps</button>
   <button id="opensettings" title="Folders, apps, learning, add-ons, keys">Settings</button>
   <button class="danger" id="shutdown" title="Stop Delta completely and free memory/GPU">Shutdown</button>
 </header>
@@ -79,6 +94,10 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
   <div class="wiz">
     <h2>Settings</h2>
     <p class="lead">Changes apply to Delta's very next action.</p>
+    <h3 id="s_apps_h">Connected apps <span class="tag">use plans you already pay for</span></h3>
+    <label class="field">Main AI <small>used first for every step; others only if it fails. Each reply says which AI answered.</small>
+      <select id="s_main"></select></label>
+    <div id="s_appslist"><div class="empty">Checking…</div></div>
     <h3>Permission level</h3>
     <label class="choice"><input type="radio" name="s_autonomy" value="ask-everything"><b>Careful</b><small>Ask before anything except reading.</small></label>
     <label class="choice"><input type="radio" name="s_autonomy" value="ask-risky"><b>Balanced</b><small>Ask before changing or sending anything.</small></label>
@@ -133,6 +152,8 @@ h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;c
         <div class="kin"><input type="password" placeholder="nvapi-…" autocomplete="off"><button>Check &amp; save</button></div>
         <div class="msg"></div>
       </div>
+      <h3>Or use an AI app you already have <span class="tag">no key needed</span></h3>
+      <div id="w_apps"></div>
       <div class="box" id="localbox"></div>
     </section>
     <section data-step="trust">
@@ -273,6 +294,46 @@ async function refreshSkills() {
   }
 }
 
+// A question from Delta: tap an option (or type your own) to continue the same request.
+function showOptions(r) {
+  const row = document.createElement("div"); row.className = "qopts";
+  const answer = choice => { $("text").value = `${r.asked_about} (${choice})`; $("send").requestSubmit(); row.remove(); };
+  for (const o of r.options || []) {
+    const b = document.createElement("button"); b.textContent = o; b.onclick = () => answer(o); row.appendChild(b);
+  }
+  const other = document.createElement("button"); other.textContent = "Other…";
+  other.onclick = () => { $("text").value = r.asked_about + " ("; $("text").focus(); row.remove(); };
+  row.appendChild(other);
+  $("log").appendChild(row); row.scrollIntoView({block: "end"});
+}
+
+// Checkpoints judged against the final screenshot, plus the screenshots themselves.
+async function showProof(r) {
+  const box = document.createElement("div"); box.className = "proof";
+  const head = document.createElement("div"); head.className = "phead";
+  head.textContent = r.seen_screen ? "Checked against a screenshot of the final screen:" : "Checked against the tool log (no screenshot available):";
+  box.appendChild(head);
+  for (const c of r.checks) {
+    const row = document.createElement("div"); row.className = "pcheck " + (c.met ? "ok" : "bad");
+    row.innerHTML = "<b></b> <span></span><small></small>";
+    row.querySelector("b").textContent = c.met ? "✓" : "✗";
+    row.querySelector("span").textContent = c.checkpoint;
+    row.querySelector("small").textContent = c.seen ? " — " + c.seen : "";
+    box.appendChild(row);
+  }
+  const list = await api(`/api/runs/${r.task_id}`).catch(() => ({images: []}));
+  if (list.images.length) {
+    const strip = document.createElement("div"); strip.className = "pimgs";
+    for (const name of list.images) {
+      const blob = await fetch(`/api/runs/${r.task_id}/${name}`, {headers: {"Authorization": "Bearer " + token}}).then(x => x.blob());
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.target = "_blank"; a.title = name;
+      const img = document.createElement("img"); img.src = a.href; img.alt = name; a.appendChild(img); strip.appendChild(a);
+    }
+    box.appendChild(strip);
+  }
+  $("log").appendChild(box); box.scrollIntoView({block: "end"});
+}
+
 function connect() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws?token=${encodeURIComponent(token)}`);
   ws.onmessage = ev => {
@@ -280,7 +341,11 @@ function connect() {
     if (m.type === "approval") renderApproval(m.approval);
     else if (m.type === "result") {
       const r = m.result;
-      add("msg" + (r.status === "done" ? "" : " failed"), r.answer, `${r.status}${r.provider ? " · via " + r.provider : ""}${r.attempts ? " · " + r.attempts + " attempt(s)" : ""}`);
+      const t = r.tokens || {}, k = n => n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
+      const cost = t.calls ? ` · ${t.calls} AI calls · ${k((t.input || 0) + (t.output || 0))} tokens${t.cached ? " (+" + k(t.cached) + " cached)" : ""}` : "";
+      add("msg" + (r.status === "done" || r.status === "needs_user" ? "" : " failed"), (r.status === "needs_user" ? "❓ " : "") + r.answer, `${r.status}${r.provider ? " · via " + r.provider : ""}${r.attempts ? " · " + r.attempts + " attempt(s)" : ""}${cost}`);
+      if (r.checks && r.checks.length) showProof(r);
+      if (r.status === "needs_user" && r.asked_about) showOptions(r);
       refreshMemory();
     } else if (m.type === "event") {
       const d = m.data;
@@ -334,7 +399,7 @@ function renderSetup(s) {
   const h = s.hardware;
   $("hw").textContent = `This PC: ${h.ram_gb} GB RAM (${h.ram_free_gb} GB free)` +
     (h.gpu ? `, ${h.gpu} with ${h.vram_gb} GB` : ", no NVIDIA GPU found") + `\n\n${h.recommendation}`;
-  $("localbox").textContent = h.ollama_running ? "✓ A local model server (Ollama) is running on this PC: private, free, offline."
+  $("localbox").textContent = h.ollama_running ? "✓ A local model server (Ollama or LM Studio) is running on this PC: private, free, offline."
     : h.can_run_local ? "Optional: install Ollama (ollama.com) later to also run a model privately on this PC."
     : "Local models are not recommended on this PC; a cloud key is all you need.";
   for (const row of document.querySelectorAll(".keyrow")) {
@@ -347,6 +412,7 @@ function renderSetup(s) {
   $("tgon").checked = $("tgon").checked || s.telegram.enabled;
 }
 async function openSetup() {
+  renderApps($("w_apps"));
   $("setup").hidden = false; showStep(0);
   renderSetup(await api("/api/setup"));
 }
@@ -421,9 +487,103 @@ async function openSettings() {
     } else { row.lastChild.innerHTML = "<button>Add in Setup</button>"; row.querySelector("button").onclick = () => { $("settings").hidden = true; openSetup(); }; }
     $("s_keys").appendChild(row);
   }
-  $("s_err").textContent = ""; $("settings").hidden = false;
+  $("s_err").textContent = ""; $("settings").hidden = false; renderApps();
 }
 $("opensettings").onclick = openSettings;
+
+// ---- connected apps (Claude Code, Codex, LM Studio) --------------------------------------
+async function renderMain() {
+  const p = await api("/api/apps/preferred").catch(() => null); if (!p) return;
+  const sel = $("s_main"); sel.innerHTML = "";
+  const opt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); };
+  opt("auto", "Automatic (local first, then your plans, then free cloud)");
+  for (const o of p.options) opt(o.name, o.label + (o.ready ? "" : " (not ready)"));
+  sel.value = p.preferred;
+}
+$("s_main").onchange = async () => {
+  await api("/api/apps/preferred", {method: "PUT", body: JSON.stringify({name: $("s_main").value})});
+  add("step ok", "✓ Main AI: " + $("s_main").selectedOptions[0].textContent); refreshStatus();
+};
+const JOBS = [["plan", "Planning", "once per task"], ["chat", "Doing steps", "every step: most tokens"],
+              ["verify", "Checking", "once at the end"]];
+const PRESETS = {claude_code: {
+  "Save tokens": {models: {plan: "sonnet", chat: "haiku", verify: "haiku"}, efforts: {plan: "low", chat: "low", verify: "low"}},
+  "Balanced": {models: {plan: "sonnet", chat: "sonnet", verify: "haiku"}, efforts: {plan: "low", chat: "low", verify: "low"}},
+  "Best quality": {models: {plan: "opus", chat: "sonnet", verify: "haiku"}, efforts: {plan: "high", chat: "medium", verify: "low"}},
+}};
+function modelPicker(a, msg, rerender) {
+  const wrap = document.createElement("div");
+  const grid = document.createElement("div"); grid.className = "jobs";
+  const pick = {};
+  for (const [job, label, hint] of JOBS) {
+    const l = document.createElement("span"); l.innerHTML = "<b></b><br><small></small>";
+    l.querySelector("b").textContent = label; l.querySelector("small").textContent = hint;
+    const m = document.createElement("select"), e = document.createElement("select");
+    const ids = a.options.map(o => o.id);
+    if (!a.options.length || !ids.includes(a.models[job])) {
+      const o = document.createElement("option"); o.value = a.models[job]; o.textContent = a.models[job] || "app default"; m.appendChild(o);
+    }
+    for (const o of a.options) { const x = document.createElement("option"); x.value = o.id; x.textContent = o.label; m.appendChild(x); }
+    m.value = a.models[job];
+    const fillEfforts = () => {
+      const levels = (a.options.find(o => o.id === m.value) || {efforts: ["low", "medium", "high"]}).efforts;
+      const keep = e.value || a.efforts[job]; e.innerHTML = "";
+      for (const v of ["", ...levels]) { const x = document.createElement("option"); x.value = v; x.textContent = v ? "effort: " + v : "effort: default"; e.appendChild(x); }
+      e.value = levels.includes(keep) ? keep : "";
+    };
+    m.onchange = fillEfforts; e.value = a.efforts[job]; fillEfforts();
+    pick[job] = [m, e]; grid.append(l, m, e);
+  }
+  const save = async body => {
+    const r = await api(`/api/apps/${a.name}/models`, {method: "PUT", body: JSON.stringify(body)});
+    msg.textContent = r.ok ? "✓ Saved. Used from the next message." : (r.detail || "Could not save."); if (r.ok) rerender();
+  };
+  const row = document.createElement("div"); row.className = "row";
+  for (const [name, body] of Object.entries(PRESETS[a.name] || {})) {
+    const b = document.createElement("button"); b.textContent = name; b.onclick = () => save(body); row.appendChild(b);
+  }
+  const s = document.createElement("button"); s.className = "primary"; s.textContent = "Save models";
+  s.onclick = () => save({models: Object.fromEntries(JOBS.map(([j]) => [j, pick[j][0].value])),
+                          efforts: Object.fromEntries(JOBS.map(([j]) => [j, pick[j][1].value]))});
+  row.appendChild(s); wrap.append(grid, row); return wrap;
+}
+async function renderApps(box = $("s_appslist")) {
+  if (box.id === "s_appslist") renderMain();
+  const list = await api("/api/apps").catch(() => []); box.innerHTML = list.length ? "" : '<div class="empty">No connectable apps configured.</div>';
+  for (const a of list) {
+    const el = document.createElement("div"); el.className = "app";
+    el.innerHTML = '<div class="top"><b></b><span class="state"></span></div><div class="row"></div><div class="msg"></div>';
+    el.querySelector("b").textContent = a.label;
+    const state = el.querySelector(".state"), row = el.querySelector(".row"), msg = el.querySelector(".msg");
+    const button = (label, fn, primary) => {
+      const b = document.createElement("button"); b.textContent = label; if (primary) b.className = "primary";
+      b.onclick = async () => { b.disabled = true; msg.textContent = "Working…";
+        try { const r = await fn(); msg.textContent = r.message || ""; if (r.ok && r.refresh) renderApps(box); }
+        catch (e) { msg.textContent = e.message; } b.disabled = false; };
+      row.appendChild(b);
+    };
+    const post = path => api(path, {method: "POST"});
+    if (a.kind === "cli") {
+      if (!a.installed) { state.className = "state bad"; state.textContent = "not installed"; }
+      else if (a.signed_in) { state.className = "state ok-text"; state.textContent = "✓ signed in, Delta can use it"; }
+      else { state.className = "state bad"; state.textContent = "installed, not signed in"; }
+      if (a.installed) {
+        if (!a.signed_in) button("Sign in", () => post(`/api/apps/${a.name}/login`), true);
+        button("Check", async () => ({ok: true, refresh: true, message: ""}));
+        if (a.signed_in) button("Send test message", () => post(`/api/apps/${a.name}/test`));
+        if (a.signed_in) el.insertBefore(modelPicker(a, msg, () => renderApps(box)), msg);
+      } else msg.textContent = a.name === "claude_code" ? "Install Claude Code, then come back here." : "Install the Codex app or CLI, then come back here.";
+    } else {
+      state.className = a.running ? "state ok-text" : "state bad";
+      state.textContent = a.running ? `✓ server running (${a.url})` : (a.installed ? "installed, server off" : "not installed");
+      if (a.installed && !a.running) button("Start server", async () => ({...await post(`/api/apps/${a.name}/start`), refresh: true}), true);
+      if (a.running) button("Send test message", () => post(`/api/apps/${a.name}/test`));
+      button("Check", async () => ({ok: true, refresh: true, message: ""}));
+    }
+    box.appendChild(el);
+  }
+}
+$("openapps").onclick = async () => { $("setup").hidden = true; await openSettings(); $("s_apps_h").scrollIntoView(); };
 $("s_close").onclick = () => { $("settings").hidden = true; };
 $("s_save").onclick = async () => {
   const body = {

@@ -75,8 +75,11 @@ def _approval_json(r: ApprovalRequest) -> dict[str, Any]:
 
 
 def _result_json(r: TaskResult) -> dict[str, Any]:
+    v = r.verification
     return {"task_id": r.task_id, "status": r.status, "answer": r.answer, "attempts": r.attempts,
-            "provider": r.provider, "steps": [{"tool": s.tool, "ok": s.ok} for s in r.steps]}
+            "provider": r.provider, "steps": [{"tool": s.tool, "ok": s.ok} for s in r.steps],
+            "checks": v.checks if v else [], "seen_screen": bool(v and v.screenshot), "tokens": r.tokens,
+            "options": r.options, "asked_about": r.asked_about}
 
 
 def create_app(c: Container, token: str) -> FastAPI:
@@ -207,11 +210,27 @@ def create_app(c: Container, token: str) -> FastAPI:
         c.lifecycle.request_stop()
         return {"ok": True}
 
+    from delta.api.apps_routes import register as register_apps
     from delta.api.settings_routes import register as register_settings
     from delta.api.setup_routes import register as register_setup
 
     register_setup(app, c, auth)
     register_settings(app, c, auth)
+    register_apps(app, c, auth)
+
+    @app.get("/api/runs/{task_id}", dependencies=[Depends(auth)])
+    async def run_proof(task_id: str) -> dict[str, Any]:
+        proof = c.orchestrator.proof
+        if proof is None or not task_id.isalnum():
+            raise HTTPException(404, "no proof")
+        return {"images": proof.files(task_id)}
+
+    @app.get("/api/runs/{task_id}/{name}", dependencies=[Depends(auth)])
+    async def run_image(task_id: str, name: str) -> FileResponse:
+        proof = c.orchestrator.proof
+        if proof is None or not task_id.isalnum() or name not in proof.files(task_id):
+            raise HTTPException(404, "no such image")  # only listed files: no path tricks
+        return FileResponse(proof.root / task_id / name, media_type="image/jpeg")
 
     @app.websocket("/api/ws")
     async def ws(socket: WebSocket) -> None:

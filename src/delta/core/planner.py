@@ -22,16 +22,30 @@ Reply with JSON only:
   "goal": "<one sentence>",
   "steps": ["<short step>", ...],
   "tools": ["<tool names the steps need, from the list above>"],
-  "success_criteria": ["<observable fact that proves the task is done, checkable with a tool>", ...],
-  "skill_id": <id of a skill below that fits this request, or null>}}
+  "success_criteria": ["<checkpoint>", ...],
+  "skill_id": <id of a skill below that fits this request, or null>,
+  "direct": {{"tool": "<tool name>", "args": {{...}}}} or null}}
+
+FAST PATH (saves the user time and tokens): if ONE tool call does the whole request, fill "direct"
+with it and keep steps short. E.g. "play <song> on YouTube" -> {{"tool": "play_youtube", "args":
+{{"query": "<song + movie/artist>"}}}}; "pause the music" -> media_control; "schedule a meeting with
+x@y.com tomorrow 5pm" -> schedule_meeting (start in ISO local time, from Now above);
+"start a meet and send the link to x@y.com" -> start_meeting with invite; "move my standup to 3pm" /
+"make the review 1 hour" / "cancel the sync" -> edit_meeting (title = the meeting's name; new_start
+is just "HH:MM" when no day is given, so the meeting keeps its own day). Leave it null when the
+job needs several steps or looking at the screen.
 
 Skills the agent learned from earlier verified successes on this PC (reuse one when it fits;
 adapt its steps to this request):
 {skills}
 
 Use the folders above directly; do not plan steps to search for them.
-Success criteria must be concrete, e.g. "file C:/Users/x/Desktop/notes.txt exists and contains 'hello'",
-"process Antigravity.exe is running", "answer cites at least one source URL".
+success_criteria are CHECKPOINTS, in order, that a person could confirm by looking at the final
+screen (or a file/process): 2-5 of them, each one concrete fact about the END STATE, e.g.
+"NotebookLM is open in the browser", "the page shows the user's Google account (signed in)",
+"a new notebook is open", "the notebook's sources list includes a source about the Indian
+Constitution", "file C:/Users/x/Desktop/notes.txt exists and contains 'hello'".
+Not checkpoints: "clicked X", "typed Y" (actions are not results).
 
 What you know about the user:
 {memory}"""
@@ -60,6 +74,10 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
         answer=str(data.get("answer", "")),
         tools=[t for t in data.get("tools", []) if isinstance(t, str) and t in tool_names],
     )
+    direct = data.get("direct")
+    if isinstance(direct, dict) and direct.get("tool") in tool_names and isinstance(direct.get("args", {}), dict):
+        plan.direct = {"tool": direct["tool"], "args": direct.get("args") or {}}
+        plan.needs_tools = True
     sid = data.get("skill_id")
     if isinstance(sid, int) and any(s.id == sid for s in skills):  # never trust an invented id
         plan.skill_id = sid

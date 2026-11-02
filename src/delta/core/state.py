@@ -22,6 +22,7 @@ class Plan:
     answer: str = ""  # filled when no tools are needed
     skill_id: int | None = None  # learned skill the planner chose to follow
     tools: list[str] = field(default_factory=list)  # tools the planner expects to need
+    direct: dict[str, Any] | None = None  # {"tool", "args"}: one call does the whole job (no agent loop)
 
 
 @dataclass
@@ -38,9 +39,12 @@ class Verification:
     passed: bool
     reason: str
     missing: list[str] = field(default_factory=list)
+    checks: list[dict[str, Any]] = field(default_factory=list)  # per checkpoint: met + what showed it
+    screenshot: bool = False  # judged against a fresh screenshot, not only the text log
+    raw: str = ""  # the checker's own reply, kept for tracing odd verdicts
 
 
-Status = Literal["done", "failed", "cancelled"]
+Status = Literal["done", "failed", "cancelled", "needs_user"]
 
 
 @dataclass
@@ -53,3 +57,7 @@ class TaskResult:
     verification: Verification | None = None
     provider: str = ""
     skill_id: int | None = None
+    tokens: dict[str, int] = field(default_factory=dict)  # input / cached / output / calls for this task
+    fast: bool = False  # finished by the planner's one direct tool call
+    options: list[str] = field(default_factory=list)  # needs_user: quick answers the user can tap
+    asked_about: str = ""  # needs_user: the original request, so an answer can continue it

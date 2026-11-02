@@ -19,6 +19,8 @@ class LLMResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     provider: str = ""
     model: str = ""
+    usage: dict[str, int] = field(default_factory=dict)  # {"input", "cached", "output"} tokens
+    final: bool = False  # the model explicitly ended its turn ({"final": ...} in the JSON tool protocol)
 
 
 Message = dict[str, Any]  # {"role": ..., "content": ..., optional "tool_calls"/"tool_call_id"}

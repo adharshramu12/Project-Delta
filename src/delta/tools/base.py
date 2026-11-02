@@ -49,6 +49,10 @@ class Tool[A: BaseModel](ABC):
     def app(self, args: A) -> str | None:
         return None
 
+    def available(self) -> bool:
+        """False hides the tool from the model for now (e.g. it needs a model or app that is missing)."""
+        return True
+
     def scope(self, args: A) -> str:
         """The *kind* of thing acted on, so Delta can learn per kind ("deletes in Downloads"),
         not per exact file: the parent folder of a path, a website's host, or an app name."""

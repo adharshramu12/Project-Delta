@@ -42,7 +42,7 @@ async def test_verified_task_teaches_a_skill_then_reuses_it(tmp_path):
                   "tools": ["write_file", "path_info"]}
     orch, _audit, _ = make(tmp_path, {
         "plan": [js(plan)],
-        "chat": [call("write_file", path=target, content="hi"), call("path_info", path=target), text("Done")],
+        "chat": [call("write_file", path=target, content="hi"), call("path_info", path=target), text("DONE: Done")],
         "verify": [js({"passed": True, "reason": "exists"}), js(skill_json)],
     })
     store = SkillStore(tmp_path / "skills.db")
@@ -58,7 +58,7 @@ async def test_verified_task_teaches_a_skill_then_reuses_it(tmp_path):
     Path(target).unlink()
     orch2, _, _ = make(tmp_path, {
         "plan": [js({**plan, "skill_id": sid})],
-        "chat": [call("write_file", path=target, content="hi"), call("path_info", path=target), text("Done")],
+        "chat": [call("write_file", path=target, content="hi"), call("path_info", path=target), text("DONE: Done")],
         "verify": [js({"passed": True, "reason": "exists"})],
     })
     orch2.skills = store
@@ -78,7 +78,7 @@ async def test_verified_task_teaches_a_skill_then_reuses_it(tmp_path):
 async def test_invented_skill_id_is_ignored(tmp_path):
     orch, _, _ = make(tmp_path, {
         "plan": [js({"needs_tools": True, "success_criteria": ["x"], "skill_id": 999})],
-        "chat": [text("nothing"), text("still nothing")], "verify": [],
+        "chat": [text("DONE: nothing"), text("DONE: still nothing")], "verify": [],
     })
     orch.skills = SkillStore(tmp_path / "skills.db")
     r = await orch.run(TaskRequest("anything"))

@@ -54,7 +54,24 @@ def _doctor() -> int:
     print(f"Delta {__version__}\nconfig: {s.config_dir}\ndata:   {s.data_dir}\n")
     print("Model providers:")
     for name, p in s.llm.providers.items():
-        if p.local:
+        if p.kind != "openai":
+            from delta.llm.cli_providers import ClaudeCodeProvider, CodexProvider
+
+            cli = (ClaudeCodeProvider if p.kind == "claude_code" else CodexProvider)(name, p)
+            exe = cli.executable()
+            state = f"found {exe}" if exe else f"not installed (optional: uses your {cli.label} plan)"
+            print(f"  {name:<8} {state}")
+        elif p.local and not p.keep_alive:  # LM Studio / Jan / llama.cpp: plain OpenAI-style server
+            if p.discover == "lmstudio":
+                from delta.llm.providers import lmstudio_base_url
+
+                p = p.model_copy(update={"base_url": lmstudio_base_url(p.base_url)})
+            try:
+                ids = [m["id"] for m in httpx.get(f"{p.base_url.rstrip('/')}/models", timeout=3).json().get("data", [])]
+                print(f"  {name:<8} running, models: {', '.join(ids) or 'none loaded'}")
+            except (httpx.HTTPError, ValueError):
+                print(f"  {name:<8} not running at {p.base_url} (optional)")
+        elif p.local:
             root = p.base_url.removesuffix("/v1")
             try:
                 tags = {m["name"] for m in httpx.get(f"{root}/api/tags", timeout=3).json().get("models", [])}
