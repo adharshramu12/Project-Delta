@@ -51,6 +51,7 @@ A rung that cannot prove its result hands over to the next one **with what it al
 | `tools/user_browser.py` | the user's own signed-in Chrome/Edge through UI Automation: read, click (real pointer for web menus), fill (Shift+Enter newlines, paste for long text) |
 | `tools/pc.py` | volume, brightness, Windows light/dark theme, screenshot, webcam; pictures go straight to a remote requester |
 | `tools/deliver.py` | `send_file` back to Telegram/Slack (Remote Guard PIN checked) |
+| `tools/emergency.py` | encrypted emergency contacts; `alert_emergency_contacts` (WhatsApp message + optional voice call) |
 | `tools/media.py` | Windows media status/control, `play_youtube` (no AI, playback proven by Windows) |
 | `tools/meetings.py` | Meet/Zoom/Teams; schedule, edit, cancel (Calendar API when connected, else the web page) |
 | `messaging/*` | WhatsApp / Telegram / Slack drivers, human texting style, delegated chats |
@@ -163,6 +164,17 @@ double-click icon ─► launcher (pythonw) ─► service: python -m delta run 
 - **Vault** (`system/vault.py`): memory contents and chat titles/messages are sealed with DPAPI
   (app-specific entropy). Old plain rows are sealed on start and the file is vacuumed; the plain-text
   FTS index was removed, and recall scores keywords in Python (memories are few, so this is fast).
+
+## Emergency help
+- **Contacts:** up to 5, saved from Settings, stored in `emergency.json` sealed with DPAPI.
+- **Help mode:** `core/playbooks.py` detects distress ("not feeling well", "chest pain", "SOS", self-harm
+  phrases) and adds the help playbook: stay calm, 112 first when serious (Tele-MANAS 14416 for self-harm
+  thoughts), offer to alert contacts, never claim anyone was told unless the tool says sent.
+- **Tool:** `alert_emergency_contacts` sends through the WhatsApp desktop driver (contact confirmed before
+  typing) and can press WhatsApp's voice-call button through UI Automation.
+- **Consent (policy):** the alert tool, and any message/chat/file during a help request, needs a human yes in
+  every autonomy level, unless the user's own message clearly says to send/call/alert/tell someone. The same
+  works from Telegram, where approval cards have Approve/Deny buttons.
 
 ## Resource policy
 | Health | Trigger (defaults) | Effect |

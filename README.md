@@ -23,6 +23,7 @@ asks before anything risky, and **verifies every task before it says "done".**
 | 🔀 **Hybrid, never stuck** | Delta routes every request to the best available AI and **falls back automatically** when one is down, rate-limited or out of credits. Switch the main AI, model or API key any time, even from your phone. |
 | 📱 **Your whole PC from Telegram** | Send a message or a **voice note** from anywhere: run tasks, get screenshots and files, take a webcam photo, change volume, brightness or dark mode, close apps, switch AI or key. **Slack is coming soon.** |
 | 🔐 **Only you can control it** | Paired to **your** Telegram account only. A **PIN** guards sensitive actions, wrong tries lock remote control, and your PC alerts you. Every action goes into a tamper-evident audit log. |
+| 🆘 **Help when you need it** | Tell Delta you're unwell or in trouble and it can **WhatsApp your chosen emergency contacts** in your name and **start a WhatsApp call**, from the PC or your phone. A clear instruction acts at once; otherwise it asks first. For anything serious it tells you to call **112**. |
 | ✅ **Verified, not hopeful** | Plan → act → **check the result against clear goals** → retry or tell you honestly what failed. |
 | 🤝 **A partner, not a chatbot** | Warm and honest in your own tone. It reads the mood, corrects you kindly when you're wrong, and says clearly what it can and can't do. |
 | 🪶 **Light on your laptop** | ~100 MB in the background, near-zero CPU at rest, **no GPU** unless you choose a local model. **Shutdown** stops everything. |
@@ -93,6 +94,7 @@ memory stay unless you add `-RemoveData`).
 | `/volume` `/brightness` `/theme` | Sound, screen brightness, Windows light/dark |
 | `/apps` | Open apps; tap to close one |
 | `/lock` `/unlock` | Lock remote control now / enter your PIN |
+| *"I'm not well, message Kushi now"* | 🆘 Emergency alert to your saved contacts (WhatsApp message or call) |
 | `/stop` `/status` `/help` | Stop a task, PC health and AIs, all commands |
 
 ## Safety by design
@@ -104,6 +106,8 @@ memory stay unless you add `-RemoveData`).
   deletes or runs code needs your yes, even in autopilot. A malicious page can't quietly take over.
 - **Encrypted at rest:** memories and chats are encrypted with Windows DPAPI, readable only by your
   Windows account.
+- **Emergency alerts:** contacts are stored encrypted; during a help request Delta reaches nobody
+  without your yes (even in autopilot) unless your own message clearly says to.
 - **Your rules:** `config/boundaries.yaml` sets allowed folders, apps, sites, quiet hours and autonomy.
 - **Tamper-evident audit log** of every decision and tool call.
 - Full threat model and known limits: [SECURITY.md](SECURITY.md).
@@ -118,7 +122,8 @@ memory stay unless you add `-RemoveData`).
      │       │                                   │
   Memory     ▼                                   ▼
   & skills  Tools ──► Policy engine ──► Approvals (any device) + Remote Guard PIN
-             │    files · apps · desktop · browser · deep research · meetings · messages · MCP
+             │    files · apps · desktop · browser · deep research · meetings · messages ·
+             │    emergency alerts · PC controls · MCP
              ▼
   Model router ── Codex ▸ Claude Code ▸ Cline ▸ NIM ▸ Groq ▸ DeepSeek ▸ LM Studio ▸ Ollama
                         ▲
@@ -155,6 +160,7 @@ Runtime data (memory, audit log, logs) lives in `%LOCALAPPDATA%\Delta`.
 - [ ] Slack control (in progress)
 - [ ] Scheduled tasks and routines
 - [x] Prompt-injection containment (enforced in code) and DPAPI encryption of memory and chats
+- [x] Emergency help: WhatsApp alerts and calls to chosen contacts, from the app or Telegram
 - [ ] End-to-end encrypted channel (Matrix), signed releases
 
 ## Creator
