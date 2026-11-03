@@ -227,6 +227,11 @@ input,select,textarea{font:inherit}
 .app .msg{font-size:12.5px;color:var(--muted);white-space:pre-wrap;padding:0;animation:none}.app .msg:empty{display:none}
 .keyrow small,.field small,.choice small{color:var(--muted);font-weight:400}
 .kin{display:flex;gap:8px}.kin input,.field input{flex:1;min-width:0}
+.tgstep{border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px;margin:10px 0;background:var(--surface)}
+.tgstep.done{border-color:var(--ok)}.tgstep.done .tgnum{background:var(--ok)}
+.tgnum{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;margin-right:6px}
+.tgstep .keyrow{border:0;padding:8px 0 0;background:none}
+.btnlink{display:inline-block;margin-top:6px;padding:8px 14px;border-radius:999px;background:#2aabee;color:#fff;text-decoration:none;font-weight:600}
 .keyrow .msg{font-size:13px;animation:none}.msg.ok{color:var(--ok)}.msg.bad{color:var(--bad)}
 .field{display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500}
 .check{display:flex;gap:9px;align-items:center;font-size:14px}
@@ -376,16 +381,22 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
     <section data-step="telegram">
       <h2>Talk to Delta from your phone <span class="tag">optional</span></h2>
       <p class="lead">Message Delta on Telegram and approve actions with a tap.</p>
-      <ol class="small"><li>In Telegram, message <span class="mono">@BotFather</span>, send <span class="mono">/newbot</span>, copy the token.</li>
-        <li>Paste it below and press <b>Check &amp; save</b>.</li>
-        <li>Press <b>Connect my phone</b> and send the code to your bot. That's it.</li></ol>
-      <div class="keyrow" data-key="telegram_bot_token">
-        <label><b>Bot token</b></label>
-        <div class="kin"><input type="password" placeholder="123456:ABC…" autocomplete="off"><button>Check &amp; save</button></div>
-        <div class="msg"></div>
-      </div>
-      <div class="row"><button id="tgpair" class="primary">Connect my phone</button></div>
-      <div id="tgcode" class="msg"></div>
+      <div class="tgstep" id="tgs1"><b><span class="tgnum">1</span> Create your own bot <small>(1 minute, free)</small></b>
+        <ol class="small"><li>Tap <a href="https://t.me/BotFather" target="_blank"><b>Open @BotFather</b></a> (the one with the blue tick) and press <b>Start</b>.</li>
+          <li>Send <span class="mono">/newbot</span>.</li>
+          <li>Send a name, e.g. <span class="mono">Delta</span>.</li>
+          <li>Send a username ending in <span class="mono">bot</span>, e.g. <span class="mono">yourname_delta_bot</span>.</li>
+          <li>BotFather replies with a long <b>token</b> like <span class="mono">7123456789:AAH…</span>. Copy it.</li></ol>
+        <a class="btnlink" href="https://t.me/BotFather" target="_blank">Open @BotFather in Telegram</a></div>
+      <div class="tgstep" id="tgs2"><b><span class="tgnum">2</span> Paste the token here</b> <small>(it is checked and saved by itself)</small>
+        <div class="keyrow" data-key="telegram_bot_token">
+          <div class="kin"><input type="password" placeholder="7123456789:AAH…" autocomplete="off"><button>Check &amp; save</button></div>
+          <div class="msg"></div>
+        </div></div>
+      <div class="tgstep" id="tgs3"><b><span class="tgnum">3</span> Connect your phone</b>
+        <p class="small">Press the button, then send the code it shows to your new bot. Delta adds your phone by itself.</p>
+        <div class="row"><button id="tgpair" class="primary">Connect my phone</button></div>
+        <div id="tgcode" class="msg"></div></div>
       <label class="field">Allowed Telegram user ids <small>(filled in when you connect; only these can control Delta)</small><input id="tgid" placeholder="filled in automatically" inputmode="numeric"></label>
       <label class="check"><input type="checkbox" id="tgon"> Turn on Telegram</label>
     </section>
@@ -884,6 +895,7 @@ let step = 0, setupState = null;
 function showStep(i) {
   step = Math.max(0, Math.min(STEPS.length - 1, i));
   document.querySelectorAll("#setup section").forEach(s => s.classList.toggle("on", s.dataset.step === STEPS[step]));
+  if (STEPS[step] === "telegram") tgSteps();
   $("dots").innerHTML = STEPS.map((_, j) => `<span class="${j <= step ? "on" : ""}"></span>`).join("");
   $("wback").style.visibility = step === 0 || step === STEPS.length - 1 ? "hidden" : "visible";
   $("wnext").textContent = step === STEPS.length - 2 ? "Finish" : step === STEPS.length - 1 ? "Start using Delta" : "Next";
@@ -919,8 +931,20 @@ for (const row of document.querySelectorAll(".keyrow")) {
     const r = await api("/api/setup/key", {method: "POST", body: JSON.stringify({name: row.dataset.key, value: input.value})})
       .catch(() => ({ok: false, message: "Delta is not reachable."}));
     btn.disabled = false; msg.className = "msg " + (r.ok ? "ok" : "bad"); msg.textContent = (r.ok ? "✓ " : "✗ ") + r.message;
-    if (r.ok) { input.value = ""; if (row.dataset.key === "telegram_bot_token") $("tgon").checked = true; refreshStatus(); }
+    if (r.ok) { input.value = ""; if (row.dataset.key === "telegram_bot_token") { $("tgon").checked = true; tgSteps(); } refreshStatus(); }
   };
+  // A pasted Telegram token is saved at once: one less button for people new to this.
+  if (row.dataset.key === "telegram_bot_token")
+    input.addEventListener("input", () => { if (/^\d{6,}:[\w-]{30,}$/.test(input.value.trim())) btn.click(); });
+}
+// Tick off the Telegram steps already done, so people see where they are.
+async function tgSteps() {
+  const s = await api("/api/telegram").catch(() => null);
+  if (!s) return;
+  for (const [id, done] of [["tgs1", s.has_token], ["tgs2", s.has_token], ["tgs3", (s.users || []).length > 0]])
+    $(id).classList.toggle("done", !!done);
+  if ((s.users || []).length) { $("tgcode").className = "msg ok";
+    $("tgcode").textContent = `✓ Connected${s.bot ? " to @" + s.bot : ""}. Message your bot from your phone; /help lists what it can do.`; }
 }
 // Telegram pairing: Delta shows a one-time code; sending it to the bot adds that phone. No user ids to look up.
 $("tgpair").onclick = async () => {
@@ -943,7 +967,7 @@ $("tgpair").onclick = async () => {
     const s = await api("/api/telegram").catch(() => null);
     if (s && (s.users || []).length > before) {
       out.className = "msg ok"; out.textContent = `✓ Connected. Message @${s.bot} from your phone; approvals arrive there too.`;
-      $("tgid").value = s.users.join(", "); $("tgon").checked = true; return;
+      $("tgid").value = s.users.join(", "); $("tgon").checked = true; tgSteps(); return;
     }
   }
   out.className = "msg bad"; out.textContent = "The code expired. Press Connect my phone again.";

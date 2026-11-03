@@ -32,5 +32,21 @@ def result_text(res: TaskResult) -> str:
     return (res.answer or "(no answer)") + tail
 
 
+def to_html(text: str) -> str:
+    """Markdown from the model (**bold**, *italic*, `code`, [link](url)) as Telegram HTML. Sent as-is,
+    Telegram shows the raw asterisks. Everything else is escaped, so no text can break the markup."""
+    import html
+    import re
+
+    out = html.escape(text, quote=False)
+    out = re.sub(r"```(?:\w+\n)?(.+?)```", r"<pre>\1</pre>", out, flags=re.S)
+    out = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", out)
+    out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out, flags=re.S)
+    out = re.sub(r"__(.+?)__", r"<b>\1</b>", out, flags=re.S)
+    out = re.sub(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])", r"<i>\1</i>", out)
+    out = re.sub(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)", r'<a href="\2">\1</a>', out)
+    return re.sub(r"(?m)^#{1,6}\s+(.+)$", r"<b>\1</b>", out)
+
+
 def chunks(text: str, size: int = 3800) -> list[str]:
     return [text[i : i + size] for i in range(0, len(text), size)] or [""]

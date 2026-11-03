@@ -53,3 +53,51 @@ async def test_start_link_carries_the_code():
     up = update(7, "/start")
     await ch._start_cmd(up, SimpleNamespace(args=[code]))
     assert ch.allowed == ["7"]
+
+
+def controlled(tmp_path):
+    """A channel over a real Container-like object with two providers, for the instant controls."""
+    from delta.config import Boundaries
+    from delta.safety.policy import PolicyEngine
+
+    providers = {"codex": SimpleNamespace(cfg=SimpleNamespace(models={}), model_options=lambda: [
+                     {"id": "gpt-6-luna", "label": "GPT-6 Luna"}], model_for=lambda job: ""),
+                 "cline": SimpleNamespace()}
+    router = SimpleNamespace(providers=providers, preferred="cline", usable=lambda: ["codex", "cline"])
+    b = Boundaries(autonomy="ask-risky")
+    audit = SimpleNamespace(record=lambda *a, **k: None)
+    c = SimpleNamespace(router=router, audit=audit, running=None,
+                        settings=SimpleNamespace(data_dir=tmp_path, llm=SimpleNamespace(preferred="cline"),
+                                                 boundaries=b, agent=SimpleNamespace(name="Delta")),
+                        orchestrator=SimpleNamespace(executor=SimpleNamespace(policy=PolicyEngine(b))))
+    return TelegramChannel(c, "123456:TEST-TOKEN", ["5"]), c  # type: ignore[arg-type]
+
+
+async def test_switching_ai_model_and_mode_from_the_phone(tmp_path):
+    ch, c = controlled(tmp_path)
+    said: list[str] = []
+
+    async def say(text):
+        said.append(text)
+
+    await ch._apply(say, "ai", "codex", 5)
+    await ch._apply(say, "model", "gpt-6-luna", 5)
+    await ch._apply(say, "mode", "trusted", 5)
+    await ch._apply(say, "ai", "nonsense", 5)
+    assert c.router.preferred == "codex" and c.router.providers["codex"].cfg.models["chat"] == "gpt-6-luna"
+    assert c.orchestrator.executor.policy.b.autonomy == "trusted"
+    assert said[-1].startswith("✗") and "Trusted" in said[2]
+    saved = (tmp_path / "settings.yaml").read_text()
+    assert "preferred: codex" in saved and "autonomy: trusted" in saved  # survives a restart
+
+
+async def test_stop_cancels_whatever_is_running(tmp_path):
+    import asyncio
+
+    from delta.control import stop_running
+
+    _, c = controlled(tmp_path)
+    c.running = asyncio.ensure_future(asyncio.sleep(30))
+    assert stop_running(c, "test")
+    await asyncio.sleep(0)
+    assert c.running.cancelled() and not stop_running(c, "test")

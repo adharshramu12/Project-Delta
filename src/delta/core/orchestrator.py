@@ -48,7 +48,9 @@ that get a verified result. Every reply costs the user time and tokens.
 Rules:
 - Independent read-only calls (several reads, a search plus a file check) go together in ONE reply.
 - Files and folders: list_dir (sizes, sort, limit, recursive), path_info, read_file answer most
-  questions in one call. Use run_shell only when no tool can; it waits for the user's approval.
+  questions in one call. search_files finds text inside files; edit_file changes one exact part.
+- run_python does in ONE step what would take many: maths, bulk renames, CSV/Excel/JSON work. Prefer
+  it (or run_shell) over long chains of small actions.
 - Prefer the simplest tool. Read before you write. After changing something, check it
   (path_info, list_running_apps, read_file) so there is evidence.
 - If a tool says BLOCKED or DENIED, do not retry it. Find an allowed way or explain.
@@ -216,7 +218,7 @@ def proof_target(steps: list[StepRecord]) -> str | None:
 
 
 # Read-only helpers every task may need for checking its own work.
-ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "web_search", "recall",
+ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "search_files", "web_search", "recall",
                 "list_windows", "read_window", "focus_window", "look_at_screen", "browser_read",
                 "media_status", "do_actions", "scroll"}
 BROWSER_TOOLS = BROWSER_ACTIONS | {"browser_read"}

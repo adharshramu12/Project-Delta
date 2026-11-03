@@ -37,6 +37,7 @@ from delta.tools.apps import app_tools
 from delta.tools.filesystem import filesystem_tools
 from delta.tools.media import media_tools
 from delta.tools.meetings import meeting_tools
+from delta.tools.power import power_tools
 from delta.tools.registry import ToolExecutor, ToolRegistry
 from delta.tools.shell import RunShell
 from delta.tools.web_search import FetchPage, SearchRouter, WebSearch
@@ -89,6 +90,7 @@ class Container:
     warnings: list[str] = field(default_factory=list)  # setup problems shown to the user, not just logged
     chats: ChatStore | None = None  # separate conversations (dashboard sidebar)
     live_channels: dict[str, Any] = field(default_factory=dict)  # running chat channels, by name
+    running: asyncio.Task[Any] | None = None  # the task being worked on now (any channel can stop it)
 
     def warn(self, message: str) -> None:
         if message not in self.warnings:
@@ -98,7 +100,11 @@ class Container:
     async def submit(self, req: TaskRequest) -> TaskResult:
         """One heavy task at a time keeps the laptop responsive."""
         async with self._task_lock:
-            return await self.orchestrator.run(req)
+            self.running = asyncio.current_task()
+            try:
+                return await self.orchestrator.run(req)
+            finally:
+                self.running = None
 
     async def start(self) -> None:
         self.lifecycle.acquire_single_instance()
@@ -179,6 +185,7 @@ def build(settings: Settings) -> Container:
     chats = ChatSessions(router, events, audit)
     registry = ToolRegistry([
         *filesystem_tools(),
+        *power_tools(),
         RunShell(),
         *app_tools(settings.apps),
         *media_tools(),

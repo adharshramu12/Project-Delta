@@ -112,7 +112,8 @@ def create_app(c: Container, token: str) -> FastAPI:
 
     @app.get("/")
     async def index() -> FileResponse:
-        return FileResponse(STATIC / "index.html")
+        # Never cached: after an update the app window otherwise kept showing the old page.
+        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
     @app.get("/favicon.ico")
     async def favicon() -> FileResponse:
