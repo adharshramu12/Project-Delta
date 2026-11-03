@@ -1,7 +1,9 @@
 # Delta architecture
 
+*Delta is created and maintained by Adharsh Kumar Bachu.*
+
 ## Design goals
-1. **Light on the laptop.** One asyncio process, no Docker/Redis/Postgres. Heavy modules load lazily. Local model weights leave VRAM after `keep_alive`.
+1. **Light on the laptop.** One asyncio service process (~100 MB idle, near-zero CPU, no GPU unless a local model is configured), no Docker/Redis/Postgres. Heavy modules load lazily. Local model weights leave VRAM after `keep_alive`.
 2. **Cheapest path first.** A request takes the cheapest route that can do it with proof: rules (0 tokens) → a learned recipe → one tool call → the full agent loop.
 3. **Never stuck.** Every external dependency (models, search) has an ordered fallback chain with circuit breakers.
 4. **Human in charge.** Nothing risky runs without approval; some things never run; any task can be stopped.
@@ -35,22 +37,29 @@ A rung that cannot prove its result hands over to the next one **with what it al
 | `core/clarify.py` | questions to ask before acting (0 tokens) |
 | `core/intents.py` | strict instant-command rules (0 tokens) |
 | `core/replay.py` | recipe validation, slot filling, replay of proven skills |
-| `core/planner.py` | request → goal, steps, **checkpoints**, optional one-call `direct` path |
+| `core/planner.py` | request → goal, steps, **checkpoints**, optional one-call `direct` path; chat replies in Delta's partner voice and the facts to `remember`, in the same call |
+| `core/questions.py` | tick-box and pick-one question forms (up to 4 questions) for the app and Telegram |
+| `core/playbooks.py` | expert know-how added only to matching requests (Deep Research in ChatGPT/Gemini, with self-healing) |
 | `core/verifier.py` | judges each checkpoint against a fresh screenshot and the tool log |
 | `core/proof.py` | per-run proof: screenshots, steps, verdicts; progress checkpoints; interrupted-run recovery |
 | `llm/router.py` | per-task routes, main-AI preference, fallback, circuit breakers, token meter |
-| `llm/providers.py` | OpenAI-compatible client (Ollama, LM Studio, Groq, NIM); JSON tool protocol for small models |
-| `llm/cli_providers.py` | Claude Code / Codex as providers (the user's own plan); one live Claude session per task |
+| `llm/providers.py` | OpenAI-compatible client (Groq, NVIDIA NIM, DeepSeek, LM Studio, Ollama); JSON tool protocol for small models |
+| `llm/cli_providers.py` | Claude Code, Codex (app-server, lean mode) and Cline as providers: the user's own plan; their own tools are off or read-only |
 | `llm/capabilities.py` | what each brain can do; step budgets per brain |
 | `tools/*` | typed tools (pydantic args) that declare risk, paths, domains, apps |
 | `tools/registry.py` | `ToolExecutor`: strict args → policy → approval → run → audit. The only way a tool runs |
+| `tools/user_browser.py` | the user's own signed-in Chrome/Edge through UI Automation: read, click (real pointer for web menus), fill (Shift+Enter newlines, paste for long text) |
+| `tools/pc.py` | volume, brightness, Windows light/dark theme, screenshot, webcam; pictures go straight to a remote requester |
+| `tools/deliver.py` | `send_file` back to Telegram/Slack (Remote Guard PIN checked) |
 | `tools/media.py` | Windows media status/control, `play_youtube` (no AI, playback proven by Windows) |
 | `tools/meetings.py` | Meet/Zoom/Teams; schedule, edit, cancel (Calendar API when connected, else the web page) |
 | `messaging/*` | WhatsApp / Telegram / Slack drivers, human texting style, delegated chats |
 | `integrations/google.py` | OAuth 2.0 (PKCE, loopback) and the Google Calendar API |
-| `safety/*` | policy matrix, approvals broker, hash-chained audit log |
+| `safety/*` | policy matrix, approvals broker, hash-chained audit log, **Remote Guard** (PIN, unlock window, lockout) |
+| `channels/telegram.py`, `channels/pc_menu.py` | one-time-code pairing, commands, voice notes, question forms, PC controls, Remote Guard checks |
 | `memory/*` | profile facts, task episodes, learned skills with recipes |
-| `system/*` | governor (CPU/RAM/GPU/temps/battery), lifecycle, logging, secrets (Windows Credential Manager) |
+| `system/*` | governor (CPU/RAM/GPU/temps/battery), lifecycle, logging, secrets (Windows Credential Manager), PC control, notifications |
+| `daemon.py` | the background service, the lean app window, leftover-window cleanup, full shutdown |
 
 ## The agent loop (rung 4)
 ```
@@ -100,7 +109,10 @@ pulsing dot while it works and a green dot when an answer is waiting.
 | a separate "describe the screen" call per step | the screenshot goes into the acting model's own conversation |
 | re-checking what AFTER already showed | the model is told to reply DONE; the final check catches mistakes |
 | a retry switching to all ~30 tool specs | same tool list on every attempt (session and cache survive) |
-| hidden after-task "learn facts" calls | only when the user said something about themselves |
+| hidden after-task "learn facts" calls | facts come back in the planner's own JSON (`remember`): no extra call |
+| greetings and thanks | canned replies, 0 tokens |
+| expert know-how in every prompt | playbooks are added only to requests that need them |
+| typing long text key by key | pasted in one go (the user's clipboard is restored) |
 | big screenshots | one window only, 1024 px for steps, 1280 px for the final proof |
 | invisible cost | every answer shows AI calls and tokens (input / cached / output) |
 
@@ -122,6 +134,26 @@ Before the matrix: denied tools, paths, apps and domains are DENY; quiet hours t
 
 **The user at the keyboard wins.** Moving the mouse pauses desktop actions; Delta continues only after the mouse is still for 4 s, and stops if the user keeps working.
 
+## Processes and lifecycle
+```
+double-click icon ─► launcher (pythonw) ─► service: python -m delta run   (hidden, ~100 MB)
+                                         └► window:  Edge --app on Delta's own profile (UI only)
+```
+- **Close (X)** closes only the window. The service keeps running, so a Telegram message still reaches
+  Delta. Edge's leftover processes for that window are freed within 60 s.
+- **Double-click** again opens the window (never a second service: single-instance lock).
+- **Shutdown** stops channels, helpers (Claude Code, Codex, Cline, local models), the service and the
+  window. Nothing keeps listening.
+
+## Remote control (Telegram)
+- **Pairing:** a single-use 6-digit code shown only on the PC (10 minutes) binds one Telegram account;
+  all others are ignored.
+- **Remote Guard:** camera, screenshot, sending files, closing apps, keys and Autopilot need the owner's
+  PIN (scrypt hash; 15-minute unlock). 5 wrong PINs lock remote control until someone at the PC unlocks
+  it; `/lock` locks at once.
+- Every remote request shows a Windows notification and is audited. Results (pictures, files) are sent
+  back into the chat.
+
 ## Resource policy
 | Health | Trigger (defaults) | Effect |
 |---|---|---|
@@ -129,10 +161,11 @@ Before the matrix: denied tools, paths, apps and domains are DENY; quiet hours t
 | THROTTLE | GPU ≥ 78 °C, VRAM ≥ 85 %, RAM ≥ 85 %, battery ≤ 30 % unplugged | local inference skipped → cloud |
 | CRITICAL | GPU ≥ 87 °C, VRAM ≥ 95 %, RAM ≥ 93 %, battery ≤ 15 % unplugged | agent pauses, user told |
 
-The daemon runs at BELOW_NORMAL priority. Local models unload after `keep_alive` and on shutdown; LM Studio is skipped when loading a model would exhaust RAM. Claude Code sessions (≈250 MB each) are capped at two and closed at the end of every task.
+The governor samples every 15 s and opens the NVIDIA driver only when a local model is configured, so a laptop's dedicated GPU can sleep. The default thread pool is capped at 4. The app window runs without GPU, extensions, sync or background mode. The daemon runs at BELOW_NORMAL priority. Local models unload after `keep_alive` and on shutdown; LM Studio is skipped when loading a model would exhaust RAM. Claude Code sessions (≈250 MB each) are capped at two and closed at the end of every task.
 
 ## Next
-- Codex live session (same as Claude Code); Telegram/Slack official APIs so delegated chats run without using the screen.
-- OAuth for Gmail and Outlook; Zoom and Teams APIs.
-- A daily live run of `evals/` (YouTube, Meet, schedule, messaging) to catch site changes.
-- Installer with auto-update; Tauri desktop app; remote access with device pairing.
+- Slack remote control (same commands and Remote Guard as Telegram).
+- Scheduled tasks and routines.
+- End-to-end encrypted channel (Matrix), memory encrypted at rest (Windows DPAPI), signed releases.
+- A prompt-injection taint guard for web content; OAuth for Gmail and Outlook.
+- A daily live run of `evals/` (YouTube, Meet, Deep Research, messaging) to catch site changes.

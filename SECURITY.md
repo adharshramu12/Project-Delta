@@ -15,6 +15,11 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 - **Prompt injection:** web pages, files and tool output are data. They cannot grant approval; only a human on an
   allow-listed channel can.
 - **The dashboard API** listens on this PC only (127.0.0.1) and needs a per-install secret token.
+- **Your own browser:** Delta never types into password or payment fields; it asks you to do that.
+- **AI apps you sign in to** (Claude Code, Codex, Cline) are used only as text brains: their own tools are
+  switched off or read-only, so Delta's rules apply to every action whichever AI is thinking.
+- **Your data stays on your PC** (`%LOCALAPPDATA%\Delta`): memory, chats, skills, audit log. Shutdown stops
+  every Delta process; nothing keeps listening.
 
 ## Remote control (Telegram): threat model
 
@@ -41,4 +46,7 @@ Delta controls a real computer, so its safety rules are part of the design, not 
   data with Windows DPAPI is planned.
 - **Cloud AI providers** see the requests sent to them. Use a local model (LM Studio, Ollama) for private work.
 
-Report vulnerabilities privately via GitHub Security Advisories, not public issues.
+## Reporting a vulnerability
+
+Report it privately via **GitHub Security Advisories** (Security tab → *Report a vulnerability*), not in a
+public issue. Please include steps to reproduce. Security fixes go to the latest version on `main`.
