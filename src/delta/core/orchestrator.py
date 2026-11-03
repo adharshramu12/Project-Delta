@@ -88,6 +88,12 @@ Rules:
     NEED_USER: <the one question or blocker>    (only if you truly cannot continue: not signed
                                                 in, a choice only the user can make, missing info)
   Any other reply is treated as a progress note and you will be asked to continue.
+- NEVER GUESS between several matches. If more than one file, contact, app or meaning fits (two
+  "daddy" photos, three chats named Inka), or the request is unclear, stop and ask BEFORE acting:
+    NEED_USER: <short question>
+    - <choice 1, e.g. the full file name or contact>
+    - <choice 2>
+  (2-6 choices, one per line; the user taps one.) Sending the wrong file or message is worse than asking.
 
 GOAL: {goal}
 PLAN:
@@ -148,6 +154,22 @@ def compact_history(messages: list[Message], budget: int, keep_last: int = 2) ->
 
 
 DONE, NEED_USER = "DONE:", "NEED_USER:"
+
+
+def split_choices(text: str) -> tuple[str, list[str]]:
+    """A question with its choices listed one per line ("- a", "1. b", "• c"): (question, choices).
+    The choices become tap buttons; the question keeps the rest."""
+    question: list[str] = []
+    choices: list[str] = []
+    for line in text.splitlines():
+        m = re.match(r"\s*(?:[-*\u2022]|\d+[.)])\s+(.+)", line)
+        if m and len(choices) < 6:
+            choices.append(m.group(1).strip().strip("`*")[:120])
+        else:
+            question.append(line)
+    if len(choices) < 2:  # a single bullet is part of the explanation, not a choice
+        return text, []
+    return "\n".join(question).strip(), choices
 MAX_NUDGES = 3  # small models may never use the markers: accept their answer after this many
 CONTINUE_NUDGE = ("Not finished yet: that reply had no tool call and did not start with DONE: or NEED_USER:. "
                   "Continue with the next unmet success criterion now (call a tool). Reply DONE: only when "
@@ -349,8 +371,9 @@ class Orchestrator:
                 return TaskResult(req.id, "cancelled", stopped, attempt, steps)
             if final.startswith(NEED_USER):
                 # A real blocker only the user can clear: ask, don't burn retries on it.
-                return TaskResult(req.id, "needs_user", final.removeprefix(NEED_USER).strip(), attempt, steps,
-                                  provider=self.router.last_provider or "")
+                ask, options = split_choices(final.removeprefix(NEED_USER).strip())
+                return TaskResult(req.id, "needs_user", ask, attempt, steps,
+                                  provider=self.router.last_provider or "", options=options, asked_about=req.text)
             final = final.removeprefix(DONE).strip()
             await self._fresh_media_status(req.id, steps)
             shot, target = await self._final_screenshot(steps)  # saved as proof either way

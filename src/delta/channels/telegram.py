@@ -47,6 +47,7 @@ class TelegramChannel:
         self.on_pair: Callable[[list[str]], None] | None = None  # persists the allow-list
         self._code: tuple[str, float] | None = None  # (pairing code, expires at)
         self.bot_name = ""
+        self._choices: dict[str, list[str]] = {}  # the choices last offered to each user (tap buttons)
         # concurrent_updates: an approval button must work while a long task is still running
         self.app = Application.builder().token(token).concurrent_updates(True).build()
         self.app.add_handler(CommandHandler("start", self._start_cmd))
@@ -57,6 +58,7 @@ class TelegramChannel:
         self.app.add_handler(CommandHandler("mode", self._mode_cmd))
         self.app.add_handler(CommandHandler("stop", self._stop_cmd))
         self.app.add_handler(CallbackQueryHandler(self._on_control, pattern=r"^ctl:"))
+        self.app.add_handler(CallbackQueryHandler(self._on_answer, pattern=r"^ans:"))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message))
         self.app.add_handler(CallbackQueryHandler(self._on_button, pattern=r"^appr:"))
 
@@ -230,10 +232,59 @@ class TelegramChannel:
             log.warning("telegram.rejected", user=user.id)
             await self._try_pair(update, update.message.text)
             return
-        await update.message.chat.send_action("typing")
-        res = await self.c.submit(TaskRequest(update.message.text, channel=self.name, user=str(user.id)))
-        for part in chunks(result_text(res)):
-            await self.reply(update, part)
+        await self._run(update, str(user.id), update.message.text)
+
+    def _chat(self, uid: str) -> str:
+        """This person's Telegram conversation (with memory, also in the dashboard sidebar)."""
+        chats = getattr(self.c, "chats", None)
+        if chats is None:
+            return ""
+        title = f"Telegram {uid}"
+        found = next((ch for ch in chats.list(title) if ch.title == title), None)
+        return (found or chats.create(title)).id
+
+    async def _run(self, update: Any, uid: str, text: str) -> None:
+        """Do what was asked. The chat's recent turns go along, so an answer like "the second one" means
+        something; a question comes back with tap buttons for its choices."""
+        message = update.message or update.callback_query.message
+        await message.chat.send_action("typing")
+        chats, chat_id = getattr(self.c, "chats", None), self._chat(uid)
+        history = chats.context_for(chat_id) if chats and chat_id else ""
+        if chats and chat_id:
+            chats.add(chat_id, "user", text)
+        res = await self.c.submit(TaskRequest(text, channel=self.name, user=uid, chat_id=chat_id, history=history))
+        if chats and chat_id:
+            chats.add(chat_id, "delta", res.answer, {"status": res.status, "provider": res.provider,
+                                                      "options": res.options, "channel": self.name})
+        parts = chunks(result_text(res))
+        kb = None
+        if res.status == "needs_user" and res.options:
+            self._choices[uid] = list(res.options)
+            kb = self._buttons([[(o[:60], f"ans:{i}")] for i, o in enumerate(res.options)])
+        for i, part in enumerate(parts):
+            await self._send(message, part, kb if i == len(parts) - 1 else None)
+
+    async def _send(self, message: Any, text: str, kb: Any = None) -> None:
+        try:
+            await message.reply_text(to_html(text), parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            await message.reply_text(text, reply_markup=kb)
+
+    async def _on_answer(self, update: Any, ctx: Any) -> None:
+        """A tapped choice is the user's answer, as if they had typed it."""
+        q = update.callback_query
+        uid = str(q.from_user.id)
+        if not is_allowed(uid, self.allowed):
+            await q.answer("not authorised")
+            return
+        choices = self._choices.pop(uid, [])
+        idx = int(q.data.split(":", 1)[1])
+        await q.answer()
+        if idx >= len(choices):
+            await q.edit_message_reply_markup(None)
+            return
+        await q.edit_message_text(f"{q.message.text}\n\n→ {choices[idx]}")
+        await self._run(update, uid, choices[idx])
 
     async def _present(self, req: ApprovalRequest) -> None:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup

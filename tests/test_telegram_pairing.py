@@ -133,3 +133,53 @@ async def test_a_channel_that_times_out_at_start_keeps_retrying(monkeypatch):
         if "telegram" in c.live_channels:
             break
     assert "telegram" in c.live_channels and c.warnings == [] and starts["n"] == 2
+
+
+async def test_a_question_arrives_with_buttons_and_a_tap_answers_it(tmp_path):
+    from delta.core.state import TaskResult
+    from delta.memory.chats import ChatStore
+
+    ch, c = controlled(tmp_path)
+    c.chats = ChatStore(tmp_path / "chats.db")
+    asked: list = []
+
+    async def submit(req):
+        asked.append(req)
+        if len(asked) == 1:
+            return TaskResult(req.id, "needs_user", "Which daddy photo?",
+                              options=["daddy.jpg", "daddy birthday 2025.png"])
+        return TaskResult(req.id, "done", "Sent daddy birthday 2025.png")
+
+    c.submit = submit
+    sent: list = []
+
+    class Msg(FakeMessage):
+        chat = SimpleNamespace(send_action=lambda a: _noop())
+
+        async def reply_text(self, text, **kw):
+            sent.append((text, kw.get("reply_markup")))
+
+    async def _noop():
+        return None
+
+    first = SimpleNamespace(effective_user=SimpleNamespace(id=5), message=Msg("send me the daddy image"))
+    await ch._on_message(first, None)
+    text, kb = sent[-1]
+    assert "Which daddy photo?" in text and [b.text for row in kb.inline_keyboard for b in row] == [
+        "daddy.jpg", "daddy birthday 2025.png"]
+
+    edited: list = []
+
+    async def answer():
+        return None
+
+    async def edit_text(t):
+        edited.append(t)
+
+    tap = SimpleNamespace(callback_query=SimpleNamespace(
+        from_user=SimpleNamespace(id=5), data="ans:1", answer=answer, edit_message_text=edit_text,
+        message=Msg("Which daddy photo?")), message=None)
+    await ch._on_answer(tap, None)
+    assert asked[1].text == "daddy birthday 2025.png"
+    assert "send me the daddy image" in asked[1].history and "Which daddy photo?" in asked[1].history
+    assert sent[-1][0].startswith("Sent daddy birthday 2025.png")

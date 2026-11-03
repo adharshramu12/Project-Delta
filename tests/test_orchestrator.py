@@ -162,3 +162,16 @@ def test_a_page_read_after_the_last_browser_action_is_the_proof():
     assert not read_page_last([step("browser_read"), step("browser_click")])  # clicked after reading
     assert not read_page_last([step("browser_open"), step("browser_read", ok=False)])
     assert not read_page_last([step("write_file")])  # no web work: screenshot rules unchanged
+
+
+async def test_several_matches_become_a_question_with_choices(tmp_path):
+    """Two 'daddy' photos: Delta must ask which one, not send a guess."""
+    orch, _, _ = make(tmp_path, {
+        "plan": [js({"needs_tools": True, "goal": "send the daddy photo", "steps": ["find", "send"],
+                     "tools": ["list_dir"], "success_criteria": ["the photo is sent"]})],
+        "chat": [text("NEED_USER: I found two daddy photos in Pictures. Which one should I send?\n"
+                      "- daddy.jpg\n- daddy birthday 2025.png")],
+    })
+    r = await orch.run(TaskRequest("send me the daddy image"))
+    assert r.status == "needs_user" and r.answer == "I found two daddy photos in Pictures. Which one should I send?"
+    assert r.options == ["daddy.jpg", "daddy birthday 2025.png"] and r.asked_about == "send me the daddy image"
