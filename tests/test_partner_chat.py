@@ -26,3 +26,6 @@ async def test_chat_reply_and_learning_come_from_one_call():
 
 def test_planner_asks_for_partner_tone_and_free_learning():
     assert "trusted partner" in PLANNER_PROMPT and '"remember"' in PLANNER_PROMPT
+    assert "never sugar-coated" in PLANNER_PROMPT and "cannot do" in PLANNER_PROMPT
+    # the character rides in every planning call: keep it small
+    assert len(PLANNER_PROMPT) < 7500
