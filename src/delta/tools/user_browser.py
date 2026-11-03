@@ -52,6 +52,37 @@ KNOWN = {  # registry ProgId prefix -> (name, process, install paths)
     "MSEdge": ("edge", "msedge.exe", [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
                                       r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"]),
 }
+PASTE_OVER = 200  # longer values are pasted in one go (the user's clipboard is put back afterwards)
+
+
+def _paste(text: str) -> None:
+    """Paste `text` with Ctrl+V, then restore whatever text the user had on the clipboard."""
+    import win32clipboard as cb
+
+    def put(value: str | None) -> None:
+        cb.OpenClipboard()
+        try:
+            cb.EmptyClipboard()
+            if value is not None:
+                cb.SetClipboardText(value, cb.CF_UNICODETEXT)
+        finally:
+            cb.CloseClipboard()
+
+    saved: str | None = None
+    with contextlib.suppress(Exception):
+        cb.OpenClipboard()
+        try:
+            if cb.IsClipboardFormatAvailable(cb.CF_UNICODETEXT):
+                saved = cb.GetClipboardData(cb.CF_UNICODETEXT)
+        finally:
+            cb.CloseClipboard()
+    put(text)
+    _pg().hotkey("ctrl", "v")
+    time.sleep(0.4)  # let the page take the paste before the clipboard changes back
+    with contextlib.suppress(Exception):
+        put(saved)
+
+
 # Menu items in web apps (ChatGPT's "+" menu, Gemini's Tools) only react to a real pointer: UIA Invoke
 # reports success and nothing happens. These get a real mouse click on Delta's own window, in front.
 POINTER_ONLY = {"MenuItem", "ListItem", "RadioButton", "CheckBox"}
@@ -365,7 +396,10 @@ class UserBrowser:
         if _focused_is_password():
             raise LookupError("REFUSED: that is a password field. Ask the user to type it.")
         _pg().hotkey("ctrl", "a")
-        _send_unicode(value, soft_newlines=True)  # only `submit` may send; a newline must not
+        if len(value) > PASTE_OVER:
+            _paste(value)  # a long brief typed key by key takes a minute and breaks if anything moves
+        else:
+            _send_unicode(value, soft_newlines=True)  # only `submit` may send; a newline must not
         self.last_fill_was_search = bool(SEARCHY.search(f"{field} {el.element_info.name}"))
         old = self._url(w)
         if submit:
