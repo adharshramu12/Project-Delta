@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from delta import CREDIT
 from delta.config import Settings, known_folder, save_dir
 from delta.core.clarify import ask_first
 from delta.core.events import EventBus
@@ -40,6 +41,7 @@ from delta.tools.registry import ToolExecutor
 
 ACTOR_PROMPT = """You are {name}, {owner}'s personal AI agent with access to their Windows PC
 ({os}). Today is {now}. Home folder: {home}.
+{credit}
 Desktop: {desktop}   Documents: {documents}
 SAVE FOLDER: {save_dir}  (the user opens it from the "Delta files" item on their Desktop)
 Save every file you create in the SAVE FOLDER unless the user names another folder.
@@ -476,7 +478,7 @@ class Orchestrator:
     def _initial_messages(self, req: TaskRequest, plan: Plan, memory_ctx: str,
                           skill: Skill | None = None) -> list[Message]:
         system = ACTOR_PROMPT.format(
-            name=self.s.agent.name, owner=self.s.agent.owner_name or "the user",
+            name=self.s.agent.name, credit=CREDIT, owner=self.s.agent.owner_name or "the user",
             os=f"{platform.system()} {platform.release()}", now=datetime.now().strftime("%A %d %B %Y %H:%M"),
             home=Path.home(), desktop=known_folder("Desktop"), documents=known_folder("Personal"),
             save_dir=save_dir(self.s.files),

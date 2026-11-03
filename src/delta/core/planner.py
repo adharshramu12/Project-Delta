@@ -3,12 +3,14 @@ of tools the task needs (so each model call carries only those tool descriptions
 
 from __future__ import annotations
 
+from delta import CREDIT
 from delta.core.state import Plan
 from delta.llm.providers import extract_json
 from delta.llm.router import ModelRouter
 from delta.memory.skills import Skill
 
 PLANNER_PROMPT = """You are the planner of {name}, a personal AI agent running on the user's Windows PC.
+{credit}
 {environment}
 Tools the agent can use: {tools}.
 
@@ -69,7 +71,8 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
     skills = skills or []
     resp = await router.complete(
         [{"role": "system", "content": PLANNER_PROMPT.format(
-            name=name, tools=", ".join(tool_names), memory=memory or "(nothing yet)", environment=environment,
+            name=name, credit=CREDIT, tools=", ".join(tool_names), memory=memory or "(nothing yet)",
+            environment=environment,
             skills="\n".join(s.prompt_line() for s in skills) or "(none yet)")},
          {"role": "user", "content": text}],
         task="plan", json_mode=True)

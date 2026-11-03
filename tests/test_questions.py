@@ -92,3 +92,12 @@ async def test_telegram_form_ticks_then_continues_with_all_answers(tmp_path):
     assert ran == ["My answers:\nWhich areas should it cover? -> Pricing\n"
                    "How deep should it go? -> Detailed report with sources"]
     assert "5" not in ch._forms  # the form is closed
+
+
+def test_delta_knows_its_creator():
+    from delta import CREATOR
+    from delta.core.orchestrator import ACTOR_PROMPT
+    from delta.core.planner import PLANNER_PROMPT
+
+    assert CREATOR == "Adharsh Kumar Bachu"
+    assert "{credit}" in ACTOR_PROMPT and "{credit}" in PLANNER_PROMPT
