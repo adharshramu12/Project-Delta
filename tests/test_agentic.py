@@ -192,9 +192,13 @@ async def test_mouse_use_pauses_then_resumes(monkeypatch):
     assert ctl._last_pos is None and ctl._paused_until == 0
 
 
-def test_typing_a_newline_needs_the_same_approval_as_enter():
+def test_typing_a_newline_needs_the_same_approval_as_enter(monkeypatch):
+    from delta.tools import desktop
     from delta.tools.base import Risk as R
     from delta.tools.desktop import TypeArgs, TypeText
+
+    # Risk depends on the app being typed into; pin it, or a chat app in front makes this flaky.
+    monkeypatch.setattr(desktop, "_title_of", lambda window: "Notepad")
 
     t = TypeText.__new__(TypeText)
     assert t.risk_for(TypeArgs(text="Indian Constitution podcast\n")) == R.WRITE

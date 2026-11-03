@@ -21,7 +21,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from delta.tools.base import Risk, Tool, ToolResult
 
@@ -559,9 +559,19 @@ class TypeText(_DesktopTool[TypeArgs]):
         return await self._act(go, evidence)
 
 
+def key_list(value: object) -> object:
+    """Models often send keys as one string ("enter", "ctrl+s", "ctrl, s"): the same keys as a list.
+    Rejecting it cost a free model several failed steps and a failed check in a Calculator task."""
+    if isinstance(value, str):
+        return [k.strip().lower() for k in value.replace("+", ",").replace(" ", ",").split(",") if k.strip()]
+    return value
+
+
 class KeysArgs(BaseModel):
     keys: list[str] = Field(description="Keys pressed together, e.g. ['ctrl','s'] or ['enter']")
     window: str | None = Field(default=None, description="Window that must receive the keys (part of title)")
+
+    _keys = field_validator("keys", mode="before")(key_list)
 
 
 class PressKeys(_DesktopTool[KeysArgs]):
@@ -724,6 +734,8 @@ class Step(BaseModel):
     text: str | None = Field(default=None, description="type: the text")
     keys: list[str] | None = Field(default=None, description="keys: e.g. ['ctrl','a']")
     seconds: float | None = Field(default=None, description="wait: 0.1-3 s, e.g. for a menu to open")
+
+    _keys = field_validator("keys", mode="before")(key_list)
 
 
 class ActionsArgs(BaseModel):

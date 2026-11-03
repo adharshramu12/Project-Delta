@@ -70,7 +70,10 @@ async def test_bad_steps_are_rejected_before_the_mouse_moves(mouse):
     assert not r.ok and "step 2" in r.output and mouse.log == []
 
 
-def test_batch_approval_is_as_strict_as_its_riskiest_step():
+def test_batch_approval_is_as_strict_as_its_riskiest_step(monkeypatch):
+    # Risk depends on the window under the point; pin it, or whatever is on screen makes this flaky.
+    monkeypatch.setattr(desktop, "_title_at", lambda x, y: "Notepad")
+    monkeypatch.setattr(desktop, "_title_of", lambda window: "Notepad")
     t = DoActions.__new__(DoActions)
     assert t.risk_for(ActionsArgs(steps=[Step(action="click", x=1, y=1)])) == Risk.ACT
     assert t.risk_for(ActionsArgs(steps=[Step(action="click", x=1, y=1),
@@ -114,3 +117,12 @@ def test_chat_apps_are_recognised_by_title():
 
     assert messaging_app("WhatsApp") == "WhatsApp" and messaging_app("Telegram (5201)") == "Telegram"
     assert messaging_app("Slack (DM) - Ravi - Slack") == "Slack" and messaging_app("Notepad") is None
+
+
+def test_keys_given_as_text_are_accepted():
+    from delta.tools.desktop import KeysArgs
+
+    assert KeysArgs(keys="enter").keys == ["enter"]
+    assert KeysArgs(keys="ctrl+s").keys == ["ctrl", "s"]
+    assert Step(action="keys", keys="Ctrl, A").keys == ["ctrl", "a"]
+    assert KeysArgs(keys=["alt", "f4"]).keys == ["alt", "f4"]

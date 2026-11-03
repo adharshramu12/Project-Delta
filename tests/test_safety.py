@@ -106,3 +106,19 @@ def test_audit_chain_survives_two_writers(tmp_path):
     cli.record("task.end")
     daemon.record("setup.complete")
     assert AuditLog(tmp_path / "audit.jsonl").verify()
+
+
+def test_sure_argument_synonyms_are_fixed_without_a_round_trip():
+    """A free model wrote write_file(text=...); the 'did you mean content' reply cost a whole AI call."""
+    from pydantic import BaseModel
+
+    from delta.tools.registry import fix_synonyms
+
+    class WriteArgs(BaseModel):
+        path: str
+        content: str
+
+    args, fixed = fix_synonyms(WriteArgs, {"file": "a.txt", "text": "hi"})
+    assert args == {"path": "a.txt", "content": "hi"} and fixed == ["file->path", "text->content"]
+    assert fix_synonyms(WriteArgs, {"path": "a", "file": "b", "content": "x"})[0]["file"] == "b"  # never overwrite
+    assert fix_synonyms(WriteArgs, {"attendees": "x"})[1] == []  # not a sure synonym: still reported

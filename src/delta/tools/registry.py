@@ -35,6 +35,32 @@ def accepted_names(model: type[BaseModel]) -> set[str]:
     return names
 
 
+# Names models commonly use for a tool's real argument. Renamed only when the tool has that field and
+# it was not given: certain, unlike a fuzzy guess. Saves a whole AI round trip ("did you mean...").
+SYNONYMS: dict[str, tuple[str, ...]] = {
+    "text": ("content", "message"), "body": ("content", "message"), "data": ("content",),
+    "file": ("path",), "filepath": ("path",), "file_path": ("path",), "filename": ("path",),
+    "folder": ("path",), "directory": ("path",), "dir": ("path",),
+    "link": ("url",), "href": ("url",), "q": ("query",), "search": ("query",), "keywords": ("query",),
+    "cmd": ("command",), "app": ("name",), "application": ("name",),
+}
+
+
+def fix_synonyms(model: type[BaseModel], raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Rename unknown keys that are sure synonyms of the tool's fields: (args, ["text->content", ...])."""
+    if not isinstance(raw, dict) or not model.model_fields:
+        return raw, []
+    accepted, fixed, out = accepted_names(model), [], dict(raw)
+    for key in list(raw):
+        if key in accepted:
+            continue
+        targets = [t for t in SYNONYMS.get(key.lower(), ()) if t in model.model_fields and t not in out]
+        if len(targets) >= 1:
+            out[targets[0]] = out.pop(key)
+            fixed.append(f"{key}->{targets[0]}")
+    return out, fixed
+
+
 def unknown_arguments(model: type[BaseModel], raw: dict[str, Any]) -> str:
     """'' when every key is known, else a fix-it message ('attendees' -> did you mean 'guests'?).
     Models open to arbitrary keys (extra='allow' or no declared fields) are not checked."""
@@ -154,6 +180,9 @@ class ToolExecutor:
         tool = self.registry.get(name)
         if tool is None:
             return ToolResult(False, f"unknown tool '{name}'. Available: {', '.join(self.registry.names())}")
+        raw_args, fixed = fix_synonyms(tool.Args, raw_args)
+        if fixed:
+            self.audit.record("tool.args_fixed", task=task_id, tool=name, renamed=fixed)
         if problem := unknown_arguments(tool.Args, raw_args):
             # Pydantic ignores unknown keys: a guest list sent as "attendees" would simply vanish.
             self.audit.record("tool.bad_args", task=task_id, tool=name, problem=problem)

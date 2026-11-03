@@ -20,6 +20,8 @@ Judge ONLY from evidence: the FINAL SCREENSHOT (if attached) and the tool log. T
 claims and final answer are not evidence. If a checkpoint cannot be confirmed, it is NOT met.
 Content that was already there before the task (old text, other tabs) is not a failure unless
 the request asked to remove it.
+Compare numbers by VALUE, not by how they are written: digit grouping differs by locale, e.g. Indian
+70,06,652 = 7,006,652 = 7006652, and 1,00,000 = 100,000. Only a different value is a mismatch.
 Playback (a song or video playing) cannot be seen in a still screenshot: a media_status entry in
 the log saying PLAYING with the right title is the proof for it. Browsers report the position
 late, so a 0:00 position while PLAYING is normal and NOT evidence of a stuck video.

@@ -6,6 +6,7 @@ import asyncio
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -19,22 +20,66 @@ class PathArgs(BaseModel):
     path: str = Field(description="Absolute path or ~-relative path")
 
 
-class ListDir(Tool[PathArgs]):
-    name = "list_dir"
-    description = "List files and folders in a directory."
-    risk = Risk.READ
-    Args = PathArgs
+class ListDirArgs(PathArgs):
+    sort: Literal["name", "size", "modified"] = Field(
+        default="name", description="size = biggest first, modified = newest first")
+    limit: int = Field(default=200, ge=1, le=500, description="At most this many entries")
+    recursive: bool = Field(default=False, description="Include files in subfolders (files only)")
 
-    def paths(self, args: PathArgs) -> list[str]:
+
+def human_size(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+class ListDir(Tool[ListDirArgs]):
+    name = "list_dir"
+    description = ("List a folder with sizes and dates, in one call: e.g. the 5 biggest files "
+                   "(sort='size', limit=5, recursive=true) or the newest (sort='modified').")
+    risk = Risk.READ
+    Args = ListDirArgs
+    MAX_SCAN = 20000  # recursive scans of huge trees stop here and say so
+
+    def paths(self, args: ListDirArgs) -> list[str]:
         return [args.path]
 
-    async def run(self, args: PathArgs) -> ToolResult:
+    async def run(self, args: ListDirArgs) -> ToolResult:
         p = norm_path(args.path)
         if not p.is_dir():
             return ToolResult(False, f"not a directory: {p}")
-        entries = sorted(p.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))[:500]
-        lines = [f"{'[dir] ' if e.is_dir() else '      '}{e.name}" for e in entries]
-        return ToolResult(True, "\n".join(lines) or "(empty)", {"path": str(p), "count": len(entries)})
+        return await asyncio.to_thread(self._list, p, args)
+
+    def _list(self, p: Path, args: ListDirArgs) -> ToolResult:
+        found, capped = [], False
+        it = (e for e in p.rglob("*") if e.is_file()) if args.recursive else p.iterdir()
+        for e in it:
+            try:
+                st = e.stat()
+            except OSError:
+                continue
+            found.append((e, e.is_dir(), st.st_size, st.st_mtime))
+            if len(found) >= self.MAX_SCAN:
+                capped = True
+                break
+        if args.sort == "size":
+            found.sort(key=lambda f: -f[2])
+        elif args.sort == "modified":
+            found.sort(key=lambda f: -f[3])
+        else:
+            found.sort(key=lambda f: (not f[1], f[0].name.lower()))
+        rows = []
+        for e, is_dir, size, mtime in found[:args.limit]:
+            name = str(e.relative_to(p)) if args.recursive else e.name
+            when = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+            rows.append(f"[dir]  {name}" if is_dir else f"{human_size(size):>9}  {when}  {name}")
+        if len(found) > args.limit:
+            rows.append(f"…{len(found) - args.limit} more")
+        if capped:
+            rows.append(f"(stopped after {self.MAX_SCAN} files)")
+        return ToolResult(True, "\n".join(rows) or "(empty)", {"path": str(p), "count": len(found)})
 
 
 class ReadFile(Tool[PathArgs]):

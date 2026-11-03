@@ -47,6 +47,8 @@ Work through the plan using tools, checking results as you go. Work like an expe
 that get a verified result. Every reply costs the user time and tokens.
 Rules:
 - Independent read-only calls (several reads, a search plus a file check) go together in ONE reply.
+- Files and folders: list_dir (sizes, sort, limit, recursive), path_info, read_file answer most
+  questions in one call. Use run_shell only when no tool can; it waits for the user's approval.
 - Prefer the simplest tool. Read before you write. After changing something, check it
   (path_info, list_running_apps, read_file) so there is evidence.
 - If a tool says BLOCKED or DENIED, do not retry it. Find an allowed way or explain.
@@ -358,7 +360,10 @@ class Orchestrator:
                                   self.router.last_provider or "", plan.skill_id)
             messages.append({"role": "user", "content": (
                 f"Verification FAILED: {verification.reason}. Unmet: {verification.missing}. "
-                "Inspect the current state with tools, fix what is missing, then summarise again.")})
+                "Inspect the current state with tools, fix what is missing, then summarise again. "
+                "If the evidence already shows the result and the check misread it (e.g. the same number "
+                "written with different digit grouping), do NOT redo the work: reply DONE: quoting the exact "
+                "evidence. Stay with the apps and pages of this task; never open unrelated apps.")})
         answer = (f"{final}\n\n⚠ I could not verify this task is complete after "
                   f"{self.s.agent.max_attempts} attempts: {verification.reason if verification else ''}")
         return TaskResult(req.id, "failed", answer.strip(), self.s.agent.max_attempts, steps, verification,
@@ -481,7 +486,10 @@ class Orchestrator:
                 "selected item or text field with focus.")}
         elif tool in DESKTOP_ACTIONS and "read_window" in names:
             # Typed text sits deep in the control tree (e.g. Notepad's editor): read far enough to show it.
-            observer, args = "read_window", {"depth": 10 if tool in TEXT_ACTIONS else 5}
+            observer = "read_window"
+            args: dict[str, Any] = {"depth": 10 if tool in TEXT_ACTIONS else 5}
+            if window := (evidence or {}).get("window"):  # e.g. the window open_app just opened and focused
+                args["window"] = window
         else:
             return None
         result = await self.executor.execute(observer, args, task_id=task_id)
