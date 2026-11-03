@@ -104,6 +104,8 @@ class PolicyEngine:
             return d(Verdict.DENY, f"tool '{tool.name}' is disabled in your boundaries")
         if risk == Risk.SYSTEM:
             return d(Verdict.DENY, "system/security/credential/payment actions are never allowed")
+        if getattr(tool, "always_ask", False):  # e.g. alerting emergency contacts: never without a yes
+            return d(Verdict.ASK, "always confirmed with you, whatever the autonomy level")
 
         paths = [norm_path(p) for p in tool.paths(args)]
         hit = next((p for p in paths if _under(p, self.protected)), None) or self._mentions(args, self.protected)

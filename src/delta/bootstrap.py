@@ -35,6 +35,7 @@ from delta.system.logging import log
 from delta.system.secrets import get_secret
 from delta.tools.apps import app_tools
 from delta.tools.deliver import SendFile
+from delta.tools.emergency import AlertEmergencyContacts, EmergencyContacts
 from delta.tools.filesystem import filesystem_tools
 from delta.tools.media import media_tools
 from delta.tools.meetings import meeting_tools
@@ -93,6 +94,7 @@ class Container:
     chats: ChatStore | None = None  # separate conversations (dashboard sidebar)
     live_channels: dict[str, Any] = field(default_factory=dict)  # running chat channels, by name
     guard: Any = None  # RemoteGuard: PIN and lock for remote control
+    emergency: Any = None  # EmergencyContacts (encrypted)
     running: asyncio.Task[Any] | None = None  # the task being worked on now (any channel can stop it)
 
     def warn(self, message: str) -> None:
@@ -188,6 +190,7 @@ def build(settings: Settings) -> Container:
     chats = ChatSessions(router, events, audit)
     live_channels: dict[str, Any] = {}
     send_file = SendFile(live_channels)
+    emergency = EmergencyContacts(data)
     registry = ToolRegistry([
         *filesystem_tools(),
         send_file,
@@ -198,6 +201,7 @@ def build(settings: Settings) -> Container:
         *media_tools(),
         *meeting_tools(),
         *messaging_tools(chats),
+        AlertEmergencyContacts(emergency),
         WebSearch(SearchRouter.from_order(settings.search.order)),
         FetchPage(),
         *(memory_tools(memory) if settings.memory.enabled else []),
@@ -257,4 +261,4 @@ def build(settings: Settings) -> Container:
     send_file.guard = guard
     return Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
                      Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"),
-                     live_channels=live_channels, guard=guard)
+                     live_channels=live_channels, guard=guard, emergency=emergency)

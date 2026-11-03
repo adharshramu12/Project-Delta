@@ -353,6 +353,15 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
       <div class="row"><button id="g_unlock" class="primary" hidden>Unlock remote control</button><button id="g_lock">Lock remote control now</button></div>
       <div class="msg" id="g_msg"></div>
     </div>
+    <h3>Emergency contacts <span class="tag">SOS</span></h3>
+    <div class="app" id="s_sos">
+      <small>If you tell Delta you're unwell or in trouble, it can send these people a WhatsApp message in your
+        name and start a WhatsApp call. It always asks you first. Stored encrypted on this PC.
+        For anything life-threatening, call <b>112</b>.</small>
+      <div id="sos_list"></div>
+      <div class="row"><button id="sos_add">+ Add contact</button><button id="sos_save" class="primary">Save</button></div>
+      <div class="msg" id="sos_msg"></div>
+    </div>
     <h3>Browser</h3>
     <label class="field">Which browser Delta uses <small id="s_using"></small>
       <select id="s_prefer"><option value="auto">My Windows default browser</option><option value="chrome">Google Chrome</option><option value="edge">Microsoft Edge</option></select></label>
@@ -1059,6 +1068,30 @@ $("opensetup").onclick = openSetup;
 
 // ---- settings page ------------------------------------------------------------------------
 const lines = id => $(id).value.split("\n").map(s => s.trim()).filter(Boolean);
+function sosRow(c) {
+  const d = document.createElement("div"); d.className = "kin sosrow";
+  d.innerHTML = '<input placeholder="Name (e.g. Amma)" maxlength="60"><input placeholder="Name in WhatsApp or phone number" maxlength="60">' +
+    '<input placeholder="Relation" maxlength="40"><button title="Remove">✕</button>';
+  const [n, w, r] = d.querySelectorAll("input");
+  n.value = c.name || ""; w.value = c.whatsapp || ""; r.value = c.relation || "";
+  d.querySelector("button").onclick = () => d.remove();
+  $("sos_list").appendChild(d);
+}
+async function sosCard() {
+  const r = await api("/api/emergency").catch(() => ({contacts: []}));
+  $("sos_list").innerHTML = "";
+  r.contacts.forEach(sosRow);
+  if (!r.contacts.length) sosRow({});
+}
+$("sos_add").onclick = () => { if ($("sos_list").children.length < 5) sosRow({}); };
+$("sos_save").onclick = async () => {
+  const contacts = [...document.querySelectorAll(".sosrow")].map(d => {
+    const [n, w, r] = d.querySelectorAll("input"); return {name: n.value.trim(), whatsapp: w.value.trim(), relation: r.value.trim()};
+  }).filter(c => c.name && c.whatsapp);
+  const r = await api("/api/emergency", {method: "PUT", body: JSON.stringify({contacts})}).catch(e => ({detail: e.message}));
+  $("sos_msg").className = "msg " + (r.ok ? "ok" : "bad");
+  $("sos_msg").textContent = r.ok ? "✓ " + r.message : "✗ Could not save: each contact needs a name and a WhatsApp name or number.";
+};
 async function guardCard() {
   const s = await api("/api/security").catch(() => null); if (!s) return;
   $("g_state").className = "state " + (s.locked ? "bad" : s.has_pin ? "ok-text" : "bad");
@@ -1076,6 +1109,7 @@ $("g_unlock").onclick = async () => { const r = await api("/api/security/unlock"
 $("g_lock").onclick = async () => { const r = await api("/api/security/lock", {method: "POST"}); $("g_msg").className = "msg ok"; $("g_msg").textContent = "✓ " + r.message; guardCard(); };
 async function openSettings() {
   guardCard();
+  sosCard();
   const s = await api("/api/settings"), b = s.boundaries;
   $("s_prefer").value = s.browser.prefer; $("s_bmode").value = s.browser.mode; $("s_orange").checked = s.browser.orange_cursor;
   $("s_using").textContent = s.browser.using ? `(currently: ${s.browser.using})` : "(no Chrome or Edge found)";

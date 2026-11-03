@@ -260,6 +260,22 @@ class WhatsAppDriver(_SearchListDriver):
     def _launch(self) -> None:
         os.startfile("whatsapp:")
 
+    CALL_BUTTON = re.compile(r"^(voice|audio) call$", re.I)
+
+    def call(self, person: str) -> str:
+        """Open the person's chat (confirmed, as for sending) and press WhatsApp's voice-call button."""
+        chat = self.open_chat(person)
+        w = self.open_app()
+        buttons = (e for e in w.descendants() if e.element_info.control_type == "Button")
+        button = next((e for e in buttons if self.CALL_BUTTON.match(e.element_info.name or "")), None)
+        if button is None:
+            raise MessagingError(f"Opened {chat}'s chat but found no voice-call button; the message was still sent.")
+        try:
+            button.invoke()
+        except Exception:
+            button.click_input()
+        return chat
+
 
 class TelegramDriver(_SearchListDriver):
     name, label = "telegram", "Telegram"

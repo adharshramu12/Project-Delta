@@ -34,6 +34,9 @@ asks before anything risky, and **verifies every task before it says "done".**
 - Open apps, manage files, type, click and read the screen like a person
 - Volume, brightness, Windows light/dark mode, screenshots, webcam, close apps
 - Schedule or start Google Meet calls; send WhatsApp and Telegram messages (it asks first)
+- **🆘 Emergency help:** say you're unwell or in trouble and Delta can message your chosen emergency
+  contacts on WhatsApp in your name and start a WhatsApp call. It always asks you first, and tells you
+  to call 112 when it's serious
 
 **In your browser** (your own signed-in Chrome or Edge)
 - Open sites, read pages, fill forms, play YouTube

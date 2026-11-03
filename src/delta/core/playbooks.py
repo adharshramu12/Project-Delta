@@ -55,6 +55,27 @@ PLAYBOOK: DEEP RESEARCH IN THE USER'S CHATGPT OR GEMINI
    wait for the research to finish."""
 
 
+EMERGENCY = re.compile(r"\b(emergency|sos|not feeling (well|good)|unwell|feel(ing)? (sick|dizzy|faint|very bad)|"
+                       r"chest pain|can'?t breathe|breathless|fainted|fell down|accident|bleeding|ambulance|"
+                       r"kill myself|suicid\w*|end my life|hurt myself)\b", re.I)
+
+EMERGENCY_PLAYBOOK = """
+
+PLAYBOOK: THE USER MAY NEED HELP (health, safety, distress)
+- Stay calm, warm and SHORT. Their safety comes before any task.
+- Life-threatening signs (chest pain, trouble breathing, fainting, heavy bleeding, stroke signs, an accident,
+  or any thought of hurting themselves): tell them FIRST to call 112 now (India's emergency number; another
+  country: its own). For thoughts of self-harm also give Tele-MANAS 14416 (free, 24x7) and stay with them.
+- Offer to alert their emergency contacts with alert_emergency_contacts (WhatsApp message in their name,
+  optionally a WhatsApp call). Write the message as the user, plainly: what is happening and what they need.
+  The tool always asks the user before sending; never claim anyone was told unless the tool says sent.
+- If it is unclear how serious it is, ask ONE quick question (NEED_USER) with options, e.g.
+  "- Alert my emergency contacts now" / "- Call one of them on WhatsApp" / "- I'm okay, just stay with me".
+- No emergency contacts saved: say how to add them (Delta → Settings → Emergency contacts) and give 112.
+- Never diagnose; simple first steps are fine (sit down, unlock the door, keep the phone close)."""
+
+
 def playbooks_for(request: str) -> str:
     """The playbooks this request needs (empty for everyday requests)."""
-    return DEEP_RESEARCH_PLAYBOOK if DEEP_RESEARCH.search(request) else ""
+    found = DEEP_RESEARCH_PLAYBOOK if DEEP_RESEARCH.search(request) else ""
+    return found + (EMERGENCY_PLAYBOOK if EMERGENCY.search(request) else "")
