@@ -17,11 +17,16 @@ from delta.bootstrap import Container
 from delta.config import ChannelConfig, read_user_settings, write_user_settings
 from delta.setup.checks import KEY_INFO, check_hardware, validate_key
 from delta.system.secrets import get_secret, set_secret
+from delta.tools.emergency import Contact
 
 
 class KeyIn(BaseModel):
     name: str
     value: str = Field(min_length=1, max_length=500)
+
+
+class ContactsIn(BaseModel):
+    contacts: list[Contact] = Field(default_factory=list, max_length=5)
 
 
 class PinIn(BaseModel):
@@ -66,6 +71,20 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
         c.warnings[:] = [w for w in c.warnings if "No AI model" not in w]
         c.audit.record("setup.key", name=body.name)  # never the value
         return {"ok": True, "message": message, "models_ready": c.router.usable()}
+
+    # --- Emergency contacts (encrypted; only from this PC's dashboard) ---------------------------------
+    @app.get("/api/emergency", dependencies=[Depends(auth)])
+    async def emergency_get() -> dict[str, Any]:
+        people = c.emergency.all() if c.emergency else []
+        return {"contacts": [p.model_dump() for p in people]}
+
+    @app.put("/api/emergency", dependencies=[Depends(auth)])
+    async def emergency_put(body: ContactsIn) -> dict[str, Any]:
+        if c.emergency is None:
+            raise HTTPException(400, "Emergency contacts are not available.")
+        c.emergency.save(body.contacts)
+        c.audit.record("emergency.contacts_saved", count=len(body.contacts))
+        return {"ok": True, "message": f"Saved {len(body.contacts)} emergency contact(s)."}
 
     # --- Remote security (Remote Guard): only from this PC's dashboard, never from a phone -------------
     @app.get("/api/security", dependencies=[Depends(auth)])
