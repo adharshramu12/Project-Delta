@@ -32,7 +32,8 @@ HELP = (
     "/mode - permission level (Careful, Balanced, Trusted, Autopilot)\n"
     "/stop - stop what I'm doing now\n"
     "/status - PC health and AIs available\n"
-    "/help - this list"
+    "/help - this list\n\n"
+    "🎙 You can also just <b>send a voice note</b>: Telugu, Hindi or English."
 )
 
 
@@ -60,6 +61,7 @@ class TelegramChannel:
         self.app.add_handler(CallbackQueryHandler(self._on_control, pattern=r"^ctl:"))
         self.app.add_handler(CallbackQueryHandler(self._on_answer, pattern=r"^ans:"))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message))
+        self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
         self.app.add_handler(CallbackQueryHandler(self._on_button, pattern=r"^appr:"))
 
     async def start(self) -> None:
@@ -233,6 +235,30 @@ class TelegramChannel:
             await self._try_pair(update, update.message.text)
             return
         await self._run(update, str(user.id), update.message.text)
+
+    async def _on_voice(self, update: Any, ctx: Any) -> None:
+        """A voice note: turned into text, shown back (so a mishearing is visible), then done like a typed
+        request."""
+        from delta.channels.voice import VoiceError, transcribe
+
+        user = update.effective_user
+        if not is_allowed(user.id, self.allowed):
+            return
+        media = update.message.voice or update.message.audio
+        await update.message.chat.send_action("typing")
+        try:
+            audio = bytes(await (await media.get_file()).download_as_bytearray())
+            text = await transcribe(audio, getattr(media, "file_name", None) or "voice.ogg")
+        except VoiceError as e:
+            await update.message.reply_text(f"🎙 {e}")
+            return
+        except Exception as e:
+            log.warning("telegram.voice_failed", error=str(e))
+            await update.message.reply_text("🎙 I couldn't get that voice note. Please try again, or type it.")
+            return
+        self.c.audit.record("telegram.voice", user=str(user.id), chars=len(text))
+        await update.message.reply_text(f"🎙 I heard: {text}")
+        await self._run(update, str(user.id), text)
 
     def _chat(self, uid: str) -> str:
         """This person's Telegram conversation (with memory, also in the dashboard sidebar)."""
