@@ -178,7 +178,7 @@ def build(settings: Settings) -> Container:
     data = settings.data_dir
     data.mkdir(parents=True, exist_ok=True)  # first run: databases need the folder to exist
     events = EventBus()
-    governor = Governor(settings.governor)
+    governor = Governor(settings.governor, watch_gpu=any(p.local for p in settings.llm.providers.values()))
     router = ModelRouter(build_providers(settings), settings.llm.routes, allow_local=governor.allow_local,
                          preferred=settings.llm.preferred)
     memory = MemoryStore(data / "memory.db")

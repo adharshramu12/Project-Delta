@@ -27,6 +27,47 @@ EDGE_PATHS = [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
               r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"]
 
 
+# The dashboard is a simple page: no GPU, no background mode (Edge otherwise keeps ~10 processes and
+# ~900 MB alive after the window is closed), no extensions, sync or update checks, few renderers.
+LEAN_WINDOW_FLAGS = ["--no-first-run", "--no-default-browser-check", "--disable-background-mode",
+                     "--disable-gpu", "--disable-extensions", "--disable-sync", "--disable-component-update",
+                     "--renderer-process-limit=2", "--disable-features=Translate,msEdgeStartupBoost"]
+REAP_EVERY_S = 60  # how often the service looks for a closed window's leftover processes
+
+
+def window_processes(data_dir: Path) -> list[object]:
+    """Edge processes of Delta's own app window (its private profile), never the user's browser."""
+    import psutil
+
+    profile = str(data_dir / "app-window").lower()
+    found: list[object] = []
+    for p in psutil.process_iter(["name", "cmdline"]):
+        with contextlib.suppress(psutil.Error):
+            if (p.info["name"] or "").lower() == "msedge.exe" and profile in " ".join(p.info["cmdline"] or []).lower():
+                found.append(p)
+    return found
+
+
+def close_window_processes(data_dir: Path) -> int:
+    import psutil
+
+    procs = window_processes(data_dir)
+    for p in procs:
+        with contextlib.suppress(psutil.Error):
+            p.terminate()  # type: ignore[attr-defined]
+    return len(procs)
+
+
+async def _reap_closed_window(data_dir: Path) -> None:
+    """X closes only the window; the service (and Telegram) keeps running. Edge sometimes keeps the
+    closed window's processes alive anyway, so free them once no Delta window is on screen."""
+    while True:
+        await asyncio.sleep(REAP_EVERY_S)
+        with contextlib.suppress(Exception):
+            if not _find_app_window() and (n := await asyncio.to_thread(close_window_processes, data_dir)):
+                log.info("window.leftovers_closed", processes=n)
+
+
 def _is_delta_title(title: str) -> bool:
     # the dashboard sets "Delta", "<chat> · Delta" or "(2) Approval needed · Delta"
     return title == "Delta" or title.endswith(" · Delta")
@@ -85,7 +126,7 @@ def _open_app_window(settings: Settings, url: str) -> bool:
         return False
     profile = settings.data_dir / "app-window"
     subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}", "--window-size=1180,800",
-                      "--no-first-run", "--no-default-browser-check", "--disable-features=Translate"],
+                      *LEAN_WINDOW_FLAGS],
                      close_fds=True, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
     return True
 
@@ -334,6 +375,10 @@ async def run(open_ui: bool = False) -> int:
     settings = load_settings()
     setup_logging(settings.data_dir)
     _quiet_connection_resets()
+    from concurrent.futures import ThreadPoolExecutor
+
+    # asyncio.to_thread would otherwise grow to cpu+4 idle threads; 4 is plenty for Delta's blocking calls
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(4, thread_name_prefix="delta-io"))
     token = load_token(settings.data_dir)
     if open_ui and _port_open(settings.api.host, settings.api.port):
         open_dashboard(settings, token)  # already running: a second double-click just shows the window
@@ -361,6 +406,7 @@ async def run(open_ui: bool = False) -> int:
     if open_ui and await _wait_for_port(settings.api.host, settings.api.port):
         await asyncio.to_thread(open_dashboard, settings, token)  # it waits for the page; keep serving it
 
+    reaper = asyncio.create_task(_reap_closed_window(settings.data_dir), name="window-reaper")
     stop = asyncio.create_task(c.lifecycle.stopping.wait())
     try:
         await asyncio.wait({serve, stop}, return_when=asyncio.FIRST_COMPLETED)
@@ -369,7 +415,9 @@ async def run(open_ui: bool = False) -> int:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(serve, 5)
         stop.cancel()
+        reaper.cancel()
         await c.stop()
+        close_window_processes(settings.data_dir)  # Shutdown means everything, the window too
         print("Delta is fully stopped.")
     return 0
 

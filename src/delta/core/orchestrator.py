@@ -276,6 +276,7 @@ class Orchestrator:
         self.skills = skills
         self.learning = learning
         self.proof = proof
+        self._planned: set[str] = set()  # tasks whose planner call also did the fact learning
         self._learning: set[asyncio.Task[None]] = set()
 
     async def drain(self) -> None:
@@ -349,6 +350,11 @@ class Orchestrator:
         with contextlib.suppress(Exception):
             await warm
         await self.events.publish("task.plan", task_id=req.id, plan=plan.__dict__)
+        self._planned.add(req.id)  # the planner already looked for facts to learn: no extra call later
+        if plan.remember and self.memory and self.s.memory.enabled and self.s.memory.auto_extract:
+            for fact in plan.remember:
+                self.memory.add(fact, kind="profile", source="auto")
+                await self.events.publish("memory.learned", fact=fact)
         if not plan.needs_tools:
             return TaskResult(req.id, "done", plan.answer, provider=self.router.last_provider or "")
         if plan.direct and not steps:
@@ -703,12 +709,14 @@ class Orchestrator:
             if self.memory and self.s.memory.enabled:
                 if result.steps:
                     self.memory.add(f"{req.text[:200]} -> {result.status}", kind="episode", source="agent")
-                if self.s.memory.auto_extract:
+                if self.s.memory.auto_extract and req.id not in self._planned:
                     for fact in await extract_facts(self.router, req.text, result.answer):
                         self.memory.add(fact, kind="profile", source="auto")
                         await self.events.publish("memory.learned", fact=fact)
         except Exception as e:
             log.error("learning.failed", task=req.id, error=str(e))
+        finally:
+            self._planned.discard(req.id)
 
     async def _learn_skill(self, req: TaskRequest, result: TaskResult) -> None:
         if not self.skills or not self.s.memory.learn_skills:

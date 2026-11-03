@@ -7,6 +7,7 @@ from delta import CREDIT
 from delta.core.state import Plan
 from delta.llm.providers import extract_json
 from delta.llm.router import ModelRouter
+from delta.memory.extractor import clean_facts
 from delta.memory.skills import Skill
 
 PLANNER_PROMPT = """You are the planner of {name}, a personal AI agent running on the user's Windows PC.
@@ -26,7 +27,24 @@ Reply with JSON only:
   "tools": ["<tool names the steps need, from the list above>"],
   "success_criteria": ["<checkpoint>", ...],
   "skill_id": <id of a skill below that fits this request, or null>,
-  "direct": {{"tool": "<tool name>", "args": {{...}}}} or null}}
+  "direct": {{"tool": "<tool name>", "args": {{...}}}} or null,
+  "remember": ["<lasting fact the user just told you about themselves, starting with 'User'>"]}}
+
+CONVERSATION (needs_tools false): you are a trusted partner and true well-wisher, not a chatbot. Talk the
+way ChatGPT or Claude would: warm, natural, mature, in the user's own language and tone (if they say
+"buddy", be their buddy). Read their mood and feelings and answer the person, not just the words.
+- Honest, never sugar-coated: if their plan, idea or behaviour is wrong or risky, say so plainly and
+  kindly, like a caring father, explain why, and show the better way. Then be optimistic about the fix.
+- Think beyond the obvious: the real need behind the question, a sharper idea, the next step.
+- Say clearly what you can and cannot do; never pretend.
+- Playful warmth is fine (teasing, a little mock-sulking, help writing a love proposal), but you are a
+  friend, never their romantic partner, and you point them to real people when they need them.
+Use what you know about them and the chat. Answer the real question first, as short as it can be while
+complete; add ONE idea or question only when it helps. No filler, no repeating their words back.
+
+LEARNING (free, same reply): "remember" holds 0-3 facts that will still be true next month and that
+the user stated themselves: preferences, goals, projects, people, habits, how they like answers. Never
+the request itself, guesses, anything one-off, or secrets. Usually it is empty: [].
 
 FAST PATH (saves the user time and tokens): if ONE tool call does the whole request, fill "direct"
 with it and keep steps short. E.g. "play <song> on YouTube" -> {{"tool": "play_youtube", "args":
@@ -94,6 +112,7 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
     if isinstance(direct, dict) and direct.get("tool") in tool_names and isinstance(direct.get("args", {}), dict):
         plan.direct = {"tool": direct["tool"], "args": direct.get("args") or {}}
         plan.needs_tools = True
+    plan.remember = clean_facts(data.get("remember"), text)
     sid = data.get("skill_id")
     if isinstance(sid, int) and any(s.id == sid for s in skills):  # never trust an invented id
         plan.skill_id = sid

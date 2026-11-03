@@ -5,7 +5,7 @@ The Telegram /volume /brightness /apps /screen /camera commands use the same fun
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -48,6 +48,24 @@ class SetBrightness(Tool[LevelArgs]):
         except PCControlError as e:
             return ToolResult(False, str(e))
         return ToolResult(True, f"brightness {level}%", {"brightness": level, "verified": True})
+
+
+class ThemeArgs(BaseModel):
+    mode: Literal["light", "dark", "toggle"] = Field(description="light, dark, or toggle (switch to the other one)")
+
+
+class SetWindowsTheme(Tool[ThemeArgs]):
+    name = "set_windows_theme"
+    description = "Switch Windows to light mode or dark mode (apps and taskbar), or toggle between them."
+    risk = Risk.ACT
+    Args = ThemeArgs
+
+    async def run(self, args: ThemeArgs) -> ToolResult:
+        try:
+            mode = await asyncio.to_thread(pc.set_windows_theme, args.mode)
+        except PCControlError as e:
+            return ToolResult(False, str(e))
+        return ToolResult(True, f"Windows is now in {mode} mode", {"theme": mode, "verified": True})
 
 
 class NoArgs(BaseModel):
@@ -105,4 +123,4 @@ class CameraPhoto(_Picture):
 def pc_tools(deliver: Any = None) -> list[Tool]:
     shot, cam = TakeScreenshot(), CameraPhoto()
     shot.deliver = cam.deliver = deliver
-    return [SetVolume(), SetBrightness(), shot, cam]
+    return [SetVolume(), SetBrightness(), SetWindowsTheme(), shot, cam]

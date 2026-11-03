@@ -62,7 +62,7 @@ class Limit(BaseModel):
 
 
 class GovernorConfig(BaseModel):
-    sample_interval_s: float = 5
+    sample_interval_s: float = 15  # health checks: cheap, but not every 5 s all day
     below_normal_priority: bool = True
     limits: dict[str, Limit] = Field(default_factory=dict)
 

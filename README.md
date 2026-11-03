@@ -1,154 +1,155 @@
-# Δ Delta: personal AI agent for Windows, by Adharsh Kumar Bachu
+<div align="center">
 
-**Delta is an open-source, local-first personal AI agent for Windows, created by
-[Adharsh Kumar Bachu](https://github.com/adharshramu12).** It does real work on your PC and in your
-browser, asks before anything risky, verifies every task before it says "done", and can be
-controlled securely from your own Telegram.
+# Δ Delta
 
-> **Creator:** Adharsh Kumar Bachu · **License:** Apache 2.0 (keep the [NOTICE](NOTICE) credit) ·
-> Ask Delta "who made you?" and it will tell you.
+### The personal AI agent that actually does the work on your Windows PC
+
+**Created by [Adharsh Kumar Bachu](https://github.com/adharshramu12)** · Open source · Apache 2.0
+
+Talk to it like a friend. Control it from your phone. It plans, uses your computer and browser,
+asks before anything risky, and **verifies every task before it says "done".**
+
+`Codex` · `Claude Code` · `Cline` · `NVIDIA NIM` · `Groq` · `DeepSeek` · `LM Studio` · `Ollama`
+
+</div>
+
+---
+
+## Why people choose Delta
+
+|  |  |
+|---|---|
+| 🧠 **Bring the AI you already have** | Use your **ChatGPT/Codex plan** (free or paid), your **Claude Code** subscription, **Cline**, or free API keys from **NVIDIA NIM** and **Groq**. Local models (LM Studio, Ollama) work too. No new subscription needed. |
+| 🔀 **Hybrid, never stuck** | Delta routes every request to the best available AI and **falls back automatically** when one is down, rate-limited or out of credits. Switch the main AI, model or API key any time, even from your phone. |
+| 📱 **Your whole PC from Telegram** | Send a message or a **voice note** from anywhere: run tasks, get screenshots and files, take a webcam photo, change volume, brightness or dark mode, close apps, switch AI or key. **Slack is coming soon.** |
+| 🔐 **Only you can control it** | Paired to **your** Telegram account only. A **PIN** guards sensitive actions, wrong tries lock remote control, and your PC alerts you. Every action goes into a tamper-evident audit log. |
+| ✅ **Verified, not hopeful** | Plan → act → **check the result against clear goals** → retry or tell you honestly what failed. |
+| 🤝 **A partner, not a chatbot** | Warm and honest in your own tone. It reads the mood, corrects you kindly when you're wrong, and says clearly what it can and can't do. |
+| 🪶 **Light on your laptop** | ~100 MB in the background, near-zero CPU at rest, **no GPU** unless you choose a local model. **Shutdown** stops everything. |
+| 🪙 **Careful with tokens** | Greetings cost 0 tokens. A chat reply and what Delta learns from it come from **one** AI call. Each step sends only the tools it needs. |
 
 ## What Delta can do
 
-- **Use your computer like a person:** open apps, manage files, type, click, read the screen.
-- **Use your own signed-in browser** (Chrome or Edge): open sites, read pages, fill forms, play YouTube.
-- **Deep Research in ChatGPT or Gemini:** asks what you need, writes an expert research brief,
-  starts Deep Research in your own account, and recovers by itself when the site fails.
-- **Asks instead of guessing:** tick-box and pick-one question forms, in the app and in Telegram.
-- **Telegram remote control:** voice notes, files, screenshots, camera, volume, brightness, apps,
-  switching the AI model or key, all only for your paired account.
-- **Remote Guard security:** PIN for sensitive actions, lockout after wrong tries, PC alerts,
-  hash-chained audit log of every action.
-- **Any AI model:** Codex, Claude Code, Cline, Groq, NVIDIA NIM, DeepSeek, LM Studio or Ollama,
-  with automatic fallback when one fails.
-- **Learns your workflows** as reusable skills, and **remembers** your preferences locally.
-- **Meetings and messages:** schedule or start Google Meet calls, send WhatsApp/Telegram messages.
+**On your PC**
+- Open apps, manage files, type, click and read the screen like a person
+- Volume, brightness, Windows light/dark mode, screenshots, webcam, close apps
+- Schedule or start Google Meet calls; send WhatsApp and Telegram messages (it asks first)
 
-## Why Delta is different
+**In your browser** (your own signed-in Chrome or Edge)
+- Open sites, read pages, fill forms, play YouTube
+- **Deep Research in your own ChatGPT or Gemini:** Delta asks what you need, writes an
+  expert-level research brief, starts Deep Research for you, and retries by itself if the site fails
 
-| | |
-|---|---|
-| **Runs on a laptop** | Local Gemma via Ollama on a 6 GB GPU. Models unload after 2 idle minutes. Daemon runs at below-normal priority. |
-| **Never stuck** | Model router falls back Ollama → Groq → NVIDIA NIM with circuit breakers. Web search falls back Tavily → SerpAPI → DuckDuckGo (free). |
-| **Protects the hardware** | Governor watches GPU temp, VRAM, RAM and battery. Over the limit → local inference stops and work moves to the cloud; at critical → Delta pauses. |
-| **You stay in charge** | Every action is risk-classified. Writes, deletes and anything that leaves the machine need your approval. Deletes go to the Recycle Bin. System settings, credentials and payments are hard-blocked. |
-| **Your rules** | `config/boundaries.yaml`: allowed/denied folders, apps, tools, domains, quiet hours, autonomy level. |
-| **Verified, not hopeful** | Plan → act → **verify against explicit success criteria** → retry or report honest failure. |
-| **Learns your workflows** | Every verified multi-step task becomes a reusable *skill*. Skills are promoted only after they work again, and retired automatically if they keep failing. You can see and remove every one. |
-| **Extensible** | Add-ons via a small stable SDK, plus a built-in **MCP** bridge to any Model Context Protocol server. Add-on tools obey the same safety rules. See [docs/ADDONS.md](docs/ADDONS.md). |
-| **Remembers you** | Local memory of your preferences and past tasks. View, edit, delete any time (`/memory`). |
-| **Auditable** | Hash-chained, tamper-evident audit log of every decision and tool call. |
+**Thinks with you**
+- Asks **tick-box questions** instead of guessing, in the app and in Telegram
+- **Remembers** your preferences locally and **learns your workflows** as reusable skills
+- Voice notes in, answers out
 
-## Architecture
+## Works with the AI you already pay for (or none at all)
 
-```
- CLI / Telegram / Slack / Voice / Desktop app / Remote PWA
-                     │
-                     ▼
-              Orchestrator ── plan → act → observe → verify → reflect
-               │      │                                   │
-         Memory│      ▼                                   ▼
-               │  ToolRegistry ──► PolicyEngine ──► ApprovalBroker (any device)
-               │      │              (floor ∩ your boundaries)
-               │      ├─ files · shell · apps · web search · fetch
-               │      └─ desktop · screen · browser · MCP   (roadmap)
-               ▼
-          ModelRouter ── Ollama ▸ Groq ▸ NVIDIA NIM
-                     ▲
-     Governor (CPU/RAM/GPU/temps/battery)        AuditLog (hash chain)
-```
+| How you sign in | Cost | Good for |
+|---|---|---|
+| **Codex** (ChatGPT account) | Your ChatGPT free or paid plan | Everyday tasks, coding, PC work |
+| **Claude Code** | Your Claude subscription | Deep reasoning, long tasks |
+| **Cline** | Free models available | Coding and agent work |
+| **NVIDIA NIM** API key | Free tier | Fast cloud models |
+| **Groq** API key | Free tier | Very fast replies, voice transcription |
+| **DeepSeek** API key | Low cost | Strong reasoning |
+| **LM Studio / Ollama** | Free, on your PC | Fully offline, private |
 
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Set them up in the app's **Setup** page, or from Telegram with `/ai`, `/model` and `/keys`.
+Keys are stored in **Windows Credential Manager**, never in files.
 
-## Install (Windows 10/11): one step
-
-**Double-click `Install Delta.cmd`** in the Delta folder (or in the zip someone shared with you).
-Or, from PowerShell:
+## Install (Windows 10/11)
 
 ```powershell
 irm https://raw.githubusercontent.com/adharshramu12/Project-Delta/main/scripts/install.ps1 | iex
 ```
 
-It installs the official Python 3.12 if needed, sets Delta up in `%LOCALAPPDATA%\Programs\Delta`,
-adds a **Delta** icon to your Desktop and Start menu, and opens Delta's setup wizard (AI sign-in,
-permissions, Telegram). Run it again to repair. `delta update` gets the newest version;
-`scripts\uninstall.ps1` removes Delta (your chats and memory stay unless you add `-RemoveData`).
+Or download the repo and **double-click `Install Delta.cmd`**. It installs the official signed
+Python if needed, adds a **Delta** icon to your Desktop and Start menu, and opens the setup wizard:
+pick your AI, set permissions, and pair your Telegram in 3 steps.
 
-## Developer setup
+- **Close (X)** hides the window; Delta keeps listening for your Telegram messages.
+- **Double-click the icon** to open it again.
+- **⏻ Shutdown** stops everything and frees all memory.
+
+`delta update` gets the newest version. `scripts\uninstall.ps1` removes Delta (your chats and
+memory stay unless you add `-RemoveData`).
+
+## Telegram commands
+
+| Command | What it does |
+|---|---|
+| *any message or voice note* | Delta does the task and replies in the chat |
+| `/ai` `/model` | See or switch the main AI and model |
+| `/keys` | Replace an API key (PIN protected) |
+| `/mode` | Permission level: ask everything → autopilot |
+| `/screen` `/camera` | Screenshot or webcam photo (PIN protected) |
+| `/volume` `/brightness` `/theme` | Sound, screen brightness, Windows light/dark |
+| `/apps` | Open apps; tap to close one |
+| `/lock` `/unlock` | Lock remote control now / enter your PIN |
+| `/stop` `/status` `/help` | Stop a task, PC health and AIs, all commands |
+
+## Safety by design
+
+- **You stay in charge:** every action is risk-checked. Deleting, sending and anything that leaves
+  your PC need your approval (unless you choose autopilot). Deletes go to the Recycle Bin.
+- **Hard limits:** passwords, payment details and security settings are always refused.
+- **Your rules:** `config/boundaries.yaml` sets allowed folders, apps, sites, quiet hours and autonomy.
+- **Tamper-evident audit log** of every decision and tool call.
+- Full threat model and known limits: [SECURITY.md](SECURITY.md).
+
+## Architecture
+
+```
+  Desktop app · Telegram · Slack (soon) · Voice · CLI
+                        │
+                        ▼
+  Orchestrator ── plan → act → observe → verify → learn
+     │       │                                   │
+  Memory     ▼                                   ▼
+  & skills  Tools ──► Policy engine ──► Approvals (any device) + Remote Guard PIN
+             │    files · apps · desktop · browser · deep research · meetings · messages · MCP
+             ▼
+  Model router ── Codex ▸ Claude Code ▸ Cline ▸ NIM ▸ Groq ▸ DeepSeek ▸ LM Studio ▸ Ollama
+                        ▲
+  Governor (CPU/RAM/GPU/battery)              Audit log (hash chain)
+```
+
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Add-ons and MCP: [docs/ADDONS.md](docs/ADDONS.md)
+
+## For developers
 
 ```powershell
-# 1. tools
 pip install uv
-winget install Ollama.Ollama
-ollama pull gemma3n:e4b          # or the Gemma tag you prefer; set it in config/delta.yaml
-
-# 2. install
-uv sync --extra all        # everything; plain 'uv sync' gives the core agent + dashboard
-
-# 3. cloud fallback keys (optional but recommended) -> stored in Windows Credential Manager
-uv run delta secrets set groq_api_key
-uv run delta secrets set nvidia_api_key
-uv run delta secrets set tavily_api_key
-
-# 4. check and talk
-uv run delta doctor
-uv run delta cli
+uv sync --extra all          # plain 'uv sync' = core agent + dashboard
+uv run delta doctor          # checks your setup
+uv run delta run --open      # start the service and open the app
+uv run pytest -q             # 290+ tests
 ```
-
-### One-click app
-```powershell
-uv sync --extra all
-powershell -File scripts/create_shortcut.ps1   # adds "Delta" to Desktop + Start menu
-```
-Click **Delta** → it starts in the background and opens the dashboard. **Shutdown** in the
-dashboard stops everything and frees RAM/VRAM. Or run `uv run delta run --open` yourself.
-
-### Telegram / Slack
-```powershell
-uv run delta secrets set telegram_bot_token      # from @BotFather
-uv run delta secrets set slack_bot_token         # xoxb-…
-uv run delta secrets set slack_app_token         # xapp-… (Socket Mode)
-```
-Then in `config/delta.yaml` set `enabled: true` and add your own user id to `allowed_user_ids`
-(an empty list means nobody can use the bot).
-
-In the CLI: just type a task. Commands: `/status`, `/memory`, `/remember <fact>`,
-`/forget <id>`, `/audit`, `/quit`.
-
-## Configuration
 
 | File | What |
 |---|---|
-| `config/delta.yaml` | providers, routes, governor limits, memory, channels |
-| `config/boundaries.yaml` | what Delta may touch and how autonomous it is |
-| `config/apps.yaml` | friendly app names → executables (Codex, Antigravity, Explorer, …) |
+| `config/delta.yaml` | AI providers, routes, governor limits, memory, channels |
+| `config/boundaries.yaml` | What Delta may touch and how autonomous it is |
+| `config/apps.yaml` | Friendly app names → programs |
 
-Runtime data (memory DB, audit log, logs) lives in `%LOCALAPPDATA%\Delta`.
+Runtime data (memory, audit log, logs) lives in `%LOCALAPPDATA%\Delta`.
 
 ## Roadmap
 
-- [x] Model router with fallback + circuit breakers
-- [x] Governor + hardware guard, clean shutdown
-- [x] Policy engine, boundaries, approvals, audit log
-- [x] Tools: files, shell, apps, web search, page fetch
-- [x] Memory (profile + episodic, FTS recall)
-- [x] Plan → act → verify loop, CLI
-- [x] Background service + local API (FastAPI/WebSocket, token auth, localhost only)
-- [x] Web dashboard: chat, live steps, approvals, memory, health, one-click Shutdown
-- [x] Desktop shortcut (no console window; second click reopens the dashboard)
-- [x] Telegram + Slack with approve/deny buttons (allow-listed users only)
-- [x] Computer use (in every install): UI Automation, Unicode typing, user-takeover stop, screen vision,
-      browser via Delta's own Chrome or Edge profile (free browsing; send/buy/delete still ask)
-- [x] Add-on SDK + MCP bridge
-- [x] Skill learning from verified tasks (candidate → proven → retired), export/import
-- [ ] Preference learning from approvals/corrections, reflection lessons
-- [ ] Routines and proactive suggestions
-- [ ] First-run setup page, one-line installer, community skill library
-- [ ] Tauri desktop app with tray icon (wraps the same dashboard)
-- [ ] Remote control (Tailscale / Cloudflare Tunnel, device pairing, PWA)
-- [ ] Voice: wake word, faster-whisper, Piper, Vapi
-- [ ] Semantic memory (sqlite-vec), memory encryption at rest, MCP tools
+- [x] Hybrid model router: Codex, Claude Code, Cline, NIM, Groq, DeepSeek, LM Studio, Ollama
+- [x] Computer use, your own browser, Deep Research in ChatGPT/Gemini
+- [x] Telegram remote control with voice, files, PIN and lockout
+- [x] Question forms, memory, skill learning, partner-style chat
+- [x] One-line installer, setup wizard, light/dark theme, low resource use
+- [ ] Slack control (in progress)
+- [ ] Scheduled tasks and routines
+- [ ] End-to-end encrypted channel (Matrix), encrypted memory at rest, signed releases
 
-## Contributing / Security
+## Creator
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Licensed under Apache-2.0.
+**Delta is created and maintained by Adharsh Kumar Bachu.**
+If you use, fork or build on Delta, keep the [NOTICE](NOTICE) file and the credit, as the
+Apache 2.0 license requires. Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -151,3 +151,25 @@ async def test_screenshot_is_sent_then_removed_from_the_pc(setup):
     await ch._send_picture(5, "screen", "5")
     assert sent[0][1] == b"jpg" and sent[0][2].startswith("Screen ·") and ("pc.screen", {"by": "5"}) in events
     assert not (fake.tmp / "screen.jpg").exists()
+
+
+def test_windows_theme_switch(monkeypatch):
+    import winreg
+
+    from delta.system import pc_control as pc
+
+    store = {"AppsUseLightTheme": 1, "SystemUsesLightTheme": 1}
+
+    class Key:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(winreg, "OpenKey", lambda *a: Key())
+    monkeypatch.setattr(winreg, "QueryValueEx", lambda k, n: (store[n], 4))
+    monkeypatch.setattr(winreg, "SetValueEx", lambda k, n, r, t, v: store.__setitem__(n, v))
+    assert pc.windows_theme() == "light"
+    assert pc.set_windows_theme("toggle") == "dark" and store == {"AppsUseLightTheme": 0, "SystemUsesLightTheme": 0}
+    assert pc.set_windows_theme("light") == "light" and pc.windows_theme() == "light"
