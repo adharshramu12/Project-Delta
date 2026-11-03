@@ -86,7 +86,7 @@ def _result_json(r: TaskResult) -> dict[str, Any]:
             "provider": r.provider, "steps": [{"tool": s.tool, "ok": s.ok} for s in r.steps],
             "checks": v.checks if v else [], "seen_screen": bool(v and v.screenshot), "tokens": r.tokens,
             "fallback": r.fallback,
-            "options": r.options, "asked_about": r.asked_about}
+            "options": r.options, "questions": r.questions, "asked_about": r.asked_about}
 
 
 def create_app(c: Container, token: str) -> FastAPI:

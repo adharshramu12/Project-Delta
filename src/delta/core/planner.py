@@ -38,6 +38,10 @@ is just "HH:MM" when no day is given, so the meeting keeps its own day).
 If the person or app is not clear, ask instead of guessing. Leave it null when the
 job needs several steps or looking at the screen.
 
+DEEP RESEARCH ("deep research ...", "research ... in ChatGPT/Gemini") is a TOOL task, never answered from
+memory: the agent asks what it needs, writes an expert brief and starts Deep Research in the user's own
+ChatGPT or Gemini in the browser (tools: browser_open, browser_read, browser_click, browser_fill).
+
 WEBSITES and web apps (NotebookLM, Gmail, YouTube, any URL), even when the user says "open Chrome":
 plan browser_open/browser_read/browser_click/browser_fill, which read the page as text and click by
 name. Never run_shell "start chrome", and no screenshots or pixel clicks unless the page cannot be read.

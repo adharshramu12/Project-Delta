@@ -59,6 +59,7 @@ class TelegramChannel(PCMenu):
         self._code: tuple[str, float] | None = None  # (pairing code, expires at)
         self.bot_name = ""
         self._choices: dict[str, list[str]] = {}  # the choices last offered to each user (tap buttons)
+        self._forms: dict[str, dict[str, Any]] = {}  # user -> open question form (delta.core.questions)
         self._awaiting_key: dict[str, tuple[str, float]] = {}  # user -> (key name, until) after /keys
         self._pending_pin: dict[str, tuple[Any, str, float]] = {}  # user -> (action to run, what, until)
         self._pc_init()
@@ -81,6 +82,7 @@ class TelegramChannel(PCMenu):
         self.app.add_handler(CallbackQueryHandler(self._on_pc_button, pattern=r"^sys:"))
         self.app.add_handler(CallbackQueryHandler(self._on_control, pattern=r"^ctl:"))
         self.app.add_handler(CallbackQueryHandler(self._on_answer, pattern=r"^ans:"))
+        self.app.add_handler(CallbackQueryHandler(self._on_form, pattern=r"^f[qd]:"))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
         self.app.add_handler(CallbackQueryHandler(self._on_button, pattern=r"^appr:"))
@@ -277,6 +279,12 @@ class TelegramChannel(PCMenu):
             return
         if await self._take_key(update, str(user.id)):
             return
+        if (form := self._forms.pop(str(user.id), None)) is not None:
+            from delta.core.questions import answers_text
+
+            text = answers_text(form["questions"], form["answers"]) + "\nAlso: " + update.message.text
+            await self._run(update, str(user.id), text)
+            return
         await self._run(update, str(user.id), update.message.text)
 
     # --- Remote Guard: PIN for sensitive actions, panic lock (delta.safety.remote_guard) -------------
@@ -435,6 +443,9 @@ class TelegramChannel(PCMenu):
         if chats and chat_id:
             chats.add(chat_id, "delta", res.answer, {"status": res.status, "provider": res.provider,
                                                       "options": res.options, "channel": self.name})
+        if res.status == "needs_user" and res.questions:
+            await self._start_form(message, uid, res)
+            return
         parts = chunks(result_text(res))
         kb = None
         if res.status == "needs_user" and res.options:
@@ -448,6 +459,59 @@ class TelegramChannel(PCMenu):
             await message.reply_text(to_html(text), parse_mode="HTML", reply_markup=kb)
         except Exception:
             await message.reply_text(text, reply_markup=kb)
+
+    # --- question forms: several questions, tick boxes (multi) or pick-one ---------------------------------
+    async def _start_form(self, message: Any, uid: str, res: Any) -> None:
+        form = {"questions": res.questions, "answers": {}, "left": set(range(len(res.questions)))}
+        self._forms[uid] = form
+        intro = res.answer or "A few quick questions so I get this exactly right:"
+        await self._send(message, intro + "\n(Tap your answers, or just type them.)")
+        for qi, q in enumerate(res.questions):
+            await message.reply_text(self._form_text(q), reply_markup=self._form_kb(q, qi, form))
+
+    @staticmethod
+    def _form_text(q: dict[str, Any]) -> str:
+        return f"{q['q']}" + ("\n(tick all that apply, then Done)" if q["multi"] else "")
+
+    def _form_kb(self, q: dict[str, Any], qi: int, form: dict[str, Any]) -> Any:
+        picked = form["answers"].get(qi, [])
+        def label(o: str) -> str:
+            return ((("☑ " if o in picked else "☐ ") + o) if q["multi"] else o)[:60]
+
+        rows = [[(label(o), f"fq:{qi}:{oi}")] for oi, o in enumerate(q["options"])]
+        if q["multi"]:
+            rows.append([("✓ Done", f"fd:{qi}")])
+        return self._buttons(rows)
+
+    async def _on_form(self, update: Any, ctx: Any) -> None:
+        from delta.core.questions import answers_text
+
+        q = update.callback_query
+        uid = str(q.from_user.id)
+        if not is_allowed(uid, self.allowed):
+            await q.answer("not authorised")
+            return
+        form = self._forms.get(uid)
+        if form is None:
+            await q.answer("That question is closed.")
+            return
+        await q.answer()
+        kind, *nums = q.data.split(":")
+        qi = int(nums[0])
+        question = form["questions"][qi]
+        picked: list[str] = form["answers"].setdefault(qi, [])
+        if kind == "fq":
+            option = question["options"][int(nums[1])]
+            if question["multi"]:  # a tick box: toggle and show it, the question stays open
+                picked.remove(option) if option in picked else picked.append(option)
+                await q.edit_message_reply_markup(self._form_kb(question, qi, form))
+                return
+            picked[:] = [option]
+        form["left"].discard(qi)
+        await q.edit_message_text(f"{question['q']}\n→ {', '.join(picked) or 'no preference'}")
+        if not form["left"]:
+            self._forms.pop(uid, None)
+            await self._run(update, uid, answers_text(form["questions"], form["answers"]))
 
     async def _on_answer(self, update: Any, ctx: Any) -> None:
         """A tapped choice is the user's answer, as if they had typed it."""

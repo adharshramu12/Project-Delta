@@ -73,6 +73,8 @@ class TaskResult:
     fallback: str = ""  # why the user's chosen main AI did not answer, e.g. "cline skipped: credits used up"
     fast: bool = False  # finished by the planner's one direct tool call
     options: list[str] = field(default_factory=list)  # needs_user: quick answers the user can tap
+    # needs_user: a form of up to 4 questions [{"q", "options", "multi"}] (delta.core.questions)
+    questions: list[dict[str, Any]] = field(default_factory=list)
     asked_about: str = ""  # needs_user: the original request, so an answer can continue it
 
 

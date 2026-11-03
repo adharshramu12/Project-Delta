@@ -128,6 +128,8 @@ main{flex:1;display:flex;min-height:0;overflow:hidden}
   box-shadow:var(--shadow-1)}
 .stopbtn:hover{color:var(--bad);border-color:var(--bad)}
 .qopts{display:flex;gap:8px;flex-wrap:wrap}
+.qform{display:flex;flex-direction:column;gap:12px;border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px;background:var(--surface)}
+.qblock{display:flex;flex-direction:column;gap:6px}.qopts button.on{background:var(--accent);color:#fff}
 .qopts button{padding:8px 15px;border-radius:var(--r-pill);border:1px solid var(--accent-ring);background:var(--surface);color:var(--ink);
   box-shadow:var(--shadow-1);transition:.15s var(--ease)}
 .qopts button:hover{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -678,7 +680,34 @@ async function refreshSkills() {
 }
 
 // A question from Delta: tap an option (or type your own) to continue the same request.
+// A form of questions (tick boxes or pick-one), like Telegram's: answers go back as one message.
+function showForm(r) {
+  const box = document.createElement("div"); box.className = "qform";
+  const picks = r.questions.map(() => new Set());
+  r.questions.forEach((q, qi) => {
+    const block = document.createElement("div"); block.className = "qblock";
+    const title = document.createElement("b"); title.textContent = q.q + (q.multi ? " (tick all that apply)" : "");
+    const opts = document.createElement("div"); opts.className = "qopts";
+    q.options.forEach(o => {
+      const b = document.createElement("button"); b.textContent = (q.multi ? "☐ " : "") + o;
+      b.onclick = () => {
+        if (q.multi) { picks[qi].has(o) ? picks[qi].delete(o) : picks[qi].add(o); b.textContent = (picks[qi].has(o) ? "☑ " : "☐ ") + o; }
+        else { picks[qi] = new Set([o]); opts.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); }
+      };
+      opts.appendChild(b);
+    });
+    block.append(title, opts); box.appendChild(block);
+  });
+  const send = document.createElement("button"); send.className = "primary"; send.textContent = "Continue";
+  send.onclick = () => {
+    const lines = r.questions.map((q, qi) => `${q.q} -> ${[...picks[qi]].join(", ") || "(no preference)"}`);
+    $("text").value = `${r.asked_about}\nMy answers:\n${lines.join("\n")}`; $("send").requestSubmit(); box.remove();
+  };
+  box.appendChild(send); $("log").appendChild(box); box.scrollIntoView({block: "end"});
+}
+
 function showOptions(r) {
+  if (r.questions && r.questions.length) return showForm(r);
   const row = document.createElement("div"); row.className = "qopts";
   const answer = choice => { $("text").value = `${r.asked_about} (${choice})`; $("send").requestSubmit(); row.remove(); };
   for (const o of r.options || []) {

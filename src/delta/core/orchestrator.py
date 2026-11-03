@@ -16,7 +16,9 @@ from delta.core.clarify import ask_first
 from delta.core.events import EventBus
 from delta.core.intents import match_intent, small_talk
 from delta.core.planner import make_plan
+from delta.core.playbooks import playbooks_for
 from delta.core.proof import ProofRecorder
+from delta.core.questions import parse_questions
 from delta.core.replay import Recipe, fill, match_slots
 from delta.core.state import CURRENT_REQUEST, Plan, StepRecord, TaskRequest, TaskResult, Verification
 from delta.core.verifier import verify
@@ -91,11 +93,18 @@ Rules:
                                                 in, a choice only the user can make, missing info)
   Any other reply is treated as a progress note and you will be asked to continue.
 - NEVER GUESS between several matches. If more than one file, contact, app or meaning fits (two
-  "daddy" photos, three chats named Inka), or the request is unclear, stop and ask BEFORE acting:
-    NEED_USER: <short question>
-    - <choice 1, e.g. the full file name or contact>
-    - <choice 2>
-  (2-6 choices, one per line; the user taps one.) Sending the wrong file or message is worse than asking.
+  "daddy" photos, three chats named Inka), or the request is unclear, stop and ask BEFORE acting.
+  Sending the wrong file or message is worse than asking.
+- Before a big open-ended task (research, a report, a plan, writing) whose key details are missing, ask
+  once, up to 4 short questions, each with choices the user taps (they can also type their own):
+    NEED_USER: <one line on why you ask>
+    <Question 1?>
+    - [ ] <tick box: the user may pick several>
+    - [ ] <tick box>
+    <Question 2?>
+    - <pick one>
+    - <pick one>
+  Ask only what changes the result; never ask what you can find out yourself.
 
 GOAL: {goal}
 PLAN:
@@ -168,20 +177,6 @@ THE USER IS NOT AT THIS PC: they are writing from their phone in {channel} and c
 DONE, NEED_USER = "DONE:", "NEED_USER:"
 
 
-def split_choices(text: str) -> tuple[str, list[str]]:
-    """A question with its choices listed one per line ("- a", "1. b", "• c"): (question, choices).
-    The choices become tap buttons; the question keeps the rest."""
-    question: list[str] = []
-    choices: list[str] = []
-    for line in text.splitlines():
-        m = re.match(r"\s*(?:[-*\u2022]|\d+[.)])\s+(.+)", line)
-        if m and len(choices) < 6:
-            choices.append(m.group(1).strip().strip("`*")[:120])
-        else:
-            question.append(line)
-    if len(choices) < 2:  # a single bullet is part of the explanation, not a choice
-        return text, []
-    return "\n".join(question).strip(), choices
 MAX_NUDGES = 3  # small models may never use the markers: accept their answer after this many
 CONTINUE_NUDGE = ("Not finished yet: that reply had no tool call and did not start with DONE: or NEED_USER:. "
                   "Continue with the next unmet success criterion now (call a tool). Reply DONE: only when "
@@ -383,9 +378,12 @@ class Orchestrator:
                 return TaskResult(req.id, "cancelled", stopped, attempt, steps)
             if final.startswith(NEED_USER):
                 # A real blocker only the user can clear: ask, don't burn retries on it.
-                ask, options = split_choices(final.removeprefix(NEED_USER).strip())
-                return TaskResult(req.id, "needs_user", ask, attempt, steps,
-                                  provider=self.router.last_provider or "", options=options, asked_about=req.text)
+                ask, questions = parse_questions(final.removeprefix(NEED_USER).strip())
+                simple = len(questions) == 1 and not questions[0]["multi"]  # one pick-one: plain buttons
+                return TaskResult(req.id, "needs_user", ask or (questions[0]["q"] if simple else ""), attempt,
+                                  steps, provider=self.router.last_provider or "",
+                                  options=questions[0]["options"] if simple else [],
+                                  questions=[] if simple else questions, asked_about=req.text)
             final = final.removeprefix(DONE).strip()
             await self._fresh_media_status(req.id, steps)
             shot, target = await self._final_screenshot(steps)  # saved as proof either way
@@ -487,6 +485,7 @@ class Orchestrator:
             criteria="\n".join(f"- {c}" for c in plan.success_criteria), memory=memory_ctx or "(nothing yet)",
             skill=(f"\nFOLLOW LEARNED SKILL #{skill.id} ({skill.name}), adapting it to this request:\n"
                    + "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(skill.procedure)) + "\n") if skill else "")
+        system += playbooks_for(req.text)  # expert know-how only when the request needs it
         if req.channel in REMOTE_CHANNELS:
             system += REMOTE_NOTE.format(channel=req.channel.title())
         return [{"role": "system", "content": system}, {"role": "user", "content": req.with_context}]
