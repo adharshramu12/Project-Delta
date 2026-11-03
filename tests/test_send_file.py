@@ -14,7 +14,7 @@ class FakeTelegram:
         self.sent.append((user, path, caption))
 
 
-def asked_from(channel, user="6057519957"):
+def asked_from(channel, user="111222333"):
     return CURRENT_REQUEST.set(TaskRequest("send me it", channel=channel, user=user))
 
 
@@ -27,7 +27,7 @@ async def test_a_file_goes_to_the_person_who_asked(tmp_path):
         r = await SendFile({"telegram": tg}).run(SendFileArgs(path=str(deck)))
     finally:
         CURRENT_REQUEST.reset(token)
-    assert r.ok and r.evidence["delivered"] and tg.sent == [("6057519957", deck, "Arva pitch.pptx")]
+    assert r.ok and r.evidence["delivered"] and tg.sent == [("111222333", deck, "Arva pitch.pptx")]
 
 
 async def test_a_folder_is_zipped_first(tmp_path):
