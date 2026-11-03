@@ -35,6 +35,7 @@ class Plan:
     skill_id: int | None = None  # learned skill the planner chose to follow
     tools: list[str] = field(default_factory=list)  # tools the planner expects to need
     direct: dict[str, Any] | None = None  # {"tool", "args"}: one call does the whole job (no agent loop)
+    remember: list[str] = field(default_factory=list)  # lasting facts about the user, noted in the same call
 
 
 @dataclass

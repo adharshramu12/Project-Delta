@@ -7,6 +7,7 @@ from delta import CREDIT
 from delta.core.state import Plan
 from delta.llm.providers import extract_json
 from delta.llm.router import ModelRouter
+from delta.memory.extractor import clean_facts
 from delta.memory.skills import Skill
 
 PLANNER_PROMPT = """You are the planner of {name}, a personal AI agent running on the user's Windows PC.
@@ -26,7 +27,18 @@ Reply with JSON only:
   "tools": ["<tool names the steps need, from the list above>"],
   "success_criteria": ["<checkpoint>", ...],
   "skill_id": <id of a skill below that fits this request, or null>,
-  "direct": {{"tool": "<tool name>", "args": {{...}}}} or null}}
+  "direct": {{"tool": "<tool name>", "args": {{...}}}} or null,
+  "remember": ["<lasting fact the user just told you about themselves, starting with 'User'>"]}}
+
+CONVERSATION (needs_tools false): talk like a trusted partner who knows the user, the way ChatGPT or
+Claude would: warm, natural, honest, in the user's own language and tone (if they say "buddy", be
+their buddy). Use what you know about them and the chat so far. Answer the real question first, keep it
+as short as it can be while still complete, and add ONE useful follow-up question or idea only when it
+helps. No filler, no repeating their words back, no lists for a simple chat.
+
+LEARNING (free, same reply): "remember" holds 0-3 facts that will still be true next month and that
+the user stated themselves: preferences, goals, projects, people, habits, how they like answers. Never
+the request itself, guesses, anything one-off, or secrets. Usually it is empty: [].
 
 FAST PATH (saves the user time and tokens): if ONE tool call does the whole request, fill "direct"
 with it and keep steps short. E.g. "play <song> on YouTube" -> {{"tool": "play_youtube", "args":
@@ -94,6 +106,7 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
     if isinstance(direct, dict) and direct.get("tool") in tool_names and isinstance(direct.get("args", {}), dict):
         plan.direct = {"tool": direct["tool"], "args": direct.get("args") or {}}
         plan.needs_tools = True
+    plan.remember = clean_facts(data.get("remember"), text)
     sid = data.get("skill_id")
     if isinstance(sid, int) and any(s.id == sid for s in skills):  # never trust an invented id
         plan.skill_id = sid

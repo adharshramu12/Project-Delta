@@ -46,6 +46,13 @@ async def extract_facts(router: ModelRouter, user_text: str, answer: str) -> lis
         facts = extract_json(resp.content).get("facts", [])
     except (LLMError, ValueError, AttributeError):
         return []
+    return clean_facts(facts, user_text)
+
+
+def clean_facts(facts: object, user_text: str) -> list[str]:
+    """Keep only short, lasting facts the user really said about themselves (max 3)."""
+    if not isinstance(facts, list):
+        return []
     return [f.strip() for f in facts
             if isinstance(f, str) and 3 < len(f.strip()) < 300
             and not ONE_OFF.search(f) and not ABOUT_DELTA.search(f)
