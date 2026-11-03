@@ -22,6 +22,8 @@ from delta.safety.policy import norm_path
 from delta.tools.base import Risk, Tool, ToolResult
 
 TEXT_LIMIT = 2_000_000  # files bigger than this are skipped by search (logs, databases)
+BINARY = {".pptx", ".ppt", ".pdf", ".docx", ".xlsx", ".zip", ".jpg", ".jpeg", ".png", ".mp4", ".mp3",
+          ".exe", ".msi", ".iso"}
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "AppData", "$Recycle.Bin"}
 
 
@@ -35,7 +37,8 @@ class SearchArgs(BaseModel):
 
 class SearchFiles(Tool[SearchArgs]):
     name = "search_files"
-    description = ("Find text inside files under a folder (like grep): returns file:line: matching line. "
+    description = ("Find files by name, and text inside files, under a folder (like grep): returns file:line: "
+                   "matching line, or the file itself when its name matches (PPT, PDF, photos). "
                    "Use it to locate notes, documents or code by content before opening them.")
     risk = Risk.READ
     Args = SearchArgs
@@ -59,8 +62,12 @@ class SearchFiles(Tool[SearchArgs]):
             p for p in root.rglob(args.glob) if p.is_file() and not SKIP_DIRS & set(p.parts))
         scanned = 0
         for f in files:
+            if rx.search(f.name):  # PPTs, PDFs, photos: found by name even though they are not text
+                hits.append(f"{f}  (file name matches)")
+                if len(hits) >= args.max_results:
+                    break
             try:
-                if f.stat().st_size > TEXT_LIMIT:
+                if f.stat().st_size > TEXT_LIMIT or f.suffix.lower() in BINARY:
                     continue
                 text = f.read_text(encoding="utf-8", errors="ignore")
             except OSError:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -73,3 +74,7 @@ class TaskResult:
     fast: bool = False  # finished by the planner's one direct tool call
     options: list[str] = field(default_factory=list)  # needs_user: quick answers the user can tap
     asked_about: str = ""  # needs_user: the original request, so an answer can continue it
+
+
+# The request being worked on, for tools that answer to whoever asked (send_file -> their chat).
+CURRENT_REQUEST: ContextVar[TaskRequest | None] = ContextVar("current_request", default=None)

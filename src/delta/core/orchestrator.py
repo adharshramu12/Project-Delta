@@ -18,7 +18,7 @@ from delta.core.intents import match_intent, small_talk
 from delta.core.planner import make_plan
 from delta.core.proof import ProofRecorder
 from delta.core.replay import Recipe, fill, match_slots
-from delta.core.state import Plan, StepRecord, TaskRequest, TaskResult, Verification
+from delta.core.state import CURRENT_REQUEST, Plan, StepRecord, TaskRequest, TaskResult, Verification
 from delta.core.verifier import verify
 from delta.learning.corrections import learn_corrections, standing_instructions
 from delta.learning.store import LearningStore
@@ -49,6 +49,8 @@ Rules:
 - Independent read-only calls (several reads, a search plus a file check) go together in ONE reply.
 - Files and folders: list_dir (sizes, sort, limit, recursive), path_info, read_file answer most
   questions in one call. search_files finds text inside files; edit_file changes one exact part.
+- The user may be away, writing from their phone: "send me <file>" means find it (search_files/list_dir)
+  and send_file it to them; a folder is zipped. Say what you sent.
 - run_python does in ONE step what would take many: maths, bulk renames, CSV/Excel/JSON work. Prefer
   it (or run_shell) over long chains of small actions.
 - Prefer the simplest tool. Read before you write. After changing something, check it
@@ -256,6 +258,7 @@ class Orchestrator:
         if self.proof:
             self.proof.start(req.id, req.text)
         self.router.reset_meter()
+        current = CURRENT_REQUEST.set(req)
         try:
             result = await self._run(req)
         except LLMError as e:
@@ -268,6 +271,7 @@ class Orchestrator:
             await self.events.publish("task.finished", task_id=req.id, status="cancelled", answer="Stopped.")
             raise
         finally:
+            CURRENT_REQUEST.reset(current)
             self.executor.forget_task(req.id)
             await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
         result.tokens = dict(self.router.meter)
@@ -550,6 +554,8 @@ class Orchestrator:
         if not wanted:
             return specs
         keep = set(wanted) | ALWAYS_TOOLS
+        if (req := CURRENT_REQUEST.get()) and req.channel in ("telegram", "slack"):
+            keep |= {"send_file", "search_files"}  # away from the PC: "send me that file" must always work
         if set(wanted) & BROWSER_TOOLS or WEBSITE.search(request):  # not ALWAYS_TOOLS' browser_read
             keep |= BROWSER_TOOLS
         if set(wanted) & SCREEN_TOOLS:

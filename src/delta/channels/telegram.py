@@ -14,6 +14,7 @@ import contextlib
 import secrets
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from delta.bootstrap import Container
@@ -75,6 +76,15 @@ class TelegramChannel:
                 ("mode", "Permission level"), ("stop", "Stop the running task"),
                 ("status", "PC health and AIs"), ("help", "What I can do")])
         log.info("telegram.started", bot=self.bot_name)
+
+    async def send_file(self, user: str, path: Path, caption: str = "") -> None:
+        """A file from this PC into the user's chat. Photos show inline; everything else is a document
+        (full quality, any type)."""
+        with path.open("rb") as f:
+            if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"} and path.stat().st_size < 10e6:
+                await self.app.bot.send_photo(int(user), f, caption=caption[:1000])
+            else:
+                await self.app.bot.send_document(int(user), f, filename=path.name, caption=caption[:1000])
 
     async def reply(self, update: Any, text: str, **kw: Any) -> None:
         """Formatted (bold, code, links); plain text if Telegram rejects the markup."""

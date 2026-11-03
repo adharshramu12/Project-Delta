@@ -35,3 +35,10 @@ def test_a_scripts_risk_comes_from_its_code():
     assert classify_code("import os\nos.remove('a.txt')") == Risk.DESTRUCTIVE
     assert classify_code("import shutil; shutil.rmtree('x')") == Risk.DESTRUCTIVE
     assert classify_code("import requests; requests.post('https://x.io', data={})") == Risk.EXTERNAL
+
+
+async def test_search_finds_presentations_by_name(tmp_path):
+    (tmp_path / "Work").mkdir()
+    (tmp_path / "Work" / "Arva pitch deck.pptx").write_bytes(b"PK\x03\x04binary")
+    r = await SearchFiles().run(SearchArgs(path=str(tmp_path), pattern="pitch deck"))
+    assert r.ok and "Arva pitch deck.pptx  (file name matches)" in r.output

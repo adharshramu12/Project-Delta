@@ -34,6 +34,7 @@ from delta.system.lifecycle import Lifecycle
 from delta.system.logging import log
 from delta.system.secrets import get_secret
 from delta.tools.apps import app_tools
+from delta.tools.deliver import SendFile
 from delta.tools.filesystem import filesystem_tools
 from delta.tools.media import media_tools
 from delta.tools.meetings import meeting_tools
@@ -183,8 +184,10 @@ def build(settings: Settings) -> Container:
     approvals = ApprovalBroker(settings.agent.approval_timeout_s)
 
     chats = ChatSessions(router, events, audit)
+    live_channels: dict[str, Any] = {}
     registry = ToolRegistry([
         *filesystem_tools(),
+        SendFile(live_channels),
         *power_tools(),
         RunShell(),
         *app_tools(settings.apps),
@@ -244,4 +247,5 @@ def build(settings: Settings) -> Container:
 
     governor.on_change(on_health)
     return Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
-                     Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"))
+                     Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"),
+                     live_channels=live_channels)
