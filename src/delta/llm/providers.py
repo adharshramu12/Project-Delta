@@ -142,6 +142,30 @@ class OpenAICompatProvider:
         self._api_key = None
         self._key_checked_at = -1e9
         self._client_obj = None
+        self._models_cache = None
+
+    _models_cache: tuple[float, list[dict]] | None = None
+    NOT_CHAT = ("whisper", "guard", "embed", "orpheus", "reward", "safety", "parse", "tts", "rerank",
+                "speech", "vision-only", "clip")
+
+    def model_options(self) -> list[dict]:
+        """The service's own list of chat models right now (Groq, NVIDIA, LM Studio...), cached for an
+        hour: users pick from what really exists, not from a list that went stale."""
+        import httpx
+
+        if self._models_cache and time.monotonic() - self._models_cache[0] < 3600:
+            return self._models_cache[1]
+        headers = {"Authorization": f"Bearer {key}"} if (key := self._key()) else {}
+        try:
+            data = httpx.get(f"{self.cfg.base_url.rstrip('/')}/models", headers=headers, timeout=10).json()
+        except (httpx.HTTPError, ValueError):
+            return []
+        ids = sorted({str(m["id"]) for m in data.get("data", []) if isinstance(m, dict) and m.get("id")
+                      and m.get("active", True)})
+        opts = [{"id": i, "label": i.split("/")[-1], "efforts": []} for i in ids
+                if not any(w in i.lower() for w in self.NOT_CHAT)]
+        self._models_cache = (time.monotonic(), opts)
+        return opts
 
     def ping(self) -> bool:
         """Is anything answering at base_url? Cached for 30 s (status screens call this often)."""

@@ -62,6 +62,30 @@ def set_autonomy(c: Container, level: str, by: str) -> str:
     return LEVELS[level]
 
 
+def key_status() -> list[dict[str, str]]:
+    """Each AI/search key Delta knows: name, label, masked value (never the key itself)."""
+    from delta.setup.checks import KEY_INFO
+    from delta.system.secrets import get_secret, mask
+
+    return [{"name": n, "label": label, "masked": mask(get_secret(n))} for n, label in KEY_INFO.items()]
+
+
+async def replace_key(c: Container, name: str, value: str, by: str) -> tuple[bool, str]:
+    """Test a new key with its service first; only a working key replaces the old one. Takes effect now."""
+    from delta.setup.checks import KEY_INFO, validate_key
+    from delta.system.secrets import mask, set_secret
+
+    if name not in KEY_INFO:
+        return False, f"unknown key '{name}'"
+    ok, message = await validate_key(name, value.strip())
+    if not ok:
+        return False, f"That key didn't work ({message}). Your old key is unchanged."
+    set_secret(name, value.strip())
+    c.router.refresh()  # used from the next call on, no restart
+    c.audit.record("keys.replaced", name=name, by=by)  # which key, never its value
+    return True, f"{KEY_INFO[name]}: new key works and is in use now ({mask(value.strip())})."
+
+
 def stop_running(c: Container, by: str) -> bool:
     """Cancel the task Delta is working on now (from any channel). False if nothing is running."""
     task = c.running

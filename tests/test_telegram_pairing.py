@@ -183,3 +183,45 @@ async def test_a_question_arrives_with_buttons_and_a_tap_answers_it(tmp_path):
     assert asked[1].text == "daddy birthday 2025.png"
     assert "send me the daddy image" in asked[1].history and "Which daddy photo?" in asked[1].history
     assert sent[-1][0].startswith("Sent daddy birthday 2025.png")
+
+
+async def test_replacing_a_key_from_the_phone(tmp_path, monkeypatch):
+    """Credits ran out: tap Replace, send the new key; it is deleted from the chat, tested, then used."""
+    import delta.setup.checks as checks
+    import delta.system.secrets as secrets
+
+    ch, c = controlled(tmp_path)
+    store = {"groq_api_key": "gsk_OLD_working_key"}
+    refreshed = []
+    c.router.refresh = lambda: refreshed.append(True)
+    monkeypatch.setattr(secrets, "set_secret", lambda n, v: store.__setitem__(n, v))
+    monkeypatch.setattr(secrets, "get_secret", lambda n: store.get(n))
+
+    async def validate(name, value):
+        return (value.startswith("gsk_GOOD"), "rejected by Groq")
+
+    monkeypatch.setattr(checks, "validate_key", validate)
+    said, deleted = [], []
+
+    class Chat:
+        async def send_message(self, text):
+            said.append(text)
+
+    def msg(text):
+        async def delete():
+            deleted.append(text)
+        return SimpleNamespace(text=text, delete=delete, chat=Chat())
+
+    async def say(text):
+        said.append(text)
+
+    await ch._apply(say, "key", "groq_api_key", 5)
+    assert await ch._take_key(SimpleNamespace(message=msg("gsk_BAD_typo")), "5")
+    assert store["groq_api_key"] == "gsk_OLD_working_key" and "unchanged" in said[-1]  # bad key: old one kept
+
+    await ch._apply(say, "key", "groq_api_key", 5)
+    assert await ch._take_key(SimpleNamespace(message=msg("gsk_GOOD_new_key_123")), "5")
+    assert store["groq_api_key"] == "gsk_GOOD_new_key_123" and refreshed and said[-1].startswith("✅")
+    assert deleted == ["gsk_BAD_typo", "gsk_GOOD_new_key_123"]  # neither stays in the chat
+    assert "gsk_GOOD_new_key_123" not in said[-1]  # only a masked form is ever shown
+    assert not await ch._take_key(SimpleNamespace(message=msg("hello")), "5")  # normal messages are not keys

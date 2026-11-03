@@ -30,6 +30,7 @@ HELP = (
     "/ai - see or switch the main AI\n"
     "/model - pick the model for the main AI\n"
     "/mode - permission level (Careful, Balanced, Trusted, Autopilot)\n"
+    "/keys - replace an API key (when credits or limits run out)\n"
     "/stop - stop what I'm doing now\n"
     "/status - PC health and AIs available\n"
     "/help - this list\n\n"
@@ -49,6 +50,7 @@ class TelegramChannel:
         self._code: tuple[str, float] | None = None  # (pairing code, expires at)
         self.bot_name = ""
         self._choices: dict[str, list[str]] = {}  # the choices last offered to each user (tap buttons)
+        self._awaiting_key: dict[str, tuple[str, float]] = {}  # user -> (key name, until) after /keys
         # concurrent_updates: an approval button must work while a long task is still running
         self.app = Application.builder().token(token).concurrent_updates(True).build()
         self.app.add_handler(CommandHandler("start", self._start_cmd))
@@ -58,6 +60,7 @@ class TelegramChannel:
         self.app.add_handler(CommandHandler("model", self._model_cmd))
         self.app.add_handler(CommandHandler("mode", self._mode_cmd))
         self.app.add_handler(CommandHandler("stop", self._stop_cmd))
+        self.app.add_handler(CommandHandler("keys", self._keys_cmd))
         self.app.add_handler(CallbackQueryHandler(self._on_control, pattern=r"^ctl:"))
         self.app.add_handler(CallbackQueryHandler(self._on_answer, pattern=r"^ans:"))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message))
@@ -77,7 +80,7 @@ class TelegramChannel:
         with contextlib.suppress(Exception):  # the "/" menu in the chat
             await self.app.bot.set_my_commands([
                 ("ai", "See or switch the main AI"), ("model", "Pick the model"),
-                ("mode", "Permission level"), ("stop", "Stop the running task"),
+                ("mode", "Permission level"), ("keys", "Replace an API key"), ("stop", "Stop the running task"),
                 ("status", "PC health and AIs"), ("help", "What I can do")])
         log.info("telegram.started", bot=self.bot_name)
 
@@ -208,6 +211,10 @@ class TelegramChannel:
                 await say(f"✅ {self.c.router.preferred} now uses {value}.")
             elif kind == "mode":
                 await say(f"✅ Permission level: {set_autonomy(self.c, value, by)}.")
+            elif kind == "key":
+                self._awaiting_key[str(uid)] = (value, time.monotonic() + 300)
+                await say("Send the new key as your next message (within 5 minutes). I'll delete it from this "
+                          "chat right after reading it, test it, and keep your old key if it doesn't work.")
         except ValueError as e:
             await say(f"✗ {e}")
 
@@ -234,7 +241,36 @@ class TelegramChannel:
             log.warning("telegram.rejected", user=user.id)
             await self._try_pair(update, update.message.text)
             return
+        if await self._take_key(update, str(user.id)):
+            return
         await self._run(update, str(user.id), update.message.text)
+
+    async def _keys_cmd(self, update: Any, ctx: Any) -> None:
+        if not is_allowed(update.effective_user.id, self.allowed):
+            return
+        from delta.control import key_status
+
+        keys = key_status()
+        lines = "\n".join(f"{k['label']}: {k['masked']}" for k in keys)
+        rows = [[(f"Replace {k['label'].split(' (')[0]}", f"ctl:key:{k['name']}")] for k in keys]
+        await update.message.reply_text(f"Your keys:\n{lines}\n\nTap one to replace it.",
+                                        reply_markup=self._buttons(rows))
+
+    async def _take_key(self, update: Any, uid: str) -> bool:
+        """The message right after 'Replace <key>' is the new key: delete it from the chat at once (a bot
+        chat is not end-to-end encrypted), test it, save it only if it works. True if it was a key."""
+        pending = self._awaiting_key.pop(uid, None)
+        if not pending or time.monotonic() > pending[1]:
+            return False
+        from delta.control import replace_key
+
+        value = (update.message.text or "").strip()
+        with contextlib.suppress(Exception):
+            await update.message.delete()
+        ok, message = await replace_key(self.c, pending[0], value, by=f"telegram:{uid}")
+        await update.message.chat.send_message(("\u2705 " if ok else "\u2717 ") + message
+                                               + ("\n(I deleted your message so the key does not stay in this chat.)"))
+        return True
 
     async def _on_voice(self, update: Any, ctx: Any) -> None:
         """A voice note: turned into text, shown back (so a mishearing is visible), then done like a typed
