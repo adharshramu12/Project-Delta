@@ -155,6 +155,16 @@ def compact_history(messages: list[Message], budget: int, keep_last: int = 2) ->
             over = size() - budget
 
 
+# Said when the request comes from a phone: the user cannot see this PC, so opening a picture or file on
+# its screen (a screenshot typed into the Run box) helps nobody. Results go into their chat.
+REMOTE_CHANNELS = {"telegram", "slack"}
+REMOTE_NOTE = """
+
+THE USER IS NOT AT THIS PC: they are writing from their phone in {channel} and cannot see its screen.
+- Never open files, pictures or windows on the PC for them to look at.
+- Pictures and files they ask for go to them with send_file (take_screenshot and camera_photo already
+  send what they take). Answers go in your final reply, in short, plain words for a phone screen."""
+
 DONE, NEED_USER = "DONE:", "NEED_USER:"
 
 
@@ -477,6 +487,8 @@ class Orchestrator:
             criteria="\n".join(f"- {c}" for c in plan.success_criteria), memory=memory_ctx or "(nothing yet)",
             skill=(f"\nFOLLOW LEARNED SKILL #{skill.id} ({skill.name}), adapting it to this request:\n"
                    + "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(skill.procedure)) + "\n") if skill else "")
+        if req.channel in REMOTE_CHANNELS:
+            system += REMOTE_NOTE.format(channel=req.channel.title())
         return [{"role": "system", "content": system}, {"role": "user", "content": req.with_context}]
 
     def _brain(self) -> str:

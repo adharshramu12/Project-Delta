@@ -192,7 +192,7 @@ def build(settings: Settings) -> Container:
         *filesystem_tools(),
         send_file,
         *power_tools(),
-        *pc_tools(),
+        *pc_tools(send_file),
         RunShell(),
         *app_tools(settings.apps),
         *media_tools(),

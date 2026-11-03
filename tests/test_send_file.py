@@ -68,3 +68,28 @@ async def test_asked_on_the_pc_it_just_says_where_it_is(tmp_path):
     finally:
         CURRENT_REQUEST.reset(token)
     assert r.ok and not r.evidence["delivered"] and str(f) in r.output
+
+
+async def test_a_screenshot_asked_from_the_phone_arrives_in_the_chat(tmp_path, monkeypatch):
+    """It used to open the screenshot on the PC (typed into the Run box) for a user who was not there."""
+    from delta.system import pc_control
+    from delta.tools.pc import TakeScreenshot
+
+    shot = tmp_path / "screen.jpg"
+    monkeypatch.setattr(pc_control, "screenshot", lambda: (shot.write_bytes(b"jpg"), shot)[1])
+    tg = FakeTelegram()
+    tool = TakeScreenshot()
+    tool.deliver = SendFile({"telegram": tg})
+    token = asked_from("telegram")
+    try:
+        r = await tool.run(tool.Args())
+    finally:
+        CURRENT_REQUEST.reset(token)
+    assert r.ok and r.evidence["delivered"] and tg.sent[0][2] == "Screen right now" and not shot.exists()
+
+
+def test_a_phone_request_tells_the_agent_the_user_cannot_see_the_pc():
+    from delta.core.orchestrator import REMOTE_CHANNELS, REMOTE_NOTE
+
+    assert "telegram" in REMOTE_CHANNELS and "cannot see its screen" in REMOTE_NOTE
+    assert "Never open files" in REMOTE_NOTE.format(channel="Telegram")
