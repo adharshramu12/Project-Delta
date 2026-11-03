@@ -458,7 +458,8 @@ class Orchestrator:
         own result (evidence["verified"], e.g. Windows says the song is PLAYING), that IS the
         verification: no agent loop, no screenshots, no checker call. Otherwise fall back to the
         normal loop, which starts with this step already done."""
-        tool, args = plan.direct["tool"], plan.direct.get("args", {})  # type: ignore[index]
+        direct = plan.direct or {}
+        tool, args = direct["tool"], direct.get("args", {})
         await self.events.publish("task.step", task_id=req.id, tool=tool, args=args)
         result = await self.executor.execute(tool, args, task_id=req.id)
         steps.append(StepRecord(tool, args, result.ok, result.output[:2000], result.evidence))
@@ -520,6 +521,7 @@ class Orchestrator:
             shot, target = await self._screenshot(proof_target(steps or []) or "", OBSERVE_WIDTH, "after " + tool)
             if shot:
                 return "screenshot", f"(screenshot of {target} attached below)", {"window": target}, shot
+        args: dict[str, Any]
         if tool in BROWSER_ACTIONS and "browser_read" in names:
             # Read the part of the page the task is about: unfocused, the answer can fall past the cut
             # and the agent ends up answering from a search snippet the checker rejects (3 extra calls).
@@ -531,7 +533,7 @@ class Orchestrator:
         elif tool in DESKTOP_ACTIONS and "read_window" in names:
             # Typed text sits deep in the control tree (e.g. Notepad's editor): read far enough to show it.
             observer = "read_window"
-            args: dict[str, Any] = {"depth": 10 if tool in TEXT_ACTIONS else 5}
+            args = {"depth": 10 if tool in TEXT_ACTIONS else 5}
             if window := (evidence or {}).get("window"):  # e.g. the window open_app just opened and focused
                 args["window"] = window
         else:

@@ -19,6 +19,7 @@ import re
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field, field_validator
@@ -813,7 +814,7 @@ class DoActions(_DesktopTool[ActionsArgs]):
         last = len(args.steps) - 1
         for i, s in enumerate(args.steps):
             # Short pauses inside the batch, the full settle only before the screen is shown.
-            r = await self._act(lambda s=s: _run_step(s), settle=0.4 if i == last else 0.12)
+            r = await self._act(partial(_run_step, s), settle=0.4 if i == last else 0.12)
             if not r.ok:
                 ran = "; ".join(done) or "nothing"
                 return ToolResult(False, f"stopped at step {i + 1} ({s.action}): {r.output}. Done before: {ran}")

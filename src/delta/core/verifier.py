@@ -70,7 +70,7 @@ async def verify(router: ModelRouter, request: str, plan: Plan, steps: list[Step
     # The per-checkpoint verdicts decide; the overall flag only counts when there are none. Models
     # sometimes write "all checkpoints are supported" and still set passed=false (or the reverse).
     passed = all(c["met"] for c in checks) if checks else _yes(data.get("passed"))
-    return Verification(passed, str(data.get("reason", "")), [c["checkpoint"] for c in checks if not c["met"]],
+    return Verification(passed, str(data.get("reason", "")), [str(c["checkpoint"]) for c in checks if not c["met"]],
                         checks, see, raw=resp.content[:2000])
 
 

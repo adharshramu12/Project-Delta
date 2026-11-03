@@ -14,6 +14,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from builtins import list as List  # the class has a list() method that hides the builtin
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -92,7 +93,7 @@ class ChatStore:
         return self._chats("WHERE c.title LIKE ? OR EXISTS (SELECT 1 FROM chat_messages m2 "
                            "WHERE m2.chat_id = c.id AND m2.text LIKE ?)", (like, like), limit)
 
-    def _chats(self, where: str, args: tuple[Any, ...], limit: int = 200) -> list[Chat]:
+    def _chats(self, where: str, args: tuple[Any, ...], limit: int = 200) -> List[Chat]:
         sql = (f"SELECT c.*, (SELECT text FROM chat_messages m WHERE m.chat_id = c.id ORDER BY m.id DESC LIMIT 1)"
                f" AS preview, (SELECT COUNT(*) FROM chat_messages m WHERE m.chat_id = c.id) AS count"
                f" FROM chats c {where} ORDER BY c.pinned DESC, c.updated DESC,"
@@ -127,7 +128,7 @@ class ChatStore:
                                  (title_from(text), chat_id, NEW_TITLE))
         return int(cur.lastrowid or 0)
 
-    def messages(self, chat_id: str, limit: int = 500) -> list[dict[str, Any]]:
+    def messages(self, chat_id: str, limit: int = 500) -> List[dict[str, Any]]:
         with self._lock:
             rows = self._db.execute("SELECT * FROM (SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY id DESC"
                                     " LIMIT ?) ORDER BY id", (chat_id, limit)).fetchall()

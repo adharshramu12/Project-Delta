@@ -38,6 +38,7 @@ async def test_problems_are_explained_in_plain_words(monkeypatch):
 
 
 async def test_telegram_voice_note_is_shown_back_then_done(monkeypatch):
+    pytest.importorskip("telegram")
     from delta.channels import telegram as tg_mod
 
     ch = tg_mod.TelegramChannel(SimpleNamespace(audit=SimpleNamespace(record=lambda *a, **k: None)),
