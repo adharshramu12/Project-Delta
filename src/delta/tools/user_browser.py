@@ -52,6 +52,9 @@ KNOWN = {  # registry ProgId prefix -> (name, process, install paths)
     "MSEdge": ("edge", "msedge.exe", [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
                                       r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"]),
 }
+# Menu items in web apps (ChatGPT's "+" menu, Gemini's Tools) only react to a real pointer: UIA Invoke
+# reports success and nothing happens. These get a real mouse click on Delta's own window, in front.
+POINTER_ONLY = {"MenuItem", "ListItem", "RadioButton", "CheckBox"}
 CLICKABLE = {"Hyperlink", "Button", "MenuItem", "CheckBox", "RadioButton", "TabItem", "ListItem", "SplitButton"}
 FIELDS = {"Edit", "ComboBox"}
 READ_TYPES = {"Hyperlink": "link", "Button": "button", "Edit": "field", "ComboBox": "field", "CheckBox": "checkbox",
@@ -332,6 +335,8 @@ class UserBrowser:
             raise LookupError(f"Nothing called '{text}' on the page; use browser_read to see what is there.")
         old = self._url(w)
         try:
+            if el.element_info.control_type in POINTER_ONLY:
+                raise RuntimeError("web menus ignore an accessibility click")
             el.invoke()  # accessibility click: no mouse, works in the background
         except Exception:
             self.ctl.guard()

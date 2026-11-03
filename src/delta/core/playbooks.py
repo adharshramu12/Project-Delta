@@ -30,9 +30,10 @@ PLAYBOOK: DEEP RESEARCH IN THE USER'S CHATGPT OR GEMINI
      open questions; concrete recommendations; full source list.
    Written in the user's language, specific to their request, no filler.
 3. Open the app in the user's own browser (signed in with any account is fine):
-   ChatGPT: https://chatgpt.com/      Gemini: https://gemini.google.com/app
+   ChatGPT: https://chatgpt.com/?hints=research      Gemini: https://gemini.google.com/app
    If the user named neither, use ChatGPT. If the page asks to sign in, stop and tell the user.
-4. Turn on Deep Research: ChatGPT: the tools / "+" menu of the message box -> "Deep research".
+4. Turn on Deep Research: ChatGPT: open https://chatgpt.com/?hints=research (Deep research already on;
+   check a "Deep research" chip shows by the message box), else the "+" menu -> "Deep research".
    Gemini: the Tools (or mode) menu -> "Deep Research". Read the page to find the current names; they change.
 5. Put the whole brief in the message box with browser_fill (one step, not typed key by key) and send it.
    Gemini first shows a research plan: click "Start research".
