@@ -25,8 +25,12 @@ class Sensor(Protocol):
 class SystemSensor:
     """psutil + NVML (nvidia-ml-py). Every reading is best-effort; missing sensors are None."""
 
-    def __init__(self) -> None:
+    def __init__(self, watch_gpu: bool = True) -> None:
         self._nvml_handle = None
+        self._nvml = None
+        if not watch_gpu:  # only local models use the GPU; opening the driver keeps a laptop dGPU awake
+            psutil.cpu_percent(None)
+            return
         try:
             import pynvml
 
@@ -78,9 +82,9 @@ HealthListener = Callable[[Assessment], Awaitable[None]]
 
 
 class Governor:
-    def __init__(self, cfg: GovernorConfig, sensor: Sensor | None = None) -> None:
+    def __init__(self, cfg: GovernorConfig, sensor: Sensor | None = None, watch_gpu: bool = True) -> None:
         self.cfg = cfg
-        self.sensor = sensor or SystemSensor()
+        self.sensor = sensor or SystemSensor(watch_gpu)
         self.snapshot = Snapshot()
         self.assessment = Assessment(Health.NORMAL)
         self._listeners: list[HealthListener] = []
