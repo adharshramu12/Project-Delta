@@ -41,6 +41,8 @@ job needs several steps or looking at the screen.
 DEEP RESEARCH ("deep research ...", "research ... in ChatGPT/Gemini") is a TOOL task, never answered from
 memory: the agent asks what it needs, writes an expert brief and starts Deep Research in the user's own
 ChatGPT or Gemini in the browser (tools: browser_open, browser_read, browser_click, browser_fill).
+Its checkpoints end at "the brief is sent and the app is answering or researching" (Stop button, Researching,
+a reply appearing); the finished report is never a checkpoint, it takes up to 30 minutes.
 
 WEBSITES and web apps (NotebookLM, Gmail, YouTube, any URL), even when the user says "open Chrome":
 plan browser_open/browser_read/browser_click/browser_fill, which read the page as text and click by
