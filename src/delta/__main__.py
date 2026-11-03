@@ -49,6 +49,19 @@ async def _cli() -> int:
     return 0
 
 
+def _update() -> int:
+    """Newest version over the installed one (data untouched): the installer again, from GitHub."""
+    import subprocess
+
+    root = Path(__file__).resolve().parents[2]
+    if (root / ".git").exists():
+        print("This is a developer checkout: update it with 'git pull', then 'uv sync --extra all'.")
+        return 1
+    script = root / "scripts" / "install.ps1"
+    return subprocess.call(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                            "-FromGitHub", "-InstallDir", str(root), "-NoLaunch"])
+
+
 def _doctor() -> int:
     from delta.system.governor import SystemSensor
 
@@ -156,10 +169,13 @@ def main() -> None:
     sp.add_argument("name", nargs="?")
     ap = sub.add_parser("audit", help="audit log tools")
     ap.add_argument("action", choices=["verify"])
+    sub.add_parser("update", help="update Delta to the newest version (keeps your data)")
     args = parser.parse_args()
 
     if args.cmd == "doctor":
         sys.exit(_doctor())
+    if args.cmd == "update":
+        sys.exit(_update())
     if args.cmd == "secrets":
         sys.exit(_secrets(args.action, args.name))
     if args.cmd == "audit":

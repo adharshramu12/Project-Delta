@@ -44,7 +44,21 @@ asks before anything risky, and **verifies every task before it says "done".**
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Quick start (Windows 11)
+## Install (Windows 10/11): one step
+
+**Double-click `Install Delta.cmd`** in the Delta folder (or in the zip someone shared with you).
+Or, from PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/adharshramu12/Project-Delta/main/scripts/install.ps1 | iex
+```
+
+It installs the official Python 3.12 if needed, sets Delta up in `%LOCALAPPDATA%\Programs\Delta`,
+adds a **Delta** icon to your Desktop and Start menu, and opens Delta's setup wizard (AI sign-in,
+permissions, Telegram). Run it again to repair. `delta update` gets the newest version;
+`scripts\uninstall.ps1` removes Delta (your chats and memory stay unless you add `-RemoveData`).
+
+## Developer setup
 
 ```powershell
 # 1. tools
