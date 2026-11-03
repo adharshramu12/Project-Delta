@@ -19,6 +19,7 @@ from typing import Any
 
 from delta.bootstrap import Container
 from delta.channels.base import approval_text, chunks, is_allowed, result_text, to_html
+from delta.channels.pc_menu import PCMenu
 from delta.core.state import TaskRequest
 from delta.safety.approvals import ApprovalRequest
 from delta.system.logging import log
@@ -30,7 +31,13 @@ HELP = (
     "/ai - see or switch the main AI\n"
     "/model - pick the model for the main AI\n"
     "/mode - permission level (Careful, Balanced, Trusted, Autopilot)\n"
-    "/keys - replace an API key (when credits or limits run out)\n"
+    "/keys - replace an API key (when credits or limits run out)\n\n"
+    "<b>Your PC</b>:\n"
+    "/volume - mute, louder, quieter (or /volume 30)\n"
+    "/brightness - screen brightness (laptop screens)\n"
+    "/apps - what is open, tap to close it\n"
+    "/screen - a screenshot of the PC now\n"
+    "/camera - a photo from the webcam of whoever is at the PC\n\n"
     "/stop - stop what I'm doing now\n"
     "/status - PC health and AIs available\n"
     "/help - this list\n\n"
@@ -38,7 +45,7 @@ HELP = (
 )
 
 
-class TelegramChannel:
+class TelegramChannel(PCMenu):
     name = "telegram"
 
     def __init__(self, c: Container, token: str, allowed: list[str]) -> None:
@@ -51,6 +58,7 @@ class TelegramChannel:
         self.bot_name = ""
         self._choices: dict[str, list[str]] = {}  # the choices last offered to each user (tap buttons)
         self._awaiting_key: dict[str, tuple[str, float]] = {}  # user -> (key name, until) after /keys
+        self._pc_init()
         # concurrent_updates: an approval button must work while a long task is still running
         self.app = Application.builder().token(token).concurrent_updates(True).build()
         self.app.add_handler(CommandHandler("start", self._start_cmd))
@@ -61,6 +69,11 @@ class TelegramChannel:
         self.app.add_handler(CommandHandler("mode", self._mode_cmd))
         self.app.add_handler(CommandHandler("stop", self._stop_cmd))
         self.app.add_handler(CommandHandler("keys", self._keys_cmd))
+        for name, handler in (("volume", self._volume_cmd), ("brightness", self._brightness_cmd),
+                              ("apps", self._apps_cmd), ("screen", self._screen_cmd),
+                              ("camera", self._camera_cmd)):
+            self.app.add_handler(CommandHandler(name, handler))
+        self.app.add_handler(CallbackQueryHandler(self._on_pc_button, pattern=r"^sys:"))
         self.app.add_handler(CallbackQueryHandler(self._on_control, pattern=r"^ctl:"))
         self.app.add_handler(CallbackQueryHandler(self._on_answer, pattern=r"^ans:"))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message))
@@ -81,6 +94,8 @@ class TelegramChannel:
             await self.app.bot.set_my_commands([
                 ("ai", "See or switch the main AI"), ("model", "Pick the model"),
                 ("mode", "Permission level"), ("keys", "Replace an API key"), ("stop", "Stop the running task"),
+                ("volume", "PC volume"), ("brightness", "Screen brightness"), ("apps", "Open apps, tap to close"),
+                ("screen", "Screenshot of the PC"), ("camera", "Webcam photo"),
                 ("status", "PC health and AIs"), ("help", "What I can do")])
         log.info("telegram.started", bot=self.bot_name)
 

@@ -38,6 +38,7 @@ from delta.tools.deliver import SendFile
 from delta.tools.filesystem import filesystem_tools
 from delta.tools.media import media_tools
 from delta.tools.meetings import meeting_tools
+from delta.tools.pc import pc_tools
 from delta.tools.power import power_tools
 from delta.tools.registry import ToolExecutor, ToolRegistry
 from delta.tools.shell import RunShell
@@ -189,6 +190,7 @@ def build(settings: Settings) -> Container:
         *filesystem_tools(),
         SendFile(live_channels),
         *power_tools(),
+        *pc_tools(),
         RunShell(),
         *app_tools(settings.apps),
         *media_tools(),
