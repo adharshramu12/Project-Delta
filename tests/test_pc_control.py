@@ -108,7 +108,8 @@ async def test_closing_apps_asks_only_when_work_could_be_lost(setup):
         shown.append((text, reply_markup))
 
     await ch._show_apps(say)
-    assert labels(shown[-1][1])[:2] == ["✖ chrome: Free Fire - YouTube - Google Chrome", "✖ Notepad: *notes.txt - Notepad"]
+    assert labels(shown[-1][1])[:2] == ["✖ chrome: Free Fire - YouTube - Google Chrome",
+                                        "✖ Notepad: *notes.txt - Notepad"]
 
     tap = await press(ch, "sys:close:0")  # a browser: nothing to lose, closes at once
     assert fake.closed == [(1, False)] and tap.edits[-1][0].startswith("✅ Closed chrome")
