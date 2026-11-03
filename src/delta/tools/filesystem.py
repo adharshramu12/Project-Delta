@@ -137,6 +137,9 @@ class WriteFile(Tool[WriteArgs]):
     def paths(self, args: WriteArgs) -> list[str]:
         return [args.path]
 
+    def undoable(self, args: WriteArgs) -> bool:
+        return True  # an overwritten file's old version goes to the Recycle Bin first
+
     def summary(self, args: WriteArgs) -> str:
         verb = "append to" if args.append else ("OVERWRITE" if norm_path(args.path).exists() else "create")
         return f"{verb} {args.path} ({len(args.content)} chars)"
@@ -144,6 +147,8 @@ class WriteFile(Tool[WriteArgs]):
     async def run(self, args: WriteArgs) -> ToolResult:
         p = norm_path(args.path)
         p.parent.mkdir(parents=True, exist_ok=True)
+        if p.is_file() and not args.append:
+            await asyncio.to_thread(_recycle, p)  # keep the old version: overwriting stays undoable
 
         def write() -> None:
             with p.open("a" if args.append else "w", encoding="utf-8") as f:
@@ -170,6 +175,9 @@ class MovePath(Tool[MoveArgs]):
     def paths(self, args: MoveArgs) -> list[str]:
         return [args.source, args.destination]
 
+    def undoable(self, args: MoveArgs) -> bool:
+        return True  # a file it replaces goes to the Recycle Bin first
+
     def summary(self, args: MoveArgs) -> str:
         return f"move {args.source} -> {args.destination}"
 
@@ -178,6 +186,8 @@ class MovePath(Tool[MoveArgs]):
         if not src.exists():
             return ToolResult(False, f"source not found: {src}")
         dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            await asyncio.to_thread(_recycle, dst)
         await asyncio.to_thread(shutil.move, str(src), str(dst))
         return ToolResult(True, f"moved to {dst}", {"source_exists": src.exists(), "destination": str(dst)})
 
@@ -210,6 +220,9 @@ class DeletePath(Tool[PathArgs]):
     def paths(self, args: PathArgs) -> list[str]:
         return [args.path]
 
+    def undoable(self, args: PathArgs) -> bool:
+        return True
+
     def summary(self, args: PathArgs) -> str:
         return f"move to Recycle Bin: {args.path}"
 
@@ -217,10 +230,14 @@ class DeletePath(Tool[PathArgs]):
         p = norm_path(args.path)
         if not p.exists():
             return ToolResult(False, f"not found: {p}")
-        from send2trash import send2trash  # loaded only when something is deleted
-
-        await asyncio.to_thread(send2trash, str(p))
+        await asyncio.to_thread(_recycle, p)
         return ToolResult(True, f"recycled {p}", {"path": str(p), "exists": Path(p).exists()})
+
+
+def _recycle(p: Path) -> None:
+    from send2trash import send2trash  # loaded only when something is deleted or replaced
+
+    send2trash(str(p))
 
 
 def filesystem_tools() -> list[Tool]:

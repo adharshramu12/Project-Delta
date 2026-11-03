@@ -208,11 +208,31 @@ def _make_telegram(c: Container) -> object:
     token = get_secret("telegram_bot_token")
     if not token:
         raise RuntimeError("no bot token: run `delta secrets set telegram_bot_token`")
-    if not cfg.allowed_user_ids:
-        raise RuntimeError("allowed_user_ids is empty in config/delta.yaml, so nobody could use the bot")
     from delta.channels.telegram import TelegramChannel
 
-    return TelegramChannel(c, token, cfg.allowed_user_ids)
+    # An empty allow-list is fine: nobody can use the bot until they pair with a code from the dashboard.
+    ch = TelegramChannel(c, token, cfg.allowed_user_ids)
+    ch.on_pair = lambda ids: save_telegram_users(c, ids)
+    return ch
+
+
+def save_telegram_users(c: Container, ids: list[str]) -> None:
+    from delta.config import ChannelConfig, write_user_settings
+
+    write_user_settings(c.settings.data_dir, {"channels": {"telegram": {"enabled": True, "allowed_user_ids": ids}}})
+    c.settings.channels["telegram"] = ChannelConfig(enabled=True, allowed_user_ids=list(ids))
+
+
+async def start_channel(c: Container, name: str) -> object:
+    """Start one channel now (e.g. Telegram right after its token is saved): no restart needed."""
+    if name in c.live_channels:
+        return c.live_channels[name]
+    factory, _ = CHANNELS[name]
+    channel = factory(c)
+    await asyncio.wait_for(channel.start(), 30)  # type: ignore[attr-defined]
+    c.lifecycle.on_shutdown(name, channel.stop)  # type: ignore[attr-defined]
+    c.live_channels[name] = channel
+    return channel
 
 
 def _make_slack(c: Container) -> object:
@@ -250,6 +270,7 @@ async def _start_channels(c: Container) -> list[object]:
             c.warn(f"{name.title()} could not start: {e}")
             continue
         c.lifecycle.on_shutdown(name, channel.stop)  # type: ignore[attr-defined]
+        c.live_channels[name] = channel
         ok.append(channel)
     return ok
 

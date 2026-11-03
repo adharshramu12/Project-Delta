@@ -309,7 +309,8 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
     <h3>Permission level</h3>
     <label class="choice"><input type="radio" name="s_autonomy" value="ask-everything"><b>Careful</b><small>Ask before anything except reading.</small></label>
     <label class="choice"><input type="radio" name="s_autonomy" value="ask-risky"><b>Balanced</b><small>Ask before changing or sending anything.</small></label>
-    <label class="choice"><input type="radio" name="s_autonomy" value="trusted"><b>Trusted</b><small>Also edit files in allowed folders without asking.</small></label>
+    <label class="choice"><input type="radio" name="s_autonomy" value="trusted"><b>Trusted</b><small>Don't ask about everyday work that can be undone: editing, replacing or deleting files in your folders (old versions go to the Recycle Bin), keys and commands. Still asks before sending anything to anyone.</small></label>
+    <label class="choice"><input type="radio" name="s_autonomy" value="autopilot"><b>Autopilot</b><small>Trusted, and also sends messages and emails without asking. Only permanent deletes still ask.</small></label>
     <label class="check"><input type="checkbox" id="s_quiet"> Quiet hours: only reading allowed between
       <input id="s_qstart" class="time" placeholder="23:30"> and <input id="s_qend" class="time" placeholder="07:00"></label>
     <h3>Browser</h3>
@@ -369,19 +370,23 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
       <p class="lead">Deleting files, sending messages and system changes always need your OK, whatever you pick here.</p>
       <label class="choice"><input type="radio" name="autonomy" value="ask-everything"><b>Careful</b><small>Ask before anything except reading. Best for your first days.</small></label>
       <label class="choice"><input type="radio" name="autonomy" value="ask-risky" checked><b>Balanced</b> <span class="tag">recommended</span><small>Open apps and read freely; ask before changing or sending anything.</small></label>
-      <label class="choice"><input type="radio" name="autonomy" value="trusted"><b>Trusted</b><small>Also create and edit files in your allowed folders without asking.</small></label>
+      <label class="choice"><input type="radio" name="autonomy" value="trusted"><b>Trusted</b><small>Don't ask about everyday work that can be undone (files go to the Recycle Bin). Still asks before sending anything.</small></label>
+      <label class="choice"><input type="radio" name="autonomy" value="autopilot"><b>Autopilot</b><small>Also sends messages and emails without asking.</small></label>
     </section>
     <section data-step="telegram">
       <h2>Talk to Delta from your phone <span class="tag">optional</span></h2>
       <p class="lead">Message Delta on Telegram and approve actions with a tap.</p>
       <ol class="small"><li>In Telegram, message <span class="mono">@BotFather</span>, send <span class="mono">/newbot</span>, copy the token.</li>
-        <li>Message <span class="mono">@userinfobot</span> to get your numeric user id.</li></ol>
+        <li>Paste it below and press <b>Check &amp; save</b>.</li>
+        <li>Press <b>Connect my phone</b> and send the code to your bot. That's it.</li></ol>
       <div class="keyrow" data-key="telegram_bot_token">
         <label><b>Bot token</b></label>
         <div class="kin"><input type="password" placeholder="123456:ABC…" autocomplete="off"><button>Check &amp; save</button></div>
         <div class="msg"></div>
       </div>
-      <label class="field">Your Telegram user id <small>(only these ids can control Delta)</small><input id="tgid" placeholder="e.g. 123456789" inputmode="numeric"></label>
+      <div class="row"><button id="tgpair" class="primary">Connect my phone</button></div>
+      <div id="tgcode" class="msg"></div>
+      <label class="field">Allowed Telegram user ids <small>(filled in when you connect; only these can control Delta)</small><input id="tgid" placeholder="filled in automatically" inputmode="numeric"></label>
       <label class="check"><input type="checkbox" id="tgon"> Turn on Telegram</label>
     </section>
     <section data-step="name">
@@ -917,6 +922,32 @@ for (const row of document.querySelectorAll(".keyrow")) {
     if (r.ok) { input.value = ""; if (row.dataset.key === "telegram_bot_token") $("tgon").checked = true; refreshStatus(); }
   };
 }
+// Telegram pairing: Delta shows a one-time code; sending it to the bot adds that phone. No user ids to look up.
+$("tgpair").onclick = async () => {
+  const out = $("tgcode"), btn = $("tgpair");
+  btn.disabled = true; out.className = "msg"; out.textContent = "Connecting to Telegram…";
+  const before = ((await api("/api/telegram").catch(() => ({}))).users || []).length;
+  const r = await api("/api/telegram/pair", {method: "POST"}).catch(e => ({detail: e.message}));
+  btn.disabled = false;
+  if (!r.code) { out.className = "msg bad"; out.textContent = "✗ " + (r.detail || "Could not connect."); return; }
+  out.innerHTML = "";
+  const big = document.createElement("div"); big.className = "mono"; big.style.fontSize = "28px";
+  big.style.letterSpacing = "6px"; big.textContent = r.code;
+  const how = document.createElement("div");
+  how.textContent = `On your phone, open @${r.bot} in Telegram and send this code (valid 10 minutes). `;
+  if (r.link) { const a = document.createElement("a"); a.href = r.link; a.target = "_blank";
+    a.textContent = "Or open it with the code filled in"; how.appendChild(a); }
+  out.append(big, how);
+  for (let i = 0; i < 300; i++) {  // up to 10 minutes
+    await new Promise(res => setTimeout(res, 2000));
+    const s = await api("/api/telegram").catch(() => null);
+    if (s && (s.users || []).length > before) {
+      out.className = "msg ok"; out.textContent = `✓ Connected. Message @${s.bot} from your phone; approvals arrive there too.`;
+      $("tgid").value = s.users.join(", "); $("tgon").checked = true; return;
+    }
+  }
+  out.className = "msg bad"; out.textContent = "The code expired. Press Connect my phone again.";
+};
 $("wback").onclick = () => showStep(step - 1);
 $("wnext").onclick = async () => {
   const name = STEPS[step];
@@ -931,7 +962,7 @@ $("wnext").onclick = async () => {
                   telegram_enabled: $("tgon").checked, telegram_user_ids: ids};
     const r = await api("/api/setup/complete", {method: "POST", body: JSON.stringify(body)}).catch(e => ({error: e.message}));
     if (!r.ok) { $("werr").textContent = "Could not save: " + (r.detail || r.error || "unknown error"); return; }
-    const level = {"ask-everything": "Careful", "ask-risky": "Balanced", "trusted": "Trusted"}[body.autonomy];
+    const level = {"ask-everything": "Careful", "ask-risky": "Balanced", "trusted": "Trusted", "autopilot": "Autopilot"}[body.autonomy];
     $("summary").textContent = `AI models ready: ${r.models_ready.join(", ") || "none"}\nPermission level: ${level}\n` +
       `Telegram: ${body.telegram_enabled ? "on" : "off"}` + (r.restart_needed ? "\n\n↻ Restart Delta (Shutdown, then open it again) to connect Telegram." : "");
   }

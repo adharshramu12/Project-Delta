@@ -26,7 +26,7 @@ class KeyIn(BaseModel):
 
 class SetupIn(BaseModel):
     owner_name: str = Field(default="", max_length=60)
-    autonomy: Literal["ask-everything", "ask-risky", "trusted"] = "ask-risky"
+    autonomy: Literal["ask-everything", "ask-risky", "trusted", "autopilot"] = "ask-risky"
     telegram_enabled: bool = False
     telegram_user_ids: list[str] = Field(default_factory=list)
 
@@ -62,6 +62,30 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
         c.warnings[:] = [w for w in c.warnings if "No AI model" not in w]
         c.audit.record("setup.key", name=body.name)  # never the value
         return {"ok": True, "message": message, "models_ready": c.router.usable()}
+
+    @app.get("/api/telegram", dependencies=[Depends(auth)])
+    async def telegram_status() -> dict[str, Any]:
+        ch = c.live_channels.get("telegram")
+        tg = c.settings.channels.get("telegram") or ChannelConfig()
+        return {"has_token": bool(get_secret("telegram_bot_token")), "connected": ch is not None,
+                "bot": getattr(ch, "bot_name", ""), "users": list(getattr(ch, "allowed", tg.allowed_user_ids))}
+
+    @app.post("/api/telegram/pair", dependencies=[Depends(auth)])
+    async def telegram_pair() -> dict[str, Any]:
+        """Connect the bot now (no restart) and show a one-time code to send it from the phone."""
+        from delta.daemon import start_channel
+
+        if not get_secret("telegram_bot_token"):
+            raise HTTPException(400, "Save your bot token from @BotFather first.")
+        try:
+            ch = await start_channel(c, "telegram")
+        except ImportError as e:
+            raise HTTPException(400, "Telegram support is not installed. Run: uv sync --extra channels") from e
+        except Exception as e:
+            raise HTTPException(400, f"Could not connect to Telegram: {e}. Check the bot token.") from e
+        code = ch.new_pairing_code()  # type: ignore[attr-defined]
+        bot = ch.bot_name  # type: ignore[attr-defined]
+        return {"code": code, "bot": bot, "link": f"https://t.me/{bot}?start={code}" if bot else ""}
 
     @app.post("/api/setup/complete", dependencies=[Depends(auth)])
     async def complete(body: SetupIn) -> dict[str, Any]:

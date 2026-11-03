@@ -43,6 +43,10 @@ class Tool[A: BaseModel](ABC):
     def paths(self, args: A) -> list[str]:
         return []
 
+    def undoable(self, args: A) -> bool:
+        """The change can be taken back (it goes to the Recycle Bin). Trusted runs these without asking."""
+        return False
+
     def domains(self, args: A) -> list[str]:
         return []
 

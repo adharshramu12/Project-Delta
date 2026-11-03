@@ -30,7 +30,7 @@ class QuietIn(BaseModel):
 
 
 class BoundariesIn(BaseModel):
-    autonomy: Literal["ask-everything", "ask-risky", "trusted"] | None = None
+    autonomy: Literal["ask-everything", "ask-risky", "trusted", "autopilot"] | None = None
     allowed_paths: list[str] | None = None
     denied_paths: list[str] | None = None
     denied_apps: list[str] | None = None

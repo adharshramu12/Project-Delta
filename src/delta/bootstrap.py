@@ -88,6 +88,7 @@ class Container:
     addon_infos: list[Any] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)  # setup problems shown to the user, not just logged
     chats: ChatStore | None = None  # separate conversations (dashboard sidebar)
+    live_channels: dict[str, Any] = field(default_factory=dict)  # running chat channels, by name
 
     def warn(self, message: str) -> None:
         if message not in self.warnings:

@@ -171,7 +171,7 @@ class QuietHours(BaseModel):
     end: str = "07:00"
 
 
-Autonomy = Literal["ask-everything", "ask-risky", "trusted"]
+Autonomy = Literal["ask-everything", "ask-risky", "trusted", "autopilot"]
 
 
 class Boundaries(BaseModel):

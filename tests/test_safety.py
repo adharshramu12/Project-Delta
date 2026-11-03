@@ -30,8 +30,45 @@ def test_trusted_writes_inside_allowed_only(tmp_path):
     outside = WriteArgs(path=str(tmp_path / "elsewhere/new.txt"), content="x")
     assert pe.evaluate(WriteFile(), inside).verdict == Verdict.ALLOW
     assert pe.evaluate(WriteFile(), outside).verdict == Verdict.ASK
-    # hard floor: delete still asks even when trusted
-    assert pe.evaluate(DeletePath(), PathArgs(path=str(tmp_path / "ok/new.txt"))).verdict == Verdict.ASK
+    # undoable (Recycle Bin) deletes no longer ask when trusted, but only inside allowed folders
+    assert pe.evaluate(DeletePath(), PathArgs(path=str(tmp_path / "ok/new.txt"))).verdict == Verdict.ALLOW
+    assert pe.evaluate(DeletePath(), PathArgs(path=str(tmp_path / "elsewhere/x.txt"))).verdict == Verdict.ASK
+
+
+def test_autonomy_levels_ask_only_where_promised(tmp_path):
+    """Users picked Trusted and still got approval prompts for everyday, undoable work."""
+    from delta.messaging.tools import SendArgs, SendMessage
+    from delta.tools.shell import RunShell, ShellArgs
+
+    existing = tmp_path / "ok" / "notes.txt"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("old")
+    overwrite = WriteArgs(path=str(existing), content="new")
+    hard_delete = ShellArgs(command=f"Remove-Item -Recurse -Force '{tmp_path / 'ok'}'")
+    plain_cmd = ShellArgs(command="New-Item -ItemType Directory build")
+    send = SendArgs.model_validate({"recipient": "Ravi", "app": "WhatsApp", "text": "hi"})
+    expect = {  # level: (overwrite, plain command, permanent delete, send a message)
+        "ask-risky": (Verdict.ASK, Verdict.ASK, Verdict.ASK, Verdict.ASK),
+        "trusted": (Verdict.ALLOW, Verdict.ALLOW, Verdict.ASK, Verdict.ASK),
+        "autopilot": (Verdict.ALLOW, Verdict.ALLOW, Verdict.ASK, Verdict.ALLOW),
+    }
+    for level, want in expect.items():
+        pe = engine(tmp_path, autonomy=level)
+        sender = SendMessage.__new__(SendMessage)
+        got = (pe.evaluate(WriteFile(), overwrite).verdict, pe.evaluate(RunShell(), plain_cmd).verdict,
+               pe.evaluate(RunShell(), hard_delete).verdict, pe.evaluate(sender, send).verdict)
+        assert got == want, level
+
+
+async def test_overwriting_keeps_the_old_version_in_the_recycle_bin(tmp_path, monkeypatch):
+    from delta.tools import filesystem
+
+    recycled = []
+    monkeypatch.setattr(filesystem, "_recycle", lambda p: (recycled.append(p), p.unlink()))
+    f = tmp_path / "a.txt"
+    f.write_text("old")
+    await WriteFile().run(WriteArgs(path=str(f), content="new"))
+    assert f.read_text() == "new" and recycled == [f]
 
 
 def test_denied_path_blocks_even_reads(tmp_path):
