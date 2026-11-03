@@ -360,7 +360,7 @@ class UserBrowser:
         if _focused_is_password():
             raise LookupError("REFUSED: that is a password field. Ask the user to type it.")
         _pg().hotkey("ctrl", "a")
-        _send_unicode(value)
+        _send_unicode(value, soft_newlines=True)  # only `submit` may send; a newline must not
         self.last_fill_was_search = bool(SEARCHY.search(f"{field} {el.element_info.name}"))
         old = self._url(w)
         if submit:

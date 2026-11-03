@@ -257,13 +257,17 @@ def _focused_text() -> str | None:
     return None
 
 
-def unicode_inputs(text: str) -> list[tuple[int, int, int]]:
+def unicode_inputs(text: str, soft_newlines: bool = False) -> list[tuple[int, int, int]]:
     """(vk, scan, flags) per key event. Characters go as KEYEVENTF_UNICODE so no keyboard layout,
-    modifier or IME can reinterpret them; newline/tab are real Enter/Tab keys."""
-    KEYUP, UNICODE = 0x0002, 0x0004
+    modifier or IME can reinterpret them; newline/tab are real Enter/Tab keys. soft_newlines makes a
+    newline Shift+Enter: in chat boxes (Gemini, ChatGPT) a plain Enter sends a half-typed message."""
+    KEYUP, UNICODE, SHIFT = 0x0002, 0x0004, 0x10
     special = {"\n": 0x0D, "\t": 0x09}
     events: list[tuple[int, int, int]] = []
     for ch in text.replace("\r\n", "\n"):
+        if ch == "\n" and soft_newlines:
+            events += [(SHIFT, 0, 0), (0x0D, 0, 0), (0x0D, 0, KEYUP), (SHIFT, 0, KEYUP)]
+            continue
         if ch in special:
             events += [(special[ch], 0, 0), (special[ch], 0, KEYUP)]
             continue
@@ -274,7 +278,7 @@ def unicode_inputs(text: str) -> list[tuple[int, int, int]]:
     return events
 
 
-def _send_unicode(text: str) -> None:
+def _send_unicode(text: str, soft_newlines: bool = False) -> None:
     import ctypes
     from ctypes import wintypes
 
@@ -290,7 +294,7 @@ def _send_unicode(text: str) -> None:
         _fields_ = [("type", wintypes.DWORD), ("u", _U)]
 
     send = ctypes.windll.user32.SendInput
-    for vk, scan, flags in unicode_inputs(text):
+    for vk, scan, flags in unicode_inputs(text, soft_newlines):
         inp = INPUT(type=1, ki=KEYBDINPUT(vk, scan, flags, 0, 0))
         send(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
         time.sleep(0.01)  # WinUI apps (new Notepad) drop keys that arrive faster than this
