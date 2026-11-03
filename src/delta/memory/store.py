@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from delta.memory.keywords import keywords, overlap
-from delta.system.vault import PREFIX, seal, unseal
+from delta.system.vault import PREFIX, scrub, seal, unseal
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories(
@@ -58,11 +58,10 @@ class MemoryStore:
             rows = self._db.execute("SELECT id, content FROM memories WHERE content NOT LIKE ?",
                                     (PREFIX + "%",)).fetchall()
             sealed = [(seal(c), i) for i, c in rows]
-            if not any(s != c for (s, _), (_, c) in zip(sealed, rows, strict=True)):
-                return
-            with self._db:
-                self._db.executemany("UPDATE memories SET content=? WHERE id=?", sealed)
-            self._db.execute("VACUUM")
+            if any(s != c for (s, _), (_, c) in zip(sealed, rows, strict=True)):
+                with self._db:
+                    self._db.executemany("UPDATE memories SET content=? WHERE id=?", sealed)
+            scrub(self._db)
 
     def _rows(self, kind: str | None = None) -> builtins.list[Memory]:
         q = "SELECT id, kind, content, source, updated FROM memories"

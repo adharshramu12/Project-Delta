@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from delta.core.intents import small_talk
-from delta.system.vault import PREFIX, seal, unseal
+from delta.system.vault import PREFIX, scrub, seal, unseal
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chats (
@@ -79,16 +79,15 @@ class ChatStore:
                                     (PREFIX + "%",)).fetchall()
             new_chats = [(seal(r["title"]), r["id"]) for r in chats]
             new_msgs = [(seal(r["text"]), r["id"]) for r in msgs]
-            changed = any(t.startswith(PREFIX) for t, _ in new_chats + new_msgs)
-            if not changed:
-                return
-            with self._db:
-                self._db.executemany("UPDATE chats SET title = ? WHERE id = ?", new_chats)
-                self._db.executemany("UPDATE chat_messages SET text = ? WHERE id = ?", new_msgs)
-            self._db.execute("VACUUM")
+            if any(t.startswith(PREFIX) for t, _ in new_chats + new_msgs):
+                with self._db:
+                    self._db.executemany("UPDATE chats SET title = ? WHERE id = ?", new_chats)
+                    self._db.executemany("UPDATE chat_messages SET text = ? WHERE id = ?", new_msgs)
+            scrub(self._db)
 
     def close(self) -> None:
         with self._lock:
+            scrub(self._db)
             self._db.close()
 
     # --- chats ------------------------------------------------------------------------------

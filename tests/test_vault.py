@@ -49,3 +49,22 @@ def test_chats_are_sealed_on_disk(tmp_path):
     wal = db.with_name("chats.db-wal")
     data = db.read_bytes() + (wal.read_bytes() if wal.exists() else b"")
     assert b"Meera" not in data
+
+
+def test_no_plain_copy_survives_in_the_write_ahead_log(tmp_path):
+    """The real-PC finding: after sealing, old plain pages sat in chats.db-wal. Opening the store must
+    leave neither the main file nor the log holding the old text."""
+    db = tmp_path / "chats.db"
+    old = ChatStore(db)
+    chat = old.create()
+    old._db.execute("INSERT INTO chat_messages(chat_id, role, text, meta, ts) VALUES (?, 'user', ?, '{}', 0)",
+                    (chat.id, "my secret plan for Diwali"))
+    old._db.commit()  # a plain row, as written before encryption existed (lands in the WAL)
+    s = ChatStore(db)  # second connection: seals it and scrubs while the first is still open
+    assert any(m["text"] == "my secret plan for Diwali" for m in s.messages(chat.id))
+    wal = db.with_name("chats.db-wal")
+    # checked while Delta is still running: SQLite only tidies the log when the last connection closes
+    data = db.read_bytes() + (wal.read_bytes() if wal.exists() else b"")
+    assert b"Diwali" not in data
+    old._db.close()
+    s.close()

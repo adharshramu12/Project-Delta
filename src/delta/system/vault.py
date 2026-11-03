@@ -17,6 +17,20 @@ _ENTROPY = b"delta-agent/v1"  # app-specific salt: other DPAPI users of the same
 _NO_UI = 0x1  # CRYPTPROTECT_UI_FORBIDDEN: never pop up a prompt
 
 
+def scrub(db: object) -> None:
+    """Leave no old plain copy in the database files: deleted data is zeroed from now on, the write-ahead
+    log is emptied, and free pages (which can still hold old text) are compacted away."""
+    import sqlite3
+
+    assert isinstance(db, sqlite3.Connection)
+    db.execute("PRAGMA secure_delete = ON")
+    with contextlib.suppress(sqlite3.Error):
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        if db.execute("PRAGMA freelist_count").fetchone()[0]:
+            db.execute("VACUUM")
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+
 def available() -> bool:
     if sys.platform != "win32":
         return False
