@@ -69,3 +69,22 @@ def test_help_mode_only_when_it_sounds_like_trouble(text, help_mode):
     assert ("MAY NEED HELP" in p) is help_mode
     if help_mode:
         assert "112" in p and "14416" in p
+
+
+def test_any_message_during_a_help_request_is_confirmed_even_on_autopilot():
+    """Live-test finding: the agent reached the contact with plain send_message and skipped the yes."""
+    from delta.core.state import CURRENT_REQUEST, TaskRequest
+    from delta.messaging.tools import SendArgs, SendMessage
+
+    policy = PolicyEngine(Boundaries(autonomy="autopilot"))
+    tool, args = SendMessage(), SendArgs(app="whatsapp", to="Kushi", text="please come, I'm unwell")
+    token = CURRENT_REQUEST.set(TaskRequest("I'm not feeling well, message Kushi"))
+    try:
+        assert policy.evaluate(tool, args).verdict == Verdict.ASK
+    finally:
+        CURRENT_REQUEST.reset(token)
+    token = CURRENT_REQUEST.set(TaskRequest("send hi to Kushi on WhatsApp"))
+    try:
+        assert policy.evaluate(tool, args).verdict == Verdict.ALLOW  # everyday autopilot is unchanged
+    finally:
+        CURRENT_REQUEST.reset(token)

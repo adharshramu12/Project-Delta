@@ -27,6 +27,8 @@ from urllib.parse import urlparse
 from pydantic import BaseModel
 
 from delta.config import Boundaries
+from delta.core.playbooks import EMERGENCY
+from delta.core.state import CURRENT_REQUEST
 from delta.tools.base import Risk, Tool
 
 
@@ -34,6 +36,14 @@ class Verdict(StrEnum):
     ALLOW = "allow"
     ASK = "ask"
     DENY = "deny"
+
+
+MESSAGING_TOOLS = {"send_message", "chat_for_me", "send_file"}
+
+
+def _help_request() -> bool:
+    req = CURRENT_REQUEST.get()
+    return bool(req and EMERGENCY.search(req.text))
 
 
 @dataclass(frozen=True)
@@ -106,6 +116,10 @@ class PolicyEngine:
             return d(Verdict.DENY, "system/security/credential/payment actions are never allowed")
         if getattr(tool, "always_ask", False):  # e.g. alerting emergency contacts: never without a yes
             return d(Verdict.ASK, "always confirmed with you, whatever the autonomy level")
+        if tool.name in MESSAGING_TOOLS and _help_request():
+            # Found in a live test: in autopilot the agent reached the contact through the ordinary
+            # send_message tool and skipped the yes. Any message during a help request is confirmed.
+            return d(Verdict.ASK, "a message during a help/emergency request is always confirmed with you")
 
         paths = [norm_path(p) for p in tool.paths(args)]
         hit = next((p for p in paths if _under(p, self.protected)), None) or self._mentions(args, self.protected)
