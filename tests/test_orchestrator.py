@@ -138,3 +138,27 @@ def test_website_requests_get_the_whole_browser_kit(tmp_path, monkeypatch):
     assert {"browser_open", "browser_click", "browser_fill"} <= names(["run_shell"], "Open Chrome, then NotebookLM")
     assert {"click_element", "type_text"} <= names(["click_at"], "click OK in Paint")  # the whole group
     assert not {"browser_click", "click_at"} & names(["write_file"], "create notes.txt")
+
+
+def test_page_reads_focus_on_what_the_task_asks():
+    """Unfocused, the founder's name fell past the 1500-char cut and the check failed (3 extra calls)."""
+    from delta.core.orchestrator import task_focus
+
+    about = {"title": "About Us | Arva Talks Academy", "url": "https://arvatalksacademy.com/about"}
+    assert task_focus("open arva talks academy website and tell me who is the founder", about) == "founder"
+    amazon = {"title": "Amazon.in", "url": "https://www.amazon.in/s?k=iphone+17"}
+    assert task_focus("what is the price of iphone 17 on amazon", amazon) == "price"
+    assert task_focus("open notebooklm", {"title": "NotebookLM", "url": "https://notebooklm.google.com"}) is None
+
+
+def test_a_page_read_after_the_last_browser_action_is_the_proof():
+    from delta.core.orchestrator import read_page_last
+    from delta.core.state import StepRecord
+
+    def step(tool, ok=True):
+        return StepRecord(tool, {}, ok, "", {})
+
+    assert read_page_last([step("browser_open"), step("browser_read")])
+    assert not read_page_last([step("browser_read"), step("browser_click")])  # clicked after reading
+    assert not read_page_last([step("browser_open"), step("browser_read", ok=False)])
+    assert not read_page_last([step("write_file")])  # no web work: screenshot rules unchanged

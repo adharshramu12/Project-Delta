@@ -27,6 +27,7 @@ from delta.llm.router import ModelRouter
 from delta.llm.schemas import AllProvidersFailedError, LLMError, Message
 from delta.memory.distill import distill
 from delta.memory.extractor import extract_facts
+from delta.memory.keywords import keywords
 from delta.memory.skills import Skill, SkillStore
 from delta.memory.store import MemoryStore
 from delta.safety.audit import AuditLog
@@ -42,8 +43,10 @@ SAVE FOLDER: {save_dir}  (the user opens it from the "Delta files" item on their
 Save every file you create in the SAVE FOLDER unless the user names another folder.
 Always use full paths (Save dialogs otherwise fall back to their own default, e.g. OneDrive).
 
-Work through the plan using tools, one step at a time, checking results as you go.
+Work through the plan using tools, checking results as you go. Work like an expert: the fewest steps
+that get a verified result. Every reply costs the user time and tokens.
 Rules:
+- Independent read-only calls (several reads, a search plus a file check) go together in ONE reply.
 - Prefer the simplest tool. Read before you write. After changing something, check it
   (path_info, list_running_apps, read_file) so there is evidence.
 - If a tool says BLOCKED or DENIED, do not retry it. Find an allowed way or explain.
@@ -52,9 +55,12 @@ Rules:
   typing; dialogs like 'Save as' can be targeted by title). Click by name with click_element; use
   click_at / look_at_screen only when read_window cannot see it. Re-read after acting.
 - Websites: use the browser freely (browser_search, browser_open, browser_read, browser_click,
-  browser_fill with submit=true for search boxes, browser_scroll, browser_back). It is Delta's own
-  Chrome/Edge profile. browser_read after each step to see the page; on long pages pass a focus
-  (browser_read focus="born") to get just the relevant lines.
+  browser_fill with submit=true for search boxes, browser_scroll, browser_back).
+  Every browser action already returns the page text that matters for this task (AFTER browser_read):
+  read that first. Call browser_read only for a different part, with a new focus (focus="born").
+  When search results already show the page that answers (an /about or /contact page, a product
+  page), open THAT page directly, not the home page. Answer from text read on the page, never from
+  a search snippet alone.
   To search INSIDE a site (YouTube, Amazon, Wikipedia…), type into its box with
   browser_fill field="Search" value="…" submit=true. Clicking a Search button does not type
   anything. Opening the site's search URL directly also works, e.g.
@@ -174,6 +180,28 @@ PIXEL_ACTIONS = {"click_at", "scroll", "do_actions"}  # aimed by coordinates: on
 OBSERVE_CHARS = 1500
 OBSERVE_WIDTH = 1024  # step screenshots: enough to read buttons, about 1k image tokens
 FINAL_WIDTH = 1280    # the proof screenshot the verifier judges
+
+# Words that say how to get somewhere, not what to look for on the page.
+_WEB_WORDS = {"open", "website", "site", "page", "browser", "chrome", "edge", "tell", "search", "google",
+              "scroll", "click", "show", "find", "read", "visit", "link", "url", "platform", "check", "look",
+              "there", "about", "info", "details", "information", "play", "watch", "listen"}
+
+
+def task_focus(request: str, evidence: dict[str, Any]) -> str | None:
+    """The request's content words the page does not already name in its title or address: what to
+    look for on it ("founder" for "open arva talks academy website and tell me the founder")."""
+    seen = f"{evidence.get('title', '')} {evidence.get('url', '')}".lower()
+    words = [w for w in keywords(request) if w not in _WEB_WORDS and w[:5] not in seen]
+    return " ".join(words[:6]) or None
+
+
+def read_page_last(steps: list[StepRecord]) -> bool:
+    """The last browser action was followed by a successful page read. That text is the better proof
+    for a web page, so the check needs no screenshot: no image tokens, and no detour to a model that
+    can see (the main AI may not)."""
+    last_action = max((i for i, s in enumerate(steps) if s.tool in BROWSER_ACTIONS), default=-1)
+    return last_action >= 0 and any(s.tool == "browser_read" and s.ok for s in steps[last_action + 1:])
+
 
 def proof_target(steps: list[StepRecord]) -> str | None:
     """Title of the window the task last worked in: "" = whole screen, None = no screen work."""
@@ -317,8 +345,9 @@ class Orchestrator:
                                   provider=self.router.last_provider or "")
             final = final.removeprefix(DONE).strip()
             await self._fresh_media_status(req.id, steps)
-            shot, target = await self._final_screenshot(steps)
-            verification = await verify(self.router, req.with_context, plan, steps, final, shot, target)
+            shot, target = await self._final_screenshot(steps)  # saved as proof either way
+            verification = await verify(self.router, req.with_context, plan, steps, final,
+                                        None if read_page_last(steps) else shot, target)
             await self.events.publish("task.verify", task_id=req.id, attempt=attempt,
                                       passed=verification.passed, reason=verification.reason,
                                       checks=verification.checks, screenshot=verification.screenshot)
@@ -431,7 +460,8 @@ class Orchestrator:
         first = self.router.candidates("chat")
         return bool(first) and first[0].supports("vision") and self._can_see()
 
-    async def _observe(self, tool: str, task_id: str, steps: list[StepRecord] | None = None
+    async def _observe(self, tool: str, task_id: str, steps: list[StepRecord] | None = None,
+                       request: str = "", evidence: dict[str, Any] | None = None
                        ) -> tuple[str, str, dict[str, Any], str | None] | None:
         """What the screen/page shows right after an action: (observer, text, args, screenshot)."""
         if not self.s.agent.auto_observe:
@@ -442,7 +472,9 @@ class Orchestrator:
             if shot:
                 return "screenshot", f"(screenshot of {target} attached below)", {"window": target}, shot
         if tool in BROWSER_ACTIONS and "browser_read" in names:
-            observer, args = "browser_read", {}
+            # Read the part of the page the task is about: unfocused, the answer can fall past the cut
+            # and the agent ends up answering from a search snippet the checker rejects (3 extra calls).
+            observer, args = "browser_read", {"focus": task_focus(request, evidence or {})}
         elif tool in PIXEL_ACTIONS and self._can_see():
             observer, args = "look_at_screen", {"question": (
                 "In 2-3 short sentences: what is on the screen now? Mention any dialog, error, "
@@ -581,7 +613,7 @@ class Orchestrator:
                     return "", (f"OK, I didn't do it. You declined: {result.evidence.get('denied_action', call.name)}. "
                                 "Tell me if you want something different.")
                 content = result.for_llm()
-                if result.ok and (seen := await self._observe(call.name, req.id, steps)):
+                if result.ok and (seen := await self._observe(call.name, req.id, steps, req.text, result.evidence)):
                     observer, text, obs_args, shot = seen
                     if shot:
                         latest_shot = (shot, obs_args.get("window", ""))
