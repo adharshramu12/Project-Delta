@@ -1,6 +1,8 @@
 """Emergency help: contacts stored encrypted, the alert always asks first (even in autopilot), messages
 and the call go to the right people, and Delta knows when to switch into help mode."""
 
+from pathlib import Path
+
 import pytest
 
 from delta.config import Boundaries
@@ -78,9 +80,16 @@ def test_any_message_during_a_help_request_is_confirmed_even_on_autopilot():
 
     policy = PolicyEngine(Boundaries(autonomy="autopilot"))
     tool, args = SendMessage(), SendArgs(app="whatsapp", to="Kushi", text="please come, I'm unwell")
-    token = CURRENT_REQUEST.set(TaskRequest("I'm not feeling well, message Kushi"))
+    token = CURRENT_REQUEST.set(TaskRequest("I'm not feeling well"))  # vague: Delta asks before reaching anyone
     try:
         assert policy.evaluate(tool, args).verdict == Verdict.ASK
+    finally:
+        CURRENT_REQUEST.reset(token)
+    token = CURRENT_REQUEST.set(TaskRequest("I'm not feeling well, message Kushi now"))  # clear: that IS the yes
+    try:
+        assert policy.evaluate(tool, args).verdict == Verdict.ALLOW
+        alert = AlertEmergencyContacts(EmergencyContacts(Path(".")))
+        assert policy.evaluate(alert, AlertArgs(message="please come, unwell")).verdict == Verdict.ALLOW
     finally:
         CURRENT_REQUEST.reset(token)
     token = CURRENT_REQUEST.set(TaskRequest("send hi to Kushi on WhatsApp"))

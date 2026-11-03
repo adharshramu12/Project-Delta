@@ -46,6 +46,17 @@ def _help_request() -> bool:
     return bool(req and EMERGENCY.search(req.text))
 
 
+# The user's own words saying to reach someone ("message Kushi now", "call Amma", "alert my contacts") are
+# the approval: in an emergency a second tap costs time. Vague distress ("I'm not well") still asks first.
+CLEAR_SEND = re.compile(r"\b(send|message|msg|text|whats\s?app|alert|call|ring|inform|notify)\b"
+                        r"|\btell (?!you\b|me\b)\w+", re.I)
+
+
+def _clearly_asked() -> bool:
+    req = CURRENT_REQUEST.get()
+    return bool(req and CLEAR_SEND.search(req.text))
+
+
 @dataclass(frozen=True)
 class Decision:
     verdict: Verdict
@@ -114,9 +125,9 @@ class PolicyEngine:
             return d(Verdict.DENY, f"tool '{tool.name}' is disabled in your boundaries")
         if risk == Risk.SYSTEM:
             return d(Verdict.DENY, "system/security/credential/payment actions are never allowed")
-        if getattr(tool, "always_ask", False):  # e.g. alerting emergency contacts: never without a yes
+        if getattr(tool, "always_ask", False) and not _clearly_asked():  # e.g. alerting emergency contacts
             return d(Verdict.ASK, "always confirmed with you, whatever the autonomy level")
-        if tool.name in MESSAGING_TOOLS and _help_request():
+        if tool.name in MESSAGING_TOOLS and _help_request() and not _clearly_asked():
             # Found in a live test: in autopilot the agent reached the contact through the ordinary
             # send_message tool and skipped the yes. Any message during a help request is confirmed.
             return d(Verdict.ASK, "a message during a help/emergency request is always confirmed with you")
