@@ -30,6 +30,7 @@ def test_a_form_has_tick_boxes_and_pick_one_questions():
 def test_research_know_how_only_for_research():
     assert "Deep Research" in playbooks_for("do a deep research on the EV market in India")
     assert "Deep Research" in playbooks_for("use chatgpt to research the best laptops under 60k")
+    assert "SELF-HEAL" in playbooks_for("deep research on edtech")  # recovers from Gemini/ChatGPT errors
     assert playbooks_for("play rajshamani podcast") == "" and playbooks_for("open gemini") == ""
 
 

@@ -36,7 +36,15 @@ PLAYBOOK: DEEP RESEARCH IN THE USER'S CHATGPT OR GEMINI
    Gemini: the Tools (or mode) menu -> "Deep Research". Read the page to find the current names; they change.
 5. Put the whole brief in the message box with browser_fill (one step, not typed key by key) and send it.
    Gemini first shows a research plan: click "Start research".
-6. Check it started (the page shows it researching), then reply DONE: which app, that results take about
+6. SELF-HEAL: read the page after sending and after Start research. If it shows an error ("something went
+   wrong", "try again", "network error", "too many requests", a stopped response) or nothing changes in ~30 s:
+   a) click Retry / Try again (or Regenerate) once and read again;
+   b) still failing: open a NEW chat (Gemini https://gemini.google.com/app, ChatGPT https://chatgpt.com/),
+      turn Deep Research on again and send the SAME brief again (do not rewrite it);
+   c) still failing: use the other app (Gemini <-> ChatGPT) with the same brief;
+   d) only after these three tries, reply NEED_USER with what each try showed. Never claim it started unless
+      the page shows it researching.
+7. Check it started (the page shows it researching), then reply DONE: which app, that results take about
    5-30 minutes and appear in that chat, and the brief you sent (so the user sees what was asked). Do not
    wait for the research to finish."""
 
