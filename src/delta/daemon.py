@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 import webbrowser
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -229,7 +229,11 @@ async def start_channel(c: Container, name: str) -> object:
         return c.live_channels[name]
     factory, _ = CHANNELS[name]
     channel = factory(c)
-    await asyncio.wait_for(channel.start(), 30)  # type: ignore[attr-defined]
+    try:
+        await asyncio.wait_for(channel.start(), 30)  # type: ignore[attr-defined]
+    except BaseException:
+        await _stop_quietly(channel)
+        raise
     c.lifecycle.on_shutdown(name, channel.stop)  # type: ignore[attr-defined]
     c.live_channels[name] = channel
     return channel
@@ -260,6 +264,7 @@ async def _start_channels(c: Container) -> list[object]:
         cfg = c.settings.channels.get(name)
         if not cfg or not cfg.enabled:
             continue
+        channel = None
         try:
             channel = factory(c)
             await asyncio.wait_for(channel.start(), 30)  # type: ignore[attr-defined]
@@ -267,12 +272,46 @@ async def _start_channels(c: Container) -> list[object]:
             c.warn(f"{name.title()} is enabled but not installed. Run: uv sync --extra {extra}")
             continue
         except Exception as e:
-            c.warn(f"{name.title()} could not start: {e}")
+            # Usually the network to the service is slow for a moment: keep trying in the background
+            # instead of leaving the phone unanswered until the next restart.
+            await _stop_quietly(channel)  # a half-started bot would fight the retry for its chat
+            c.warn(f"{name.title()} could not start: {e or type(e).__name__}. Retrying in the background.")
+            retry = asyncio.create_task(_retry_channel(c, name), name=f"retry-{name}")
+            c.lifecycle.on_shutdown(f"retry-{name}", _cancel_task(retry))
             continue
         c.lifecycle.on_shutdown(name, channel.stop)  # type: ignore[attr-defined]
         c.live_channels[name] = channel
         ok.append(channel)
     return ok
+
+
+async def _stop_quietly(channel: object) -> None:
+    if channel is not None:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(channel.stop(), 10)  # type: ignore[attr-defined]
+
+
+RETRY_DELAYS_S = (10, 30, 60)  # then every 60 s
+
+
+async def _retry_channel(c: Container, name: str) -> None:
+    for attempt in range(10_000):
+        await asyncio.sleep(RETRY_DELAYS_S[min(attempt, len(RETRY_DELAYS_S) - 1)])
+        try:
+            await start_channel(c, name)
+        except Exception as e:
+            log.info("channel.retry_failed", channel=name, attempt=attempt + 1, error=str(e) or type(e).__name__)
+            continue
+        c.warnings[:] = [w for w in c.warnings if not w.startswith(f"{name.title()} could not start")]
+        log.info("channel.connected_after_retry", channel=name, attempts=attempt + 1)
+        return
+
+
+def _cancel_task(task: asyncio.Task[None]) -> Callable[[], Awaitable[None]]:
+    async def cancel() -> None:
+        task.cancel()
+
+    return cancel
 
 
 def _quiet_connection_resets() -> None:

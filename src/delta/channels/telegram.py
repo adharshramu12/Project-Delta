@@ -9,6 +9,7 @@ appears on this PC's dashboard, so a bot token alone still controls nothing.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import secrets
 import time
@@ -65,7 +66,10 @@ class TelegramChannel:
         assert self.app.updater
         await self.app.updater.start_polling(drop_pending_updates=True)
         self.bot_name = (await self.app.bot.get_me()).username or ""
-        with contextlib.suppress(Exception):  # the "/" menu in the chat; cosmetic, never fatal
+        self._menu_task = asyncio.create_task(self._set_menu())  # cosmetic: not part of the start-up timeout
+
+    async def _set_menu(self) -> None:
+        with contextlib.suppress(Exception):  # the "/" menu in the chat
             await self.app.bot.set_my_commands([
                 ("ai", "See or switch the main AI"), ("model", "Pick the model"),
                 ("mode", "Permission level"), ("stop", "Stop the running task"),

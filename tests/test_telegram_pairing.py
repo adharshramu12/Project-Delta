@@ -101,3 +101,35 @@ async def test_stop_cancels_whatever_is_running(tmp_path):
     assert stop_running(c, "test")
     await asyncio.sleep(0)
     assert c.running.cancelled() and not stop_running(c, "test")
+
+
+async def test_a_channel_that_times_out_at_start_keeps_retrying(monkeypatch):
+    """'Telegram could not start: Timed out' used to leave the phone unanswered until a restart."""
+    import asyncio
+
+    from delta import daemon
+
+    starts = {"n": 0}
+
+    class Flaky:
+        async def start(self):
+            starts["n"] += 1
+            if starts["n"] == 1:
+                raise TimeoutError("Timed out")
+
+        async def stop(self):
+            pass
+
+    hooks = []
+    c = SimpleNamespace(settings=SimpleNamespace(channels={"telegram": SimpleNamespace(enabled=True)}),
+                        warnings=[], live_channels={},
+                        lifecycle=SimpleNamespace(on_shutdown=lambda name, fn: hooks.append(name)))
+    c.warn = lambda m: c.warnings.append(m)
+    monkeypatch.setattr(daemon, "CHANNELS", {"telegram": (lambda _c: Flaky(), "channels")})
+    monkeypatch.setattr(daemon, "RETRY_DELAYS_S", (0,))
+    assert await daemon._start_channels(c) == [] and "Retrying" in c.warnings[0]
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if "telegram" in c.live_channels:
+            break
+    assert "telegram" in c.live_channels and c.warnings == [] and starts["n"] == 2
