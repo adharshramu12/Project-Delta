@@ -39,6 +39,8 @@ HELP = (
     "/screen - a screenshot of the PC now\n"
     "/camera - a photo from the webcam of whoever is at the PC\n\n"
     "/stop - stop what I'm doing now\n"
+    "/unlock - enter your PIN (camera, screen, files, closing apps, keys need it)\n"
+    "/lock - lock all remote control now (only the PC can unlock it)\n"
     "/status - PC health and AIs available\n"
     "/help - this list\n\n"
     "🎙 You can also just <b>send a voice note</b>: Telugu, Hindi or English."
@@ -58,6 +60,7 @@ class TelegramChannel(PCMenu):
         self.bot_name = ""
         self._choices: dict[str, list[str]] = {}  # the choices last offered to each user (tap buttons)
         self._awaiting_key: dict[str, tuple[str, float]] = {}  # user -> (key name, until) after /keys
+        self._pending_pin: dict[str, tuple[Any, str, float]] = {}  # user -> (action to run, what, until)
         self._pc_init()
         # concurrent_updates: an approval button must work while a long task is still running
         self.app = Application.builder().token(token).concurrent_updates(True).build()
@@ -69,6 +72,8 @@ class TelegramChannel(PCMenu):
         self.app.add_handler(CommandHandler("mode", self._mode_cmd))
         self.app.add_handler(CommandHandler("stop", self._stop_cmd))
         self.app.add_handler(CommandHandler("keys", self._keys_cmd))
+        self.app.add_handler(CommandHandler("lock", self._lock_cmd))
+        self.app.add_handler(CommandHandler("unlock", self._unlock_cmd))
         for name, handler in (("volume", self._volume_cmd), ("brightness", self._brightness_cmd),
                               ("apps", self._apps_cmd), ("screen", self._screen_cmd),
                               ("camera", self._camera_cmd)):
@@ -94,6 +99,7 @@ class TelegramChannel(PCMenu):
             await self.app.bot.set_my_commands([
                 ("ai", "See or switch the main AI"), ("model", "Pick the model"),
                 ("mode", "Permission level"), ("keys", "Replace an API key"), ("stop", "Stop the running task"),
+                ("lock", "Lock remote control now"), ("unlock", "Enter your PIN"),
                 ("volume", "PC volume"), ("brightness", "Screen brightness"), ("apps", "Open apps, tap to close"),
                 ("screen", "Screenshot of the PC"), ("camera", "Webcam photo"),
                 ("status", "PC health and AIs"), ("help", "What I can do")])
@@ -133,7 +139,10 @@ class TelegramChannel(PCMenu):
             self.c.audit.record("telegram.paired", user=uid)
             await update.message.reply_text(
                 f"✅ Paired. This chat now controls Δ {self.c.settings.agent.name} on your PC. "
-                "Tell me what to do; approvals will arrive here with Approve/Deny buttons.")
+                "Tell me what to do; approvals will arrive here with Approve/Deny buttons.\n\n"
+                "🛡 Protect this: whoever has your Telegram can talk to your PC. Turn on Telegram's "
+                "Two-Step Verification (Settings → Privacy and Security → Two-Step Verification), and set a "
+                "Delta PIN on the PC (Settings → Remote security) for the camera, screen, files and keys.")
             return
         await update.message.reply_text(
             "🔒 Not connected yet. On your PC open Delta → Settings → Telegram → Connect my phone, "
@@ -224,12 +233,18 @@ class TelegramChannel(PCMenu):
             elif kind == "model":
                 set_model(self.c, self.c.router.preferred, value, by)
                 await say(f"✅ {self.c.router.preferred} now uses {value}.")
+            elif kind == "mode" and value == "autopilot":
+                async def go() -> None:
+                    await say(f"✅ Permission level: {set_autonomy(self.c, value, by)}.")
+                await self._guarded(str(uid), "autopilot", say, go)
             elif kind == "mode":
                 await say(f"✅ Permission level: {set_autonomy(self.c, value, by)}.")
             elif kind == "key":
-                self._awaiting_key[str(uid)] = (value, time.monotonic() + 300)
-                await say("Send the new key as your next message (within 5 minutes). I'll delete it from this "
-                          "chat right after reading it, test it, and keep your old key if it doesn't work.")
+                async def ask_key() -> None:
+                    self._awaiting_key[str(uid)] = (value, time.monotonic() + 300)
+                    await say("Send the new key as your next message (within 5 minutes). I'll delete it from "
+                              "this chat right after reading it, test it, and keep your old key if it doesn't work.")
+                await self._guarded(str(uid), "keys", say, ask_key)
         except ValueError as e:
             await say(f"✗ {e}")
 
@@ -256,9 +271,91 @@ class TelegramChannel(PCMenu):
             log.warning("telegram.rejected", user=user.id)
             await self._try_pair(update, update.message.text)
             return
+        if await self._take_pin(update, str(user.id)):
+            return
+        if await self._locked(update.message.reply_text):
+            return
         if await self._take_key(update, str(user.id)):
             return
         await self._run(update, str(user.id), update.message.text)
+
+    # --- Remote Guard: PIN for sensitive actions, panic lock (delta.safety.remote_guard) -------------
+    def _guard(self) -> Any:
+        return getattr(self.c, "guard", None)
+
+    async def _locked(self, say: Any) -> bool:
+        g = self._guard()
+        if g is not None and g.locked:
+            await say(g.locked_message())
+            return True
+        return False
+
+    async def _guarded(self, uid: str, action: str, say: Any, run: Any) -> None:
+        """Run a sensitive action only for an owner who proved the PIN (in the last 15 minutes). Otherwise
+        ask for it; the action runs right after a correct PIN."""
+        from delta.safety.remote_guard import SENSITIVE
+        from delta.system.notify import notify
+
+        g = self._guard()
+        if g is None:
+            await run()
+            return
+        if g.locked:
+            await say(g.locked_message())
+            return
+        if not g.has_pin:
+            await say(f"\U0001f510 To {SENSITIVE[action]} from your phone, first set a remote PIN on the PC: "
+                      "Delta \u2192 Settings \u2192 Remote security.")
+            return
+        if g.is_unlocked(uid):
+            notify("\U0001f4f1 Delta: remote action", f"From Telegram: {SENSITIVE[action]}")
+            self.c.audit.record("guard.sensitive", action=action, user=uid)
+            await run()
+            return
+        self._pending_pin[uid] = (run, action, time.monotonic() + 120)
+        await say(f"\U0001f510 Enter your Delta PIN to {SENSITIVE[action]}. I delete it from this chat right away.")
+
+    async def _take_pin(self, update: Any, uid: str) -> bool:
+        """The message after a PIN request is the PIN: deleted from the chat at once, then checked."""
+        pending = self._pending_pin.get(uid)
+        if not pending:
+            return False
+        run, action, until = pending
+        if time.monotonic() > until:
+            self._pending_pin.pop(uid, None)
+            return False
+        pin = (update.message.text or "").strip()
+        with contextlib.suppress(Exception):
+            await update.message.delete()
+        g = self._guard()
+        ok, message = g.try_pin(uid, pin)
+        chat = update.message.chat
+        if ok:
+            self._pending_pin.pop(uid, None)
+            await chat.send_message("\u2705 " + message)
+            await self._guarded(uid, action, chat.send_message, run)
+        else:
+            if g.locked:
+                self._pending_pin.pop(uid, None)
+            await chat.send_message("\u2717 " + message)
+        return True
+
+    async def _lock_cmd(self, update: Any, ctx: Any) -> None:
+        if not is_allowed(update.effective_user.id, self.allowed) or self._guard() is None:
+            return
+        self._guard().lock("locked from Telegram by the owner", by=f"telegram:{update.effective_user.id}")
+        self._pending_pin.clear()
+        await update.message.reply_text("\U0001f512 Remote control is locked. Only someone at the PC can unlock it "
+                                        "(Delta \u2192 Settings \u2192 Remote security).")
+
+    async def _unlock_cmd(self, update: Any, ctx: Any) -> None:
+        if not is_allowed(update.effective_user.id, self.allowed):
+            return
+        uid = str(update.effective_user.id)
+
+        async def done() -> None:
+            await update.message.chat.send_message("Sensitive actions are open for 15 minutes.")
+        await self._guarded(uid, "unlock", update.message.reply_text, done)
 
     async def _keys_cmd(self, update: Any, ctx: Any) -> None:
         if not is_allowed(update.effective_user.id, self.allowed):
@@ -295,6 +392,8 @@ class TelegramChannel(PCMenu):
         user = update.effective_user
         if not is_allowed(user.id, self.allowed):
             return
+        if await self._locked(update.message.reply_text):
+            return
         media = update.message.voice or update.message.audio
         await update.message.chat.send_action("typing")
         try:
@@ -325,6 +424,9 @@ class TelegramChannel(PCMenu):
         something; a question comes back with tap buttons for its choices."""
         message = update.message or update.callback_query.message
         await message.chat.send_action("typing")
+        from delta.system.notify import notify
+
+        notify("\U0001f4f1 Delta: request from Telegram", text[:120])
         chats, chat_id = getattr(self.c, "chats", None), self._chat(uid)
         history = chats.context_for(chat_id) if chats and chat_id else ""
         if chats and chat_id:

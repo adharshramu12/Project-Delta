@@ -24,6 +24,10 @@ class KeyIn(BaseModel):
     value: str = Field(min_length=1, max_length=500)
 
 
+class PinIn(BaseModel):
+    pin: str = Field(min_length=4, max_length=8, pattern=r"^\d+$")
+
+
 class SetupIn(BaseModel):
     owner_name: str = Field(default="", max_length=60)
     autonomy: Literal["ask-everything", "ask-risky", "trusted", "autopilot"] = "ask-risky"
@@ -62,6 +66,33 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
         c.warnings[:] = [w for w in c.warnings if "No AI model" not in w]
         c.audit.record("setup.key", name=body.name)  # never the value
         return {"ok": True, "message": message, "models_ready": c.router.usable()}
+
+    # --- Remote security (Remote Guard): only from this PC's dashboard, never from a phone -------------
+    @app.get("/api/security", dependencies=[Depends(auth)])
+    async def security_status() -> dict[str, Any]:
+        return await asyncio.to_thread(c.guard.status) if c.guard else {"has_pin": False, "locked": False}
+
+    @app.put("/api/security/pin", dependencies=[Depends(auth)])
+    async def security_pin(body: PinIn) -> dict[str, Any]:
+        if c.guard is None:
+            raise HTTPException(400, "Remote security is not available.")
+        try:
+            await asyncio.to_thread(c.guard.set_pin, body.pin, "dashboard")
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"ok": True, "message": "PIN saved. Your phone asks for it before sensitive actions."}
+
+    @app.post("/api/security/unlock", dependencies=[Depends(auth)])
+    async def security_unlock() -> dict[str, Any]:
+        if c.guard:
+            c.guard.unlock_from_pc("dashboard")
+        return {"ok": True, "message": "Remote control is unlocked."}
+
+    @app.post("/api/security/lock", dependencies=[Depends(auth)])
+    async def security_lock() -> dict[str, Any]:
+        if c.guard:
+            c.guard.lock("locked on the PC", by="dashboard")
+        return {"ok": True, "message": "Remote control is locked."}
 
     @app.get("/api/telegram", dependencies=[Depends(auth)])
     async def telegram_status() -> dict[str, Any]:

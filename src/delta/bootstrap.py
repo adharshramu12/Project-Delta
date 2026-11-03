@@ -92,6 +92,7 @@ class Container:
     warnings: list[str] = field(default_factory=list)  # setup problems shown to the user, not just logged
     chats: ChatStore | None = None  # separate conversations (dashboard sidebar)
     live_channels: dict[str, Any] = field(default_factory=dict)  # running chat channels, by name
+    guard: Any = None  # RemoteGuard: PIN and lock for remote control
     running: asyncio.Task[Any] | None = None  # the task being worked on now (any channel can stop it)
 
     def warn(self, message: str) -> None:
@@ -186,9 +187,10 @@ def build(settings: Settings) -> Container:
 
     chats = ChatSessions(router, events, audit)
     live_channels: dict[str, Any] = {}
+    send_file = SendFile(live_channels)
     registry = ToolRegistry([
         *filesystem_tools(),
-        SendFile(live_channels),
+        send_file,
         *power_tools(),
         *pc_tools(),
         RunShell(),
@@ -248,6 +250,11 @@ def build(settings: Settings) -> Container:
         await events.publish("governor.health", health=a.health.name, reasons=a.reasons)
 
     governor.on_change(on_health)
+    from delta.safety.remote_guard import RemoteGuard
+    from delta.system.notify import notify
+
+    guard = RemoteGuard(data, audit, alert=notify)
+    send_file.guard = guard
     return Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
                      Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"),
-                     live_channels=live_channels)
+                     live_channels=live_channels, guard=guard)

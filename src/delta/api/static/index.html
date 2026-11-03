@@ -318,6 +318,17 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
     <label class="choice"><input type="radio" name="s_autonomy" value="autopilot"><b>Autopilot</b><small>Trusted, and also sends messages and emails without asking. Only permanent deletes still ask.</small></label>
     <label class="check"><input type="checkbox" id="s_quiet"> Quiet hours: only reading allowed between
       <input id="s_qstart" class="time" placeholder="23:30"> and <input id="s_qend" class="time" placeholder="07:00"></label>
+    <h3>Remote security <span class="tag">phone control</span></h3>
+    <div class="app" id="s_guard">
+      <div class="top"><b>Delta PIN</b><span class="state" id="g_state"></span></div>
+      <small>Your phone asks for this PIN (once per 15 minutes) before the camera, a screenshot, sending files,
+        closing apps, changing keys or Autopilot. 5 wrong PINs lock remote control until you unlock it here.
+        Also turn on Telegram's Two-Step Verification on your phone.</small>
+      <div class="kin"><input id="g_pin" type="password" inputmode="numeric" maxlength="8" placeholder="4-8 digits" autocomplete="new-password">
+        <button id="g_save">Set PIN</button></div>
+      <div class="row"><button id="g_unlock" class="primary" hidden>Unlock remote control</button><button id="g_lock">Lock remote control now</button></div>
+      <div class="msg" id="g_msg"></div>
+    </div>
     <h3>Browser</h3>
     <label class="field">Which browser Delta uses <small id="s_using"></small>
       <select id="s_prefer"><option value="auto">My Windows default browser</option><option value="chrome">Google Chrome</option><option value="edge">Microsoft Edge</option></select></label>
@@ -997,7 +1008,23 @@ $("opensetup").onclick = openSetup;
 
 // ---- settings page ------------------------------------------------------------------------
 const lines = id => $(id).value.split("\n").map(s => s.trim()).filter(Boolean);
+async function guardCard() {
+  const s = await api("/api/security").catch(() => null); if (!s) return;
+  $("g_state").className = "state " + (s.locked ? "bad" : s.has_pin ? "ok-text" : "bad");
+  $("g_state").textContent = s.locked ? `🔒 locked: ${s.reason}` : s.has_pin ? "✓ PIN set, protecting phone control" : "no PIN: sensitive phone actions are blocked";
+  $("g_save").textContent = s.has_pin ? "Change PIN" : "Set PIN";
+  $("g_unlock").hidden = !s.locked; $("g_lock").hidden = s.locked;
+}
+$("g_save").onclick = async () => {
+  const r = await api("/api/security/pin", {method: "PUT", body: JSON.stringify({pin: $("g_pin").value.trim()})}).catch(e => ({detail: e.message}));
+  $("g_msg").className = "msg " + (r.ok ? "ok" : "bad");
+  $("g_msg").textContent = r.ok ? "✓ " + r.message : "✗ " + (typeof r.detail === "string" ? r.detail : "Use 4 to 8 digits.");
+  if (r.ok) $("g_pin").value = ""; guardCard();
+};
+$("g_unlock").onclick = async () => { const r = await api("/api/security/unlock", {method: "POST"}); $("g_msg").className = "msg ok"; $("g_msg").textContent = "✓ " + r.message; guardCard(); };
+$("g_lock").onclick = async () => { const r = await api("/api/security/lock", {method: "POST"}); $("g_msg").className = "msg ok"; $("g_msg").textContent = "✓ " + r.message; guardCard(); };
 async function openSettings() {
+  guardCard();
   const s = await api("/api/settings"), b = s.boundaries;
   $("s_prefer").value = s.browser.prefer; $("s_bmode").value = s.browser.mode; $("s_orange").checked = s.browser.orange_cursor;
   $("s_using").textContent = s.browser.using ? `(currently: ${s.browser.using})` : "(no Chrome or Edge found)";

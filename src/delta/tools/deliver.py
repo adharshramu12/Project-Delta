@@ -37,6 +37,7 @@ class SendFile(Tool[SendFileArgs]):
 
     def __init__(self, live_channels: dict[str, Any]) -> None:
         self.live_channels = live_channels  # the Container's running channels (filled at start-up)
+        self.guard: Any = None  # the Container's RemoteGuard, set at start-up
 
     def paths(self, args: SendFileArgs) -> list[str]:
         return [args.path]
@@ -55,6 +56,12 @@ class SendFile(Tool[SendFileArgs]):
             # Asked on this PC: the file is already here.
             return ToolResult(True, f"The file is on this PC at {p} (open it with open_target).",
                               {"path": str(p), "delivered": False})
+        g = self.guard
+        if g is not None and not g.is_unlocked(req.user):  # a stolen phone must not empty the PC
+            why = g.locked_message() if g.locked else (
+                "Sending files needs the owner's PIN: send /unlock, enter the PIN, then ask again." if g.has_pin
+                else "Set a remote PIN on the PC first (Settings > Remote security) to send files to your phone.")
+            return ToolResult(False, why, {"path": str(p), "needs_pin": True})
         upload, zipped = (await asyncio.to_thread(_zip, p), True) if p.is_dir() else (p, False)
         size_mb = upload.stat().st_size / 1e6
         limit = LIMIT_MB.get(req.channel, 50)

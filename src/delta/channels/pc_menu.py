@@ -110,13 +110,21 @@ class PCMenu:
 
     # --- pictures --------------------------------------------------------------------------------------
     async def _screen_cmd(self, update: Any, ctx: Any) -> None:
-        if self._ok(update.effective_user.id):
-            await self._send_picture(update.effective_chat.id, "screen", str(update.effective_user.id))
+        if not self._ok(update.effective_user.id):
+            return
+        uid, chat = str(update.effective_user.id), update.effective_chat.id
+        await self._guarded(uid, "screen", update.message.reply_text,  # type: ignore[attr-defined]
+                            lambda: self._send_picture(chat, "screen", uid))
 
     async def _camera_cmd(self, update: Any, ctx: Any) -> None:
-        if self._ok(update.effective_user.id):
-            await update.message.reply_text("📷 Taking a photo with the PC's camera (its light comes on)…")
-            await self._send_picture(update.effective_chat.id, "camera", str(update.effective_user.id))
+        if not self._ok(update.effective_user.id):
+            return
+        uid, chat = str(update.effective_user.id), update.effective_chat.id
+
+        async def shoot() -> None:
+            await self.app.bot.send_message(chat, "📷 Taking a photo with the PC's camera (its light comes on)…")  # type: ignore[attr-defined]
+            await self._send_picture(chat, "camera", uid)
+        await self._guarded(uid, "camera", update.message.reply_text, shoot)  # type: ignore[attr-defined]
 
     async def _send_picture(self, chat_id: int, kind: str, uid: str) -> None:
         bot = self.app.bot  # type: ignore[attr-defined]
@@ -162,20 +170,21 @@ class PCMenu:
                 else:
                     text, rows = f"☀️ Brightness {await asyncio.to_thread(pc.brightness)}%", BRI_ROWS
                 await q.edit_message_text(text, reply_markup=self._buttons(rows))  # type: ignore[attr-defined]
-            elif kind == "close":
-                await self._close(q, value, "ask", uid)
-            elif kind == "closeok":
-                await self._close(q, value, "close", uid)
-            elif kind == "kill":
-                await self._close(q, value, "kill", uid)
+            elif kind in ("close", "closeok", "kill"):
+                mode = {"close": "ask", "closeok": "close", "kill": "kill"}[kind]
+                await self._guarded(uid, "close_app", q.message.reply_text,  # type: ignore[attr-defined]
+                                    lambda: self._close(q, value, mode, uid))
             elif kind == "apps":
                 await self._show_apps(q.edit_message_text)
             elif kind == "screen":
-                await self._send_picture(q.message.chat.id, "screen", uid)
+                chat = q.message.chat.id
+                await self._guarded(uid, "screen", q.message.reply_text,  # type: ignore[attr-defined]
+                                    lambda: self._send_picture(chat, "screen", uid))
         except PCControlError as e:
             await q.edit_message_text(f"✗ {e}")
 
     def _ok(self, uid: Any) -> bool:
         from delta.channels.base import is_allowed
 
-        return is_allowed(uid, self.allowed)  # type: ignore[attr-defined]
+        guard = getattr(self.c, "guard", None)  # type: ignore[attr-defined]
+        return is_allowed(uid, self.allowed) and not (guard and guard.locked)  # type: ignore[attr-defined]

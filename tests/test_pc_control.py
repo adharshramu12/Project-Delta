@@ -70,11 +70,15 @@ def setup(tmp_path, monkeypatch):
 class Tap:
     def __init__(self, data):
         self.data, self.from_user = data, SimpleNamespace(id=5)
-        self.message = SimpleNamespace(chat=SimpleNamespace(id=5))
+        self.replies = []
+        self.message = SimpleNamespace(chat=SimpleNamespace(id=5), reply_text=self._reply)
         self.edits = []
 
     async def answer(self, *a):
         return None
+
+    async def _reply(self, text, **kw):
+        self.replies.append(text)
 
     async def edit_message_text(self, text, reply_markup=None):
         self.edits.append((text, reply_markup))
