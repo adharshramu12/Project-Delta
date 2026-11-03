@@ -4,6 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Delta</title>
+<script>
+/* Theme: "system" (follows Windows), "light" or "dark". Set before the page paints: no flash. */
+(function () {
+  const dark = matchMedia("(prefers-color-scheme: dark)");
+  let mode = "system";
+  try { mode = localStorage.getItem("delta-theme") || "system"; } catch (e) {}
+  window.applyTheme = function (m) {
+    mode = m || mode;
+    try { localStorage.setItem("delta-theme", mode); } catch (e) {}
+    document.documentElement.dataset.theme = mode === "system" ? (dark.matches ? "dark" : "light") : mode;
+    document.documentElement.dataset.mode = mode;
+    const b = document.getElementById("themebtn");
+    if (b) b.title = "Theme: " + mode + " (click to change)";
+  };
+  window.nextTheme = () => applyTheme({system: "light", light: "dark", dark: "system"}[mode]);
+  dark.addEventListener("change", () => applyTheme());
+  document.addEventListener("DOMContentLoaded", () => applyTheme());
+  applyTheme();
+})();
+</script>
 <link rel="icon" href="/favicon.ico">
 <style>
 /* Delta design system: Apple's clarity, Claude's warmth.
@@ -24,14 +44,15 @@
   --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
   --ease:cubic-bezier(.2,.8,.2,1);
 }
-@media (prefers-color-scheme:dark){:root{
+:root[data-theme="dark"]{
   --paper:#171615; --surface:#201f1d; --surface-2:#2a2826; --ink:#ede9e3; --ink-2:#c9c4bc; --muted:#948f87;
   --line:rgba(237,233,227,.08); --line-strong:rgba(237,233,227,.15);
   --accent:#d97757; --accent-soft:rgba(217,119,87,.14); --accent-ring:rgba(217,119,87,.4);
   --ok:#5bbf86; --ok-soft:rgba(91,191,134,.12); --warn:#e0a84a; --warn-soft:rgba(224,168,74,.14);
   --bad:#ef7268; --bad-soft:rgba(239,114,104,.12); --me:#33302c;
   --shadow-1:0 1px 2px rgba(0,0,0,.3); --shadow-2:0 10px 30px rgba(0,0,0,.35); --shadow-3:0 24px 64px rgba(0,0,0,.5);
-}}
+}
+:root[data-theme="dark"]{color-scheme:dark} :root[data-theme="light"]{color-scheme:light}
 *{box-sizing:border-box}html,body{margin:0;height:100%}
 body{background:var(--paper);color:var(--ink);font:15px/1.55 var(--font);-webkit-font-smoothing:antialiased;
   display:flex;flex-direction:column;letter-spacing:-.003em}
@@ -295,6 +316,7 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
   <span id="health" class="pill OFFLINE status"><span class="dot"></span><span class="lbl">offline</span><span id="stats" class="tip"></span></span>
   <span class="chattitle" id="chattitle"></span>
   <div class="spacer"></div>
+  <button id="themebtn" class="iconbtn" onclick="nextTheme()" aria-label="Theme: system, light or dark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
   <button id="bell" class="iconbtn bell" title="Approvals" aria-label="Approvals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="count" id="bellcount">0</span></button>
   <button id="openapps" class="iconbtn" title="Connected apps: Claude Code, Codex, LM Studio, Google" aria-label="Connected apps"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button>
   <button id="opensettings" class="iconbtn" title="Settings: permissions, folders, learning, keys" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>

@@ -8,6 +8,7 @@ cannot hide it), and every photo, screenshot and closed app is written to the au
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import subprocess
 import tempfile
@@ -101,6 +102,42 @@ _HIDDEN = {"Program Manager", "Windows Input Experience", "Settings", "Microsoft
 _NO_UNSAVED_WORK = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vlc.exe",
                     "spotify.exe", "calculatorapp.exe", "photos.exe", "explorer.exe", "whatsapp.exe",
                     "telegram.exe", "steam.exe"}  # closing these cannot lose a document
+
+
+THEME_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+
+
+def windows_theme() -> str:
+    """'light' or 'dark': what Windows apps use now."""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, THEME_KEY) as k:
+            return "light" if winreg.QueryValueEx(k, "AppsUseLightTheme")[0] else "dark"
+    except OSError:
+        return "light"
+
+
+def set_windows_theme(mode: str) -> str:
+    """Switch Windows (apps and taskbar) to 'light', 'dark' or the opposite ('toggle'). Only the user's own
+    personal colour choice; open apps are told so they repaint right away."""
+    import ctypes
+    import winreg
+
+    if mode == "toggle":
+        mode = "light" if windows_theme() == "dark" else "dark"
+    if mode not in ("light", "dark"):
+        raise PCControlError("Theme must be light, dark or toggle.")
+    value = 1 if mode == "light" else 0
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, THEME_KEY, 0, winreg.KEY_SET_VALUE) as k:
+            for name in ("AppsUseLightTheme", "SystemUsesLightTheme"):
+                winreg.SetValueEx(k, name, 0, winreg.REG_DWORD, value)
+    except OSError as e:
+        raise PCControlError(f"Windows did not allow the theme change: {e}") from e
+    with contextlib.suppress(Exception):  # WM_SETTINGCHANGE "ImmersiveColorSet": apps repaint now
+        ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 2000, None)
+    return mode
 
 
 def open_windows(exclude_titles: tuple[str, ...] = ("Delta",)) -> list[OpenWindow]:

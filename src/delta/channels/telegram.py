@@ -35,6 +35,7 @@ HELP = (
     "<b>Your PC</b>:\n"
     "/volume - mute, louder, quieter (or /volume 30)\n"
     "/brightness - screen brightness (laptop screens)\n"
+    "/theme - Windows light or dark mode\n"
     "/apps - what is open, tap to close it\n"
     "/screen - a screenshot of the PC now\n"
     "/camera - a photo from the webcam of whoever is at the PC\n\n"
@@ -76,6 +77,7 @@ class TelegramChannel(PCMenu):
         self.app.add_handler(CommandHandler("lock", self._lock_cmd))
         self.app.add_handler(CommandHandler("unlock", self._unlock_cmd))
         for name, handler in (("volume", self._volume_cmd), ("brightness", self._brightness_cmd),
+                              ("theme", self._theme_cmd),
                               ("apps", self._apps_cmd), ("screen", self._screen_cmd),
                               ("camera", self._camera_cmd)):
             self.app.add_handler(CommandHandler(name, handler))
@@ -102,7 +104,8 @@ class TelegramChannel(PCMenu):
                 ("ai", "See or switch the main AI"), ("model", "Pick the model"),
                 ("mode", "Permission level"), ("keys", "Replace an API key"), ("stop", "Stop the running task"),
                 ("lock", "Lock remote control now"), ("unlock", "Enter your PIN"),
-                ("volume", "PC volume"), ("brightness", "Screen brightness"), ("apps", "Open apps, tap to close"),
+                ("volume", "PC volume"), ("brightness", "Screen brightness"), ("theme", "Windows light / dark mode"),
+                ("apps", "Open apps, tap to close"),
                 ("screen", "Screenshot of the PC"), ("camera", "Webcam photo"),
                 ("status", "PC health and AIs"), ("help", "What I can do")])
         log.info("telegram.started", bot=self.bot_name)

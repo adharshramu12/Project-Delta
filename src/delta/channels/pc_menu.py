@@ -1,4 +1,4 @@
-"""Telegram controls for the PC itself: /volume, /brightness, /apps, /screen, /camera.
+"""Telegram controls for the PC itself: /volume, /brightness, /theme, /apps, /screen, /camera.
 
 Instant (no AI, no tokens) and button-driven: the message updates in place to show the new state.
 Closing an app that could lose unsaved work asks first; a photo or screenshot is audit-logged."""
@@ -17,6 +17,12 @@ VOL_ROWS = [[("🔇 Mute", "sys:vol:mute"), ("🔈 Unmute", "sys:vol:unmute"),
             [("25%", "sys:vol:=25"), ("50%", "sys:vol:=50"), ("75%", "sys:vol:=75"), ("100%", "sys:vol:=100")]]
 BRI_ROWS = [[("➖", "sys:bri:-10"), ("➕", "sys:bri:+10")],
             [("25%", "sys:bri:=25"), ("50%", "sys:bri:=50"), ("75%", "sys:bri:=75"), ("100%", "sys:bri:=100")]]
+
+THEME_ROWS = [[("☀️ Light", "sys:theme:light"), ("🌙 Dark", "sys:theme:dark"), ("🔁 Switch", "sys:theme:toggle")]]
+
+
+def _theme_text() -> str:
+    return "🌙 Windows is in dark mode" if pc.windows_theme() == "dark" else "☀️ Windows is in light mode"
 
 
 class PCMenu:
@@ -46,6 +52,13 @@ class PCMenu:
         if ctx.args and ctx.args[0].rstrip("%").isdigit():
             await asyncio.to_thread(pc.set_brightness, int(ctx.args[0].rstrip("%")))
         await self._pc_reply(update.message.reply_text, lambda: f"☀️ Brightness {pc.brightness()}%", BRI_ROWS)
+
+    async def _theme_cmd(self, update: Any, ctx: Any) -> None:
+        if not self._ok(update.effective_user.id):
+            return
+        if ctx.args and ctx.args[0].lower() in ("light", "dark", "toggle"):  # /theme dark
+            await asyncio.to_thread(pc.set_windows_theme, ctx.args[0].lower())
+        await self._pc_reply(update.message.reply_text, _theme_text, THEME_ROWS)
 
     async def _pc_reply(self, say: Any, text_fn: Any, rows: list) -> None:
         try:
@@ -170,6 +183,11 @@ class PCMenu:
                 else:
                     text, rows = f"☀️ Brightness {await asyncio.to_thread(pc.brightness)}%", BRI_ROWS
                 await q.edit_message_text(text, reply_markup=self._buttons(rows))  # type: ignore[attr-defined]
+            elif kind == "theme":
+                await asyncio.to_thread(pc.set_windows_theme, value)
+                self.c.audit.record("pc.theme", change=value, by=uid)  # type: ignore[attr-defined]
+                await q.edit_message_text(await asyncio.to_thread(_theme_text),
+                                          reply_markup=self._buttons(THEME_ROWS))  # type: ignore[attr-defined]
             elif kind in ("close", "closeok", "kill"):
                 mode = {"close": "ask", "closeok": "close", "kill": "kill"}[kind]
                 await self._guarded(uid, "close_app", q.message.reply_text,  # type: ignore[attr-defined]
