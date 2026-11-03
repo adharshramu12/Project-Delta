@@ -335,6 +335,55 @@ CLINE_BROKE = ('{"type":"run_result","finishReason":"error","text":"Insufficient
                'balance is $-0.02"}')
 
 
+class FakeClineProc:
+    """Stands in for cline-cli: yields its JSON event lines; records whether it was stopped early."""
+
+    def __init__(self, stdout: str, code: int = 0):
+        self._lines = [(line + "\n").encode() for line in stdout.splitlines()]
+        self.returncode, self.code, self.killed = None, code, False
+
+        class Out:
+            def __init__(self, lines):
+                self.lines = lines
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not self.lines:
+                    raise StopAsyncIteration
+                return self.lines.pop(0)
+
+        class Err:
+            async def read(self):
+                return b""
+
+        self.stdout, self.stderr = Out(self._lines), Err()
+
+    def kill(self):
+        self.killed = True
+
+    async def wait(self):
+        self.returncode = -9 if self.killed else self.code
+        return self.returncode
+
+
+def fake_cline(monkeypatch, respond):
+    """Patch process creation; respond(cmd) -> (stdout, exit code). Returns the list of launched procs."""
+    from delta.llm import cli_providers
+
+    procs = []
+
+    async def spawn(*cmd, **kwargs):
+        out, code = respond(list(cmd))
+        procs.append(FakeClineProc(out, code))
+        procs[-1].cmd = list(cmd)
+        return procs[-1]
+
+    monkeypatch.setattr(cli_providers.asyncio, "create_subprocess_exec", spawn)
+    return procs
+
+
 def _cline(tmp_path):
     from delta.config import ProviderConfig
     from delta.llm.cli_providers import ClineProvider
@@ -363,19 +412,12 @@ def test_cline_out_of_credits_moves_on_instead_of_waiting(tmp_path):
 
 
 async def test_cline_gets_the_prompt_as_an_argument_and_refuses_oversize(tmp_path, monkeypatch):
-    from delta.llm import cli_providers
     from delta.llm.schemas import LLMError
 
     p = _cline(tmp_path)
-    seen = {}
-
-    async def fake_run(self, cmd, prompt, cwd):
-        seen["cmd"], seen["stdin"] = cmd, prompt
-        return CLINE_OK, "", 0
-
-    monkeypatch.setattr(cli_providers.CLIProvider, "_run", fake_run)
+    procs = fake_cline(monkeypatch, lambda cmd: (CLINE_OK, 0))
     r = await p.complete("chat", [{"role": "user", "content": "say OK"}], None)
-    assert r.content == "OK" and "say OK" in seen["cmd"][-1] and seen["stdin"] == ""
+    assert r.content == "OK" and "say OK" in procs[0].cmd[-1]
     with pytest.raises(LLMError) as e:
         await p.complete("chat", [{"role": "user", "content": "x" * 40000}], None)
     assert e.value.kind == "too_large"
@@ -396,7 +438,6 @@ def test_cline_lists_free_models_first(tmp_path, monkeypatch):
 
 async def test_cline_out_of_credits_on_a_paid_model_answers_with_a_free_one(tmp_path, monkeypatch):
     from delta.config import ProviderConfig
-    from delta.llm import cli_providers
     from delta.llm.cli_providers import ClineProvider
 
     p = ClineProvider("cline", ProviderConfig(kind="cline", models={"chat": "anthropic/claude-sonnet-5.5"}))
@@ -404,12 +445,32 @@ async def test_cline_out_of_credits_on_a_paid_model_answers_with_a_free_one(tmp_
     monkeypatch.setattr(p, "catalog", lambda: CATALOG)
     models = []
 
-    async def fake_run(self, cmd, prompt, cwd):
+    def respond(cmd):
         model = cmd[cmd.index("-m") + 1]
         models.append(model)
-        return (CLINE_BROKE, "", 1) if model == "anthropic/claude-sonnet-5.5" else (CLINE_OK, "", 0)
+        return (CLINE_BROKE, 1) if model == "anthropic/claude-sonnet-5.5" else (CLINE_OK, 0)
 
-    monkeypatch.setattr(cli_providers.CLIProvider, "_run", fake_run)
+    fake_cline(monkeypatch, respond)
     r = await p.complete("chat", [{"role": "user", "content": "say OK"}], None)
     assert r.content == "OK" and models == ["anthropic/claude-sonnet-5.5", "reflection/beam-free"]
     assert p.model_for("chat") == "anthropic/claude-sonnet-5.5"  # the user's choice is kept for next time
+
+
+CLINE_NATIVE_CALL = "\n".join([
+    '{"type":"agent_event","event":{"type":"usage","totalInputTokens":12361,"totalOutputTokens":59,'
+    '"totalCacheReadTokens":6016}}',
+    '{"type":"agent_event","event":{"type":"content_start","contentType":"tool","toolName":"browser_open",'
+    '"input":{"url":"https://example.com"}}}',
+    '{"type":"agent_event","event":{"type":"content_start","contentType":"tool","toolName":"run_commands",'
+    '"input":{"commands":["start https://example.com"]}}}'])
+
+
+async def test_cline_native_tool_call_becomes_a_delta_tool_call_and_stops_cline(tmp_path, monkeypatch):
+    """Cline's model calls Delta's tools natively; Delta used to see an empty reply and nudge 3 times."""
+    p = _cline(tmp_path)
+    procs = fake_cline(monkeypatch, lambda cmd: (CLINE_NATIVE_CALL, 0))
+    tools = [{"type": "function", "function": {"name": "browser_open", "parameters": {"type": "object"}}}]
+    r = await p.complete("chat", [{"role": "user", "content": "open example.com"}], tools)
+    assert [(c.name, c.arguments) for c in r.tool_calls] == [("browser_open", {"url": "https://example.com"})]
+    assert procs[0].killed  # stopped before Cline's own run_commands attempt
+    assert r.usage == {"input": 12361, "cached": 6016, "output": 59}

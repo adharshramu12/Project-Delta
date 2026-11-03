@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import getpass
 import logging
 import os
 import sys
 import warnings
+from datetime import datetime
+from pathlib import Path
 
 import httpx
 
@@ -166,9 +169,24 @@ def main() -> None:
         print("audit chain intact" if good else "AUDIT CHAIN BROKEN: log was modified")
         sys.exit(0 if good else 1)
     if args.cmd == "app":
-        from delta.daemon import launch_app
+        # Run hidden from the Desktop shortcut: an error here would otherwise show NOTHING at all.
+        try:
+            from delta.daemon import launch_app
 
-        sys.exit(launch_app())
+            sys.exit(launch_app())
+        except Exception:
+            import traceback
+
+            detail = traceback.format_exc()
+            log_file = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Delta" / "logs" / "launcher.log"
+            with contextlib.suppress(OSError):
+                log_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(log_file, "a", encoding="utf-8") as f:
+                    f.write(f"\n--- {datetime.now():%Y-%m-%d %H:%M:%S}\n{detail}")
+            from delta.daemon import alert
+
+            alert(f"Delta could not open.\n\n{detail.strip().splitlines()[-1]}\n\nDetails: {log_file}")
+            sys.exit(1)
     if args.cmd == "run":
         from delta.daemon import alert, run
 

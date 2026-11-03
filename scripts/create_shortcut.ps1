@@ -1,9 +1,18 @@
 # Creates "Delta" shortcuts on the Desktop and in the Start menu.
 # One click starts Delta with no console window and opens the dashboard; clicking again
 # while it runs just reopens the dashboard. Stop it with the dashboard's Shutdown button.
+#
+# The shortcut runs the venv's pythonw.exe directly. Not a .vbs (Windows is retiring VBScript and
+# Explorer no longer runs it), and the venv must come from the official, signed python.org Python:
+# with Smart App Control on, Windows silently blocks an unsigned python.exe started from the Desktop.
 $root = Split-Path $PSScriptRoot -Parent
-$python = Join-Path $root ".venv\Scripts\python.exe"
-if (-not (Test-Path $python)) { throw "Run 'uv sync --extra all' first." }
+$pythonw = Join-Path $root ".venv\Scripts\pythonw.exe"
+if (-not (Test-Path $pythonw)) { throw "Run scripts\install.ps1 (or 'uv sync --extra all') first." }
+$sac = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState
+if ($sac -eq 1 -and (Get-AuthenticodeSignature $pythonw).Status -ne "Valid") {
+    Write-Warning ("Smart App Control is on and .venv uses an unsigned Python, so Windows will block the shortcut. " +
+                   "Run scripts\install.ps1 to rebuild .venv on the official python.org Python 3.12.")
+}
 
 # A "Delta" folder on the Desktop shows up as a second "Delta" icon (Windows hides ".lnk"), and
 # double-clicking it opens an empty folder instead of the app. Older versions saved files there.
@@ -26,8 +35,8 @@ $targets = @(
 )
 foreach ($path in $targets) {
     $lnk = $shell.CreateShortcut($path)
-    $lnk.TargetPath = Join-Path $env:WINDIR "System32\wscript.exe"
-    $lnk.Arguments = "`"" + (Join-Path $root "scripts\delta.vbs") + "`""
+    $lnk.TargetPath = $pythonw
+    $lnk.Arguments = "-m delta app"
     $lnk.WorkingDirectory = $root
     $lnk.Description = "Delta personal AI agent"
     $icon = Join-Path $root "src\delta\api\static\delta.ico"

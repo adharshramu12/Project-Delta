@@ -198,7 +198,7 @@ class CLIProvider:
         if json_mode and not tools:
             prompt += "\n\nReply with ONLY a JSON object."
         # An empty scratch folder as working dir: no project files, CLAUDE.md or AGENTS.md leak in.
-        with tempfile.TemporaryDirectory(prefix="delta-cli-") as work:
+        with tempfile.TemporaryDirectory(prefix="delta-cli-", ignore_cleanup_errors=True) as work:
             out_file = Path(work) / "reply.txt"
             images = take_images(msgs, Path(work))
             cmd = self.command(exe, model, out_file, self.effort_for(task), images)
@@ -262,7 +262,7 @@ class CLIProvider:
         exe = self.executable()
         if exe is None:
             return None
-        with tempfile.TemporaryDirectory(prefix="delta-cli-") as work:
+        with tempfile.TemporaryDirectory(prefix="delta-cli-", ignore_cleanup_errors=True) as work:
             try:
                 stdout, stderr, code = await self._run([exe, *self.status_args()], "", work)
             except LLMError:
@@ -406,7 +406,7 @@ class ClaudeCodeProvider(CLIProvider):
         prompt = render_transcript(new)
         if json_mode and not tools:
             prompt += "\n\nReply with ONLY a JSON object."
-        with tempfile.TemporaryDirectory(prefix="delta-cli-") as work:
+        with tempfile.TemporaryDirectory(prefix="delta-cli-", ignore_cleanup_errors=True) as work:
             line = self.stdin(prompt, take_images(new, Path(work))) if _has_images(new) else json.dumps(
                 {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": prompt}]}}) + "\n"
         try:
@@ -770,6 +770,18 @@ class CodexProvider(CLIProvider):
         return code == 0 and "logged in" in text and "not logged in" not in text
 
 
+def _cline_tool_calls(lines: list[str], wanted: frozenset[str]) -> list[dict[str, Any]]:
+    """Delta tool calls the model made as Cline-native tool calls ({"name", "arguments"} each)."""
+    calls = []
+    for line in lines:
+        e = _json_or_none(line)
+        ev = e.get("event") if isinstance(e, dict) else None
+        if (isinstance(ev, dict) and ev.get("type") == "content_start" and ev.get("contentType") == "tool"
+                and ev.get("toolName") in wanted):
+            calls.append({"name": ev["toolName"], "arguments": ev.get("input") or {}})
+    return calls
+
+
 def _json_or_none(line: str) -> object:
     try:
         return json.loads(line)
@@ -799,6 +811,11 @@ class ClineProvider(CLIProvider):
         super().__init__(name, cfg)
         self._catalog: tuple[float, dict[str, Any]] | None = None
         self._force_model: contextvars.ContextVar[str] = contextvars.ContextVar(f"{name}_model", default="")
+        # Delta's tools offered on this call. Cline's model calls them as NATIVE tools (not as the JSON
+        # text Delta asks for); Cline rejects those as unknown and Delta saw an empty reply. Each such
+        # call is captured as a Delta tool call and Cline is stopped right there.
+        self._delta_tools: contextvars.ContextVar[frozenset[str]] = contextvars.ContextVar(
+            f"{name}_tools", default=frozenset())
 
     def catalog(self) -> dict[str, Any]:
         """Cline's current model list ({"free": [...], "recommended": [...], ...}), cached for an hour."""
@@ -836,6 +853,7 @@ class ClineProvider(CLIProvider):
         self, task: str, messages: list[Message], tools: list[dict] | None, json_mode: bool = False
     ) -> LLMResponse:
         """Out of credits on a paid model: answer with a free Cline model instead of giving up."""
+        self._delta_tools.set(frozenset(str(t["function"]["name"]) for t in tools or []))
         try:
             return await super().complete(task, messages, tools, json_mode)
         except LLMError as e:
@@ -871,20 +889,66 @@ class ClineProvider(CLIProvider):
         # Cline reads its prompt only from the command line (piped input is not detected on Windows).
         if len(prompt) > self.MAX_PROMPT_CHARS:
             raise LLMError(f"{self.name}: prompt too long for Cline's command line", kind="too_large")
-        return await super()._run([*cmd, prompt], "", cwd) if prompt else await super()._run(cmd, "", cwd)
+        if prompt:
+            cmd = [*cmd, prompt]
+        wanted = self._delta_tools.get()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, cwd=cwd, env={**os.environ, "NO_COLOR": "1"}, stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=2**24)
+        except OSError as e:
+            self._path = None
+            raise LLMError(f"{self.name}: could not start Cline: {e}", kind="unreachable") from e
+        lines: list[str] = []
+
+        async def read() -> bool:
+            """Collect events; True as soon as the model picked one of Delta's tools."""
+            assert proc.stdout is not None
+            async for raw in proc.stdout:
+                line = raw.decode("utf-8", "replace")
+                lines.append(line)
+                if wanted and _cline_tool_calls([line], wanted):
+                    return True
+            return False
+
+        err_task = asyncio.create_task(proc.stderr.read()) if proc.stderr else None
+        stopped, finished = False, False
+        try:
+            stopped = await asyncio.wait_for(read(), self.cfg.timeout_s)
+            if not stopped:  # output ended: let Cline exit on its own and keep its exit code
+                await asyncio.wait_for(proc.wait(), 15)
+                finished = True
+        except TimeoutError as e:
+            raise LLMError(f"{self.name}: timed out after {self.cfg.timeout_s}s") from e
+        finally:
+            if not finished and proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()  # got Delta's tool call: Cline's own retries would only cost time
+                await proc.wait()
+        err = (await err_task).decode("utf-8", "replace") if err_task else ""
+        return "".join(lines), err, 0 if stopped else (proc.returncode or 0)
+
+    def _events(self, stdout: str) -> list[dict[str, Any]]:
+        return [e for e in map(_json_or_none, stdout.splitlines()) if isinstance(e, dict)]
 
     def _result(self, stdout: str) -> dict[str, Any]:
-        events = [e for e in map(_json_or_none, stdout.splitlines()) if isinstance(e, dict)]
-        return next((e for e in reversed(events) if e.get("type") == "run_result"), {})
+        return next((e for e in reversed(self._events(stdout)) if e.get("type") == "run_result"), {})
 
     def reply(self, stdout: str, out_file: Path) -> str:
+        if calls := _cline_tool_calls(stdout.splitlines(), self._delta_tools.get()):
+            return json.dumps({"tool_calls": calls})  # parsed like any JSON tool reply
         result = self._result(stdout)
         if result.get("finishReason") == "error":
             raise self._error(str(result.get("text") or "Cline reported an error"), 1)
         return str(result.get("text") or "").strip()
 
     def usage(self, stdout: str, stderr: str) -> dict[str, int]:
-        u = self._result(stdout).get("usage") or {}
+        u: dict[str, Any] = self._result(stdout).get("usage") or {}
+        if not u:  # stopped early: no run_result yet, the last usage event has the totals
+            last: dict[str, Any] = next((e["event"] for e in reversed(self._events(stdout))
+                                         if isinstance(e.get("event"), dict) and e["event"].get("type") == "usage"), {})
+            u = {"inputTokens": last.get("totalInputTokens"), "outputTokens": last.get("totalOutputTokens"),
+                 "cacheReadTokens": last.get("totalCacheReadTokens")}
         return {"input": int(u.get("inputTokens") or 0) + int(u.get("cacheWriteTokens") or 0),
                 "cached": int(u.get("cacheReadTokens") or 0), "output": int(u.get("outputTokens") or 0)}
 

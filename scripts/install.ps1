@@ -14,7 +14,16 @@ if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
 [Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "2m", "User")
 [Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS", "1", "User")
 
-python -m uv sync --python 3.12 --extra all
+# Build .venv on the official, signed python.org Python 3.12. uv's own Python builds are unsigned, and
+# with Smart App Control on Windows silently blocks them when Delta is opened from the Desktop.
+$py312 = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
+if (-not (Test-Path $py312) -and (Confirm-Step "Install the official Python 3.12 from python.org with winget (per-user)?")) {
+    winget install --id Python.Python.3.12 --scope user -e --override "/quiet InstallAllUsers=0 PrependPath=0"
+}
+if ((Test-Path $py312) -and -not (Test-Path .venv\Scripts\python.exe)) { & $py312 -m venv .venv }
+python -m uv sync --python 3.12 --extra all  # reuses the .venv made above
+
+powershell -ExecutionPolicy Bypass -File scripts\create_shortcut.ps1
 
 $model = (Select-String -Path config/delta.yaml -Pattern '^\s+chat:\s+(\S+)' | Select-Object -First 1).Matches.Groups[1].Value
 if ((Get-Command ollama -ErrorAction SilentlyContinue) -and (Confirm-Step "Pull local model $model (~3 GB)?")) {
