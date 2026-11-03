@@ -154,6 +154,16 @@ double-click icon ─► launcher (pythonw) ─► service: python -m delta run 
 - Every remote request shows a Windows notification and is audited. Results (pictures, files) are sent
   back into the chat.
 
+## Prompt-injection containment and encryption
+- **Taint guard** (`tools/registry.py`): the first time a task reads outside content (`browser_read`,
+  `fetch_page`, `web_search`, `read_file`, `read_messages`, `read_window`, `look_at_screen`) the task is
+  marked. From then on EXTERNAL and DESTRUCTIVE actions, code (`run_shell`, `run_python`), `send_file`,
+  messages and `remember` turn into an approval, overriding autonomy and learned trust. In-page browser
+  steps are exempt. The mark is cleared when the task ends.
+- **Vault** (`system/vault.py`): memory contents and chat titles/messages are sealed with DPAPI
+  (app-specific entropy). Old plain rows are sealed on start and the file is vacuumed; the plain-text
+  FTS index was removed, and recall scores keywords in Python (memories are few, so this is fast).
+
 ## Resource policy
 | Health | Trigger (defaults) | Effect |
 |---|---|---|
@@ -166,6 +176,6 @@ The governor samples every 15 s and opens the NVIDIA driver only when a local mo
 ## Next
 - Slack remote control (same commands and Remote Guard as Telegram).
 - Scheduled tasks and routines.
-- End-to-end encrypted channel (Matrix), memory encrypted at rest (Windows DPAPI), signed releases.
-- A prompt-injection taint guard for web content; OAuth for Gmail and Outlook.
+- End-to-end encrypted channel (Matrix), signed releases.
+- OAuth for Gmail and Outlook.
 - A daily live run of `evals/` (YouTube, Meet, Deep Research, messaging) to catch site changes.

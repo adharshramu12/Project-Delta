@@ -96,6 +96,10 @@ memory stay unless you add `-RemoveData`).
 - **You stay in charge:** every action is risk-checked. Deleting, sending and anything that leaves
   your PC need your approval (unless you choose autopilot). Deletes go to the Recycle Bin.
 - **Hard limits:** passwords, payment details and security settings are always refused.
+- **Prompt-injection containment:** after Delta reads a web page, file or message, anything that sends,
+  deletes or runs code needs your yes, even in autopilot. A malicious page can't quietly take over.
+- **Encrypted at rest:** memories and chats are encrypted with Windows DPAPI, readable only by your
+  Windows account.
 - **Your rules:** `config/boundaries.yaml` sets allowed folders, apps, sites, quiet hours and autonomy.
 - **Tamper-evident audit log** of every decision and tool call.
 - Full threat model and known limits: [SECURITY.md](SECURITY.md).
@@ -146,7 +150,8 @@ Runtime data (memory, audit log, logs) lives in `%LOCALAPPDATA%\Delta`.
 - [x] One-line installer, setup wizard, light/dark theme, low resource use
 - [ ] Slack control (in progress)
 - [ ] Scheduled tasks and routines
-- [ ] End-to-end encrypted channel (Matrix), encrypted memory at rest, signed releases
+- [x] Prompt-injection containment (enforced in code) and DPAPI encryption of memory and chats
+- [ ] End-to-end encrypted channel (Matrix), signed releases
 
 ## Creator
 
