@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from delta.core.intents import small_talk
+from delta.system.vault import PREFIX, scrub, seal, unseal
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chats (
@@ -68,9 +69,25 @@ class ChatStore:
         self._db.execute("PRAGMA journal_mode = WAL")
         self._db.executescript(SCHEMA)
         self._lock = threading.Lock()
+        self._seal_old_rows()
+
+    def _seal_old_rows(self) -> None:
+        """Titles and messages are encrypted at rest (DPAPI). Rows from before that are sealed once."""
+        with self._lock:
+            chats = self._db.execute("SELECT id, title FROM chats WHERE title NOT LIKE ?", (PREFIX + "%",)).fetchall()
+            msgs = self._db.execute("SELECT id, text FROM chat_messages WHERE text NOT LIKE ?",
+                                    (PREFIX + "%",)).fetchall()
+            new_chats = [(seal(r["title"]), r["id"]) for r in chats]
+            new_msgs = [(seal(r["text"]), r["id"]) for r in msgs]
+            if any(t.startswith(PREFIX) for t, _ in new_chats + new_msgs):
+                with self._db:
+                    self._db.executemany("UPDATE chats SET title = ? WHERE id = ?", new_chats)
+                    self._db.executemany("UPDATE chat_messages SET text = ? WHERE id = ?", new_msgs)
+            scrub(self._db)
 
     def close(self) -> None:
         with self._lock:
+            scrub(self._db)
             self._db.close()
 
     # --- chats ------------------------------------------------------------------------------
@@ -79,7 +96,7 @@ class ChatStore:
         chat = Chat(uuid.uuid4().hex[:12], title, now, now)
         with self._lock, self._db:
             self._db.execute("INSERT INTO chats(id, title, created, updated) VALUES (?,?,?,?)",
-                             (chat.id, chat.title, now, now))
+                             (chat.id, seal(chat.title), now, now))
         return chat
 
     def get(self, chat_id: str) -> Chat | None:
@@ -89,9 +106,11 @@ class ChatStore:
     def list(self, query: str = "", limit: int = 200) -> list[Chat]:
         if not query.strip():
             return self._chats("", (), limit)
-        like = f"%{query.strip()}%"
-        return self._chats("WHERE c.title LIKE ? OR EXISTS (SELECT 1 FROM chat_messages m2 "
-                           "WHERE m2.chat_id = c.id AND m2.text LIKE ?)", (like, like), limit)
+        q = query.strip().lower()  # contents are encrypted, so the search runs here, not in SQL
+        with self._lock:
+            hits = {r["chat_id"] for r in self._db.execute("SELECT chat_id, text FROM chat_messages")
+                    if q in unseal(r["text"]).lower()}
+        return [c for c in self._chats("", (), 10_000) if c.id in hits or q in c.title.lower()][:limit]
 
     def _chats(self, where: str, args: tuple[Any, ...], limit: int = 200) -> List[Chat]:
         sql = (f"SELECT c.*, (SELECT text FROM chat_messages m WHERE m.chat_id = c.id ORDER BY m.id DESC LIMIT 1)"
@@ -101,13 +120,13 @@ class ChatStore:
                f" (SELECT COALESCE(MAX(m.id), 0) FROM chat_messages m WHERE m.chat_id = c.id) DESC LIMIT ?")
         with self._lock:
             rows = self._db.execute(sql, (*args, limit)).fetchall()
-        return [Chat(r["id"], r["title"], r["created"], r["updated"], bool(r["pinned"]),
-                     (r["preview"] or "")[:120], r["count"]) for r in rows]
+        return [Chat(r["id"], unseal(r["title"]), r["created"], r["updated"], bool(r["pinned"]),
+                     unseal(r["preview"] or "")[:120], r["count"]) for r in rows]
 
     def update(self, chat_id: str, title: str | None = None, pinned: bool | None = None) -> Chat | None:
         with self._lock, self._db:
             if title is not None and title.strip():
-                self._db.execute("UPDATE chats SET title = ? WHERE id = ?", (title.strip()[:80], chat_id))
+                self._db.execute("UPDATE chats SET title = ? WHERE id = ?", (seal(title.strip()[:80]), chat_id))
             if pinned is not None:
                 self._db.execute("UPDATE chats SET pinned = ? WHERE id = ?", (int(pinned), chat_id))
         return self.get(chat_id)
@@ -121,18 +140,19 @@ class ChatStore:
         now = time.time()
         with self._lock, self._db:
             cur = self._db.execute("INSERT INTO chat_messages(chat_id, role, text, meta, ts) VALUES (?,?,?,?,?)",
-                                   (chat_id, role, text, json.dumps(meta or {}), now))
+                                   (chat_id, role, seal(text), json.dumps(meta or {}), now))
             self._db.execute("UPDATE chats SET updated = ? WHERE id = ?", (now, chat_id))
             if role == "user" and not small_talk(text):  # the first real request names the chat ("hi" doesn't)
-                self._db.execute("UPDATE chats SET title = ? WHERE id = ? AND title = ?",
-                                 (title_from(text), chat_id, NEW_TITLE))
+                row = self._db.execute("SELECT title FROM chats WHERE id = ?", (chat_id,)).fetchone()
+                if row and unseal(row["title"]) == NEW_TITLE:
+                    self._db.execute("UPDATE chats SET title = ? WHERE id = ?", (seal(title_from(text)), chat_id))
         return int(cur.lastrowid or 0)
 
     def messages(self, chat_id: str, limit: int = 500) -> List[dict[str, Any]]:
         with self._lock:
             rows = self._db.execute("SELECT * FROM (SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY id DESC"
                                     " LIMIT ?) ORDER BY id", (chat_id, limit)).fetchall()
-        return [{"id": r["id"], "role": r["role"], "text": r["text"], "meta": json.loads(r["meta"]),
+        return [{"id": r["id"], "role": r["role"], "text": unseal(r["text"]), "meta": json.loads(r["meta"]),
                  "ts": r["ts"]} for r in rows]
 
     def context_for(self, chat_id: str, turns: int = 6, max_chars: int = 1600, per_message: int = 300) -> str:
@@ -144,7 +164,7 @@ class ChatStore:
         lines: list[str] = []
         used = 0
         for r in rows:  # newest first
-            text = " ".join(r["text"].split())
+            text = " ".join(unseal(r["text"]).split())
             if len(text) > per_message:
                 text = text[:per_message] + "…"
             line = f"{'User' if r['role'] == 'user' else 'Delta'}: {text}"

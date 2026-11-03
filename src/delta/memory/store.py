@@ -1,4 +1,5 @@
-"""Local long-term memory in SQLite with FTS5 full-text recall.
+"""Local long-term memory in SQLite. Contents are encrypted at rest with Windows DPAPI (system/vault.py),
+so recall scores keywords in Python instead of a full-text index (an index would store plain text).
 
 kinds:
   profile  - durable facts/preferences about the user ("prefers Antigravity for Python")
@@ -16,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from delta.memory.keywords import keywords, overlap
+from delta.system.vault import PREFIX, scrub, seal, unseal
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories(
@@ -26,17 +28,11 @@ CREATE TABLE IF NOT EXISTS memories(
   created TEXT NOT NULL,
   updated TEXT NOT NULL
 );
-CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content, content='memories', content_rowid='id');
-CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-  INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
-END;
-CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-  INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.id, old.content);
-END;
-CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-  INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.id, old.content);
-  INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
-END;
+-- the old plain-text full-text index goes: it kept a readable copy of every memory
+DROP TRIGGER IF EXISTS memories_ai;
+DROP TRIGGER IF EXISTS memories_ad;
+DROP TRIGGER IF EXISTS memories_au;
+DROP TABLE IF EXISTS memories_fts;
 """
 
 
@@ -54,6 +50,28 @@ class MemoryStore:
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.executescript(SCHEMA)
         self._lock = threading.Lock()
+        self._seal_old_rows()
+
+    def _seal_old_rows(self) -> None:
+        """Rows written before encryption: seal them once, then VACUUM so no plain copy stays in the file."""
+        with self._lock:
+            rows = self._db.execute("SELECT id, content FROM memories WHERE content NOT LIKE ?",
+                                    (PREFIX + "%",)).fetchall()
+            sealed = [(seal(c), i) for i, c in rows]
+            if any(s != c for (s, _), (_, c) in zip(sealed, rows, strict=True)):
+                with self._db:
+                    self._db.executemany("UPDATE memories SET content=? WHERE id=?", sealed)
+            scrub(self._db)
+
+    def _rows(self, kind: str | None = None) -> builtins.list[Memory]:
+        q = "SELECT id, kind, content, source, updated FROM memories"
+        params: tuple = ()
+        if kind:
+            q += " WHERE kind=?"
+            params = (kind,)
+        with self._lock:
+            rows = self._db.execute(q + " ORDER BY updated DESC, id DESC", params).fetchall()
+        return [Memory(i, k, unseal(c), s, u) for i, k, c, s, u in rows]
 
     def close(self) -> None:
         self._db.close()
@@ -61,22 +79,21 @@ class MemoryStore:
     def add(self, content: str, kind: str = "profile", source: str = "user") -> int:
         content = content.strip()
         now = datetime.now(UTC).isoformat(timespec="seconds")
+        same = next((m for m in self._rows(kind) if m.content.lower() == content.lower()), None)
         with self._lock, self._db:
-            row = self._db.execute("SELECT id FROM memories WHERE kind=? AND lower(content)=lower(?)",
-                                   (kind, content)).fetchone()
-            if row:
-                self._db.execute("UPDATE memories SET updated=? WHERE id=?", (now, row[0]))
-                return int(row[0])
+            if same:
+                self._db.execute("UPDATE memories SET updated=? WHERE id=?", (now, same.id))
+                return same.id
             cur = self._db.execute(
                 "INSERT INTO memories(kind, content, source, created, updated) VALUES (?,?,?,?,?)",
-                (kind, content, source, now, now))
+                (kind, seal(content), source, now, now))
             return int(cur.lastrowid or 0)
 
     def update(self, mem_id: int, content: str) -> bool:
         now = datetime.now(UTC).isoformat(timespec="seconds")
         with self._lock, self._db:
             return self._db.execute("UPDATE memories SET content=?, updated=? WHERE id=?",
-                                    (content, now, mem_id)).rowcount > 0
+                                    (seal(content), now, mem_id)).rowcount > 0
 
     def delete(self, mem_id: int) -> bool:
         with self._lock, self._db:
@@ -87,30 +104,21 @@ class MemoryStore:
             self._db.execute("DELETE FROM memories")
 
     def list(self, kind: str | None = None, limit: int = 200) -> list[Memory]:
-        q = "SELECT id, kind, content, source, updated FROM memories"
-        params: tuple = ()
-        if kind:
-            q += " WHERE kind=?"
-            params = (kind,)
-        q += " ORDER BY updated DESC LIMIT ?"
-        with self._lock:
-            return [Memory(*r) for r in self._db.execute(q, (*params, limit))]
+        return self._rows(kind)[:limit]
 
     def search(self, query: str, k: int = 6, kind: str | None = None) -> builtins.list[Memory]:
+        """Best keyword matches (a word counts when a word in the memory starts with it), newest first on ties."""
         words = keywords(query)
         if not words:
             return []
-        match = " OR ".join(f'"{w}"*' for w in words)
-        sql = ("SELECT m.id, m.kind, m.content, m.source, m.updated FROM memories_fts f "
-               "JOIN memories m ON m.id=f.rowid WHERE memories_fts MATCH ?")
-        params: builtins.list[str | int] = [match]
-        if kind:
-            sql += " AND m.kind=?"
-            params.append(kind)
-        sql += " ORDER BY bm25(memories_fts) LIMIT ?"
-        params.append(k)
-        with self._lock:
-            return [Memory(*r) for r in self._db.execute(sql, params)]
+        scored = []
+        for m in self._rows(kind):
+            tokens = re.findall(r"\w+", m.content.lower())
+            score = sum(any(t.startswith(w) for t in tokens) for w in words)
+            if score:
+                scored.append((score, m))
+        scored.sort(key=lambda sm: -sm[0])  # stable: newest first among equal scores
+        return [m for _, m in scored[:k]]
 
     def context_for(self, query: str, k: int = 6) -> str:
         """Prompt block: recent profile facts + past tasks that really match this request.

@@ -12,8 +12,12 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 - **Approvals** time out to *deny*.
 - **Secrets** live in Windows Credential Manager, never in config, logs or chats.
 - **Audit log** is hash-chained; `delta audit verify` detects tampering.
-- **Prompt injection:** web pages, files and tool output are data. They cannot grant approval; only a human on an
-  allow-listed channel can.
+- **Prompt injection (enforced in code):** web pages, files and tool output are data and can never grant
+  approval. Once a task has read outside content (a page, search result, file, chat message or the screen),
+  every send, delete, code run or memory write in that task needs a human yes, **even in Autopilot and even
+  for actions Delta has learned to trust**. Steps inside the open page (click, fill) stay free.
+- **Encryption at rest:** memories, chat titles and messages are encrypted with **Windows DPAPI**, tied to
+  your Windows account. Another account, a copied disk or a stolen database file cannot read them.
 - **The dashboard API** listens on this PC only (127.0.0.1) and needs a per-install secret token.
 - **Your own browser:** Delta never types into password or payment fields; it asks you to do that.
 - **AI apps you sign in to** (Claude Code, Codex, Cline) are used only as text brains: their own tools are
@@ -42,8 +46,10 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 - **Telegram bot chats are not end-to-end encrypted.** Messages travel encrypted, but Telegram's servers can
   read them. Delta minimises what passes through (keys and PINs are deleted at once; pictures are deleted
   from the PC after sending). For end-to-end encryption, a Matrix channel is planned.
-- **Malware already running as the same Windows user** can read what that user can. Encrypting Delta's own
-  data with Windows DPAPI is planned.
+- **Malware already running as the same Windows user** can ask Windows to decrypt that user's DPAPI data,
+  like any other app the user runs. DPAPI protects against other accounts and stolen files, not that.
+- **Prompt-injection containment** guards risky actions, not reading: an injected page can still mislead
+  Delta's answers or in-page steps, so check important results.
 - **Cloud AI providers** see the requests sent to them. Use a local model (LM Studio, Ollama) for private work.
 
 ## Reporting a vulnerability

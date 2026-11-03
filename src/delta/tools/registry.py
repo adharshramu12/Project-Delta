@@ -8,6 +8,7 @@ from __future__ import annotations
 import difflib
 import json
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ValidationError
@@ -17,7 +18,7 @@ from delta.safety.approvals import ApprovalBroker, ApprovalRequest
 from delta.safety.audit import AuditLog
 from delta.safety.policy import PolicyEngine, Verdict, norm_path
 from delta.system.logging import log
-from delta.tools.base import Tool, ToolResult
+from delta.tools.base import Risk, Tool, ToolResult
 
 
 def accepted_names(model: type[BaseModel]) -> set[str]:
@@ -107,6 +108,25 @@ class ToolRegistry:
         return list(self._tools)
 
 
+# Prompt-injection containment, enforced in code rather than by asking the model nicely. Once a task
+# has read content that someone else wrote (a web page, search results, a file, a chat message, the
+# screen), that content may be steering the model. From then on, actions that send, delete, run code
+# or change Delta's memory need a human yes for the rest of the task, whatever the autonomy level
+# or learned trust says. In-page browser steps (click, fill, press) stay free: they only act on the
+# page already open, which is how Deep Research and form filling work.
+UNTRUSTED_SOURCES = {"browser_read", "fetch_page", "web_search", "read_messages", "read_file",
+                     "read_window", "look_at_screen"}
+GUARDED_RISKS = {Risk.EXTERNAL, Risk.DESTRUCTIVE}
+ALWAYS_GUARDED = {"run_shell", "run_python", "remember", "send_file", "send_message", "chat_for_me"}
+IN_PAGE = {"browser_click", "browser_fill", "browser_press"}
+
+
+def needs_taint_check(tool_name: str, risk: str) -> bool:
+    if tool_name in IN_PAGE:
+        return False
+    return tool_name in ALWAYS_GUARDED or risk in GUARDED_RISKS
+
+
 class ToolExecutor:
     def __init__(self, registry: ToolRegistry, policy: PolicyEngine, approvals: ApprovalBroker,
                  audit: AuditLog, learning: LearningStore | None = None,
@@ -119,6 +139,8 @@ class ToolExecutor:
         self.on_learned = on_learned
         # task_id -> things the user refused to have changed during that task (normalised paths/targets)
         self._refused: dict[str, set[str]] = {}
+        # task_id -> the first tool that brought outside content into the task (see UNTRUSTED_SOURCES)
+        self._tainted: dict[str, str] = {}
 
     @staticmethod
     def action_key(tool: Tool, args: BaseModel, risk: str) -> str:
@@ -175,6 +197,7 @@ class ToolExecutor:
 
     def forget_task(self, task_id: str) -> None:
         self._refused.pop(task_id, None)
+        self._tainted.pop(task_id, None)
 
     async def execute(self, name: str, raw_args: dict[str, Any], task_id: str = "") -> ToolResult:
         tool = self.registry.get(name)
@@ -193,6 +216,12 @@ class ToolExecutor:
             return ToolResult(False, f"invalid arguments for {name}: {e.errors(include_url=False)}")
 
         decision = self.policy.evaluate(tool, args)
+        source = self._tainted.get(task_id) if task_id else None
+        tainted = bool(source) and decision.verdict != Verdict.DENY and needs_taint_check(name, decision.risk)
+        if tainted:
+            decision = replace(decision, verdict=Verdict.ASK,
+                               reason=f"this task read outside content ({source}), which could be steering me; "
+                                      "please confirm")
         summary = tool.summary(args)
         self.audit.record("policy", task=task_id, tool=name, summary=summary,
                           verdict=decision.verdict, risk=decision.risk, reason=decision.reason)
@@ -215,7 +244,7 @@ class ToolExecutor:
                                   {"user_denied": True,
                                    "denied_action": f"{summary} (you said no to this before; undo it in "
                                                     f"Delta's learned list if you changed your mind)"})
-            if (self.learning and decision.risk in TRUSTABLE_RISKS
+            if (self.learning and not tainted and decision.risk in TRUSTABLE_RISKS
                     and (trust := self._learned_match("trust", key, tool, args, decision.risk))):
                 self.audit.record("approval", task=task_id, tool=name, approved=True, by="learned trust",
                                   learned=trust.id)
@@ -247,4 +276,7 @@ class ToolExecutor:
             log.exception("tool.crashed", tool=name)
             result = ToolResult(False, f"{type(e).__name__}: {e}")
         self.audit.record("tool", task=task_id, tool=name, ok=result.ok, evidence=result.evidence)
+        if task_id and result.ok and name in UNTRUSTED_SOURCES and task_id not in self._tainted:
+            self._tainted[task_id] = name
+            self.audit.record("taint", task=task_id, source=name)
         return result
