@@ -44,7 +44,7 @@ class Lifecycle:
         # Reverse order: things started last stop first.
         for name, hook in reversed(self._hooks):
             try:
-                await asyncio.wait_for(hook(), timeout=10)
+                await asyncio.wait_for(hook(), timeout=3)
                 log.info("lifecycle.stopped", component=name)
             except Exception as e:
                 log.error("lifecycle.stop_failed", component=name, error=str(e))

@@ -202,19 +202,27 @@ class NoArgs(BaseModel):
     pass
 
 
-class BrowserRead(_BrowserTool[NoArgs]):
-    name = "browser_read"
-    description = "Read the current browser page: title, URL, visible text and clickable elements."
-    risk = Risk.READ
-    Args = NoArgs
+class ReadArgs(BaseModel):
+    focus: str | None = Field(default=None, description="Only return parts of the page about this, e.g. 'born'")
 
-    async def run(self, args: NoArgs) -> ToolResult:
+
+class BrowserRead(_BrowserTool[ReadArgs]):
+    name = "browser_read"
+    description = ("Read the current browser page: title, URL, visible text and clickable elements. "
+                   "Pass focus (e.g. 'born', 'price') to get only the relevant parts of long pages.")
+    risk = Risk.READ
+    Args = ReadArgs
+
+    async def run(self, args: ReadArgs) -> ToolResult:
+        from delta.tools.user_browser import MAX_READ_CHARS, select_lines
+
         async def go() -> ToolResult:
             page = await self.mgr.page()
-            text = (await page.inner_text("body"))[:12000]
+            text = await page.inner_text("body")
             elements = await page.evaluate(ELEMENTS_JS)
             ev = await _evidence(page, self.mgr)
-            body = f"{ev['title']} — {ev['url']}\n\n{text}\n\nINTERACTIVE:\n" + "\n".join(elements)
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()] + elements
+            body = f"{ev['title']} — {ev['url']}\n\n" + select_lines(lines, args.focus, MAX_READ_CHARS)
             return ToolResult(True, body, ev)
 
         return await self._guarded(go)

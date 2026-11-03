@@ -19,6 +19,57 @@ llm:
       models:
         chat: gemma3n:e4b   # set to the tag you pulled, e.g. gemma4:e4b
         vision: gemma3:4b
+    # LM Studio (or Jan / llama.cpp server: change base_url). Start its local server
+    # (Developer tab, or `lms server start`); "auto" uses whatever chat model you downloaded.
+    lmstudio:
+      base_url: http://127.0.0.1:1234/v1   # used if LM Studio's own settings can't be read
+      discover: lmstudio                   # follow the port set in LM Studio
+      min_free_ram_gb: 6                   # don't load a model when the PC is short on memory
+      local: true
+      native_tools: false
+      timeout_s: 180
+      models:
+        chat: auto
+    # Your own Claude Pro/Max plan through the Claude Code CLI (run `claude` once to sign in).
+    # Skipped automatically when Claude Code is not installed.
+    claude_code:
+      kind: claude_code
+      timeout_s: 240
+      # Per job: plan = once per task, chat = every step (most tokens), verify = one final check.
+      # Change these in Settings > Connected apps.
+      models:
+        plan: sonnet
+        chat: sonnet
+        verify: haiku
+        vision: haiku     # "what is on screen" and the screenshot check: fast and cheap
+      efforts:
+        plan: low         # plans are short checklists: low effort is ~2x faster and as good
+        chat: low
+        verify: low
+        vision: low
+    # Your own ChatGPT plan through the Codex CLI (run `codex` once to sign in).
+    codex:
+      kind: codex
+      timeout_s: 240
+      models:
+        chat: ""          # empty = Codex's default model
+    # Your Cline account, through the cline-cli that the Cline desktop app installs. Uses one of
+    # Cline's FREE models by default (no credits needed); pick others in Settings > Connected apps.
+    # Skipped when Cline is not installed.
+    cline:
+      kind: cline
+      timeout_s: 240
+      models:
+        chat: reflection/beam-free   # Cline's free Beam model; "" = the model you last chose in Cline
+    # DeepSeek's own API (very low cost). Key: `delta secrets set deepseek_api_key`.
+    deepseek:
+      base_url: https://api.deepseek.com/v1
+      secret: deepseek_api_key
+      timeout_s: 90
+      models:
+        chat: deepseek-chat
+        plan: deepseek-chat
+        verify: deepseek-chat
     groq:
       base_url: https://api.groq.com/openai/v1
       secret: groq_api_key
@@ -36,10 +87,10 @@ llm:
         vision: meta/llama-3.2-90b-vision-instruct
   # Provider order per job. The first healthy, allowed provider wins.
   routes:
-    chat: [ollama, groq, nim]
-    plan: [groq, nim, ollama]
-    verify: [groq, nim, ollama]
-    vision: [ollama, nim]
+    chat: [ollama, lmstudio, claude_code, codex, cline, deepseek, groq, nim]
+    plan: [claude_code, codex, cline, deepseek, groq, nim, lmstudio, ollama]
+    verify: [groq, nim, deepseek, claude_code, codex, cline, lmstudio, ollama]
+    vision: [ollama, lmstudio, claude_code, codex, nim]
 
 search:
   order: [tavily, serpapi, duckduckgo]   # duckduckgo needs no key and is the free fallback

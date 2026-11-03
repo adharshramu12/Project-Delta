@@ -42,7 +42,7 @@ async def test_verified_task_teaches_a_skill_then_reuses_it(tmp_path):
                   "tools": ["write_file", "path_info"]}
     orch, _audit, _ = make(tmp_path, {
         "plan": [js(plan)],
-        "chat": [call("write_file", path=target, content="hi"), call("path_info", path=target), text("Done")],
+        "chat": [call("write_file", path=target, content="hi"), call("path_info", path=target), text("DONE: Done")],
         "verify": [js({"passed": True, "reason": "exists"}), js(skill_json)],
     })
     store = SkillStore(tmp_path / "skills.db")
@@ -58,7 +58,7 @@ async def test_verified_task_teaches_a_skill_then_reuses_it(tmp_path):
     Path(target).unlink()
     orch2, _, _ = make(tmp_path, {
         "plan": [js({**plan, "skill_id": sid})],
-        "chat": [call("write_file", path=target, content="hi"), call("path_info", path=target), text("Done")],
+        "chat": [call("write_file", path=target, content="hi"), call("path_info", path=target), text("DONE: Done")],
         "verify": [js({"passed": True, "reason": "exists"})],
     })
     orch2.skills = store
@@ -78,9 +78,34 @@ async def test_verified_task_teaches_a_skill_then_reuses_it(tmp_path):
 async def test_invented_skill_id_is_ignored(tmp_path):
     orch, _, _ = make(tmp_path, {
         "plan": [js({"needs_tools": True, "success_criteria": ["x"], "skill_id": 999})],
-        "chat": [text("nothing"), text("still nothing")], "verify": [],
+        "chat": [text("DONE: nothing"), text("DONE: still nothing")], "verify": [],
     })
     orch.skills = SkillStore(tmp_path / "skills.db")
     r = await orch.run(TaskRequest("anything"))
     await orch.drain()
     assert r.skill_id is None
+
+
+def test_chat_filler_does_not_pull_in_skills(tmp_path):
+    """'did u completed the previous talk buddy' used to match every skill through 'the' and 'did',
+    adding ~700 prompt tokens and an extra AI call per message."""
+    from delta.memory.skills import SkillStore
+
+    s = SkillStore(tmp_path / "s.db")
+    s.learn("Play a YouTube video from a search query", "User asks to open YouTube and play the song",
+            ["open youtube", "search", "play"], ["play_youtube"])
+    assert s.relevant("did u completed the previous talk buddy") == []
+    assert [k.name for k in s.relevant("play the kesariya song on youtube")] == [
+        "Play a YouTube video from a search query"]
+
+
+def test_memory_context_skips_filler_matches_and_repeats(tmp_path):
+    from delta.memory.store import MemoryStore
+
+    m = MemoryStore(tmp_path / "m.db")
+    m.add("User's name is Adharsh.", kind="profile")
+    m.add("The user's name is Adharsh.", kind="profile")
+    m.add("Play the Kaanunna Kalyanam song from Sita Ramam on YouTube -> done", kind="episode")
+    ctx = m.context_for("did u completed the previous talk buddy")
+    assert ctx.count("Adharsh") == 1 and "(past)" not in ctx
+    assert "(past)" in m.context_for("play kaanunna kalyanam song again")

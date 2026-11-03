@@ -19,6 +19,8 @@ class LLMResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     provider: str = ""
     model: str = ""
+    usage: dict[str, int] = field(default_factory=dict)  # {"input", "cached", "output"} tokens
+    final: bool = False  # the model explicitly ended its turn ({"final": ...} in the JSON tool protocol)
 
 
 Message = dict[str, Any]  # {"role": ..., "content": ..., optional "tool_calls"/"tool_call_id"}
@@ -27,7 +29,8 @@ Message = dict[str, Any]  # {"role": ..., "content": ..., optional "tool_calls"/
 class LLMError(RuntimeError):
     """Raised when a provider fails in a way that should trigger fallback.
 
-    kind: "unreachable" (nothing listening, e.g. Ollama not installed), "rate_limit", or "error".
+    kind: "unreachable" (nothing listening, e.g. Ollama not installed), "rate_limit", "quota" (out of
+    credits: skip this provider for a while), or "error".
     retry_after_s: for rate limits, how long the provider asked us to wait (if it said).
     """
 

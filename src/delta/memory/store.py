@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from delta.memory.keywords import keywords, overlap
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories(
   id INTEGER PRIMARY KEY,
@@ -95,10 +97,10 @@ class MemoryStore:
             return [Memory(*r) for r in self._db.execute(q, (*params, limit))]
 
     def search(self, query: str, k: int = 6, kind: str | None = None) -> builtins.list[Memory]:
-        words = [w for w in re.findall(r"\w{3,}", query.lower())][:12]
+        words = keywords(query)
         if not words:
             return []
-        match = " OR ".join(f'"{w}"' for w in words)
+        match = " OR ".join(f'"{w}"*' for w in words)
         sql = ("SELECT m.id, m.kind, m.content, m.source, m.updated FROM memories_fts f "
                "JOIN memories m ON m.id=f.rowid WHERE memories_fts MATCH ?")
         params: builtins.list[str | int] = [match]
@@ -111,8 +113,16 @@ class MemoryStore:
             return [Memory(*r) for r in self._db.execute(sql, params)]
 
     def context_for(self, query: str, k: int = 6) -> str:
-        """Prompt block: recent profile facts + memories relevant to this request."""
+        """Prompt block: recent profile facts + past tasks that really match this request.
+        Repeated facts ("User's name is X" / "The user's name is X") are sent once."""
         profile = self.list("profile", limit=25)
-        related = [m for m in self.search(query, k) if m.id not in {p.id for p in profile}]
-        lines = [f"- {m.content}" for m in profile] + [f"- (past) {m.content}" for m in related]
-        return "\n".join(lines)
+        words = keywords(query)
+        need = min(2, len(words))
+        related = [m for m in self.search(query, k) if m.id not in {p.id for p in profile}
+                   and overlap(words, m.content) >= need]
+        lines: dict[str, str] = {}
+        for m in profile:
+            key = re.sub(r"\W+|^the ", " ", m.content.lower().removeprefix("the ")).strip()
+            lines.setdefault(key, f"- {m.content}")
+        lines.update({f"past {m.id}": f"- (past) {m.content}" for m in related})
+        return "\n".join(lines.values())

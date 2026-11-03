@@ -1,8 +1,15 @@
 """PolicyEngine = hard safety floor ∩ the user's boundaries.
 
-Hard floor (not configurable): SYSTEM-risk actions are denied, DESTRUCTIVE and EXTERNAL
-actions always need a human. The user's `boundaries.yaml` can only make Delta stricter
-than that, or relax ordinary writes inside allowed folders.
+Hard floor (not configurable): SYSTEM-risk actions (security settings, credentials, payments) are
+denied, and changes that cannot be undone (a shell deleting files, Shift+Delete) always need a human.
+
+Autonomy (the user's choice):
+  ask-everything  ask before anything except reading
+  ask-risky       act freely; ask before changing or sending anything
+  trusted         also change things without asking when it can be undone: edit, overwrite or
+                  delete files in allowed folders (old versions go to the Recycle Bin), keys and
+                  ordinary commands. Still asks before sending anything to anyone.
+  autopilot       trusted, and also sends messages and emails without asking.
 """
 
 from __future__ import annotations
@@ -133,16 +140,25 @@ class PolicyEngine:
             return d(Verdict.ASK, "quiet hours: autonomous actions are paused")
 
         autonomy = self.b.autonomy
+        trusted = autonomy in ("trusted", "autopilot")
+        in_allowed = bool(paths) and all(_under(p, self.allowed) for p in paths)
         if risk == Risk.ACT:
             if autonomy == "ask-everything":
                 return d(Verdict.ASK, "autonomy=ask-everything")
             return d(Verdict.ALLOW, "non-destructive interaction")
         if risk == Risk.WRITE:
-            if autonomy == "trusted" and paths and all(_under(p, self.allowed) for p in paths):
-                return d(Verdict.ALLOW, "write inside allowed folders (trusted)")
-            return d(Verdict.ASK, "modifies data")
-        # DESTRUCTIVE / EXTERNAL: hard floor, always a human decision
-        return d(Verdict.ASK, "deletes/overwrites data" if risk == Risk.DESTRUCTIVE else "sends data outside")
+            if trusted and (in_allowed or not paths):
+                return d(Verdict.ALLOW, f"change allowed without asking ({autonomy})")
+            return d(Verdict.ASK, "modifies data" if not paths else "changes files outside your allowed folders")
+        if risk == Risk.DESTRUCTIVE:
+            if trusted and in_allowed and tool.undoable(args):
+                return d(Verdict.ALLOW, f"undoable: the old version goes to the Recycle Bin ({autonomy})")
+            return d(Verdict.ASK, "deletes/overwrites data and cannot be undone"
+                     if not tool.undoable(args) else "deletes/overwrites data outside your allowed folders")
+        # EXTERNAL: reaches other people or services
+        if autonomy == "autopilot":
+            return d(Verdict.ALLOW, "sends without asking (autopilot)")
+        return d(Verdict.ASK, "sends data outside")
 
     def _quiet_hours(self) -> bool:
         q = self.b.quiet_hours

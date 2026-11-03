@@ -95,6 +95,14 @@ async def test_last_provider_waits_longer_instead_of_failing(monkeypatch):
     assert (await router.complete([])).content == "ok"  # 0.1 s > normal limit, but it is the last resort
 
 
+async def test_rate_limit_without_hint_still_waits(monkeypatch):
+    """Live finding (hard test, screen-vision): a 429 with no 'try again in' failed in 3 seconds."""
+    monkeypatch.setattr("delta.llm.router.DEFAULT_RATE_WAIT_S", 0.05)
+    only = FakeProvider("groq", [LLMError("429", kind="rate_limit", retry_after_s=None), text("ok")])
+    router = ModelRouter({"groq": only}, {"chat": ["groq"]})
+    assert (await router.complete([])).content == "ok"
+
+
 def test_friendly_messages_for_users():
     from delta.core.orchestrator import friendly_model_error
     from delta.llm.schemas import AllProvidersFailedError
@@ -166,7 +174,7 @@ async def test_actor_gets_only_planned_tools_first(tmp_path):
     target = str(tmp_path / "a.txt")
     orch, _, _ = make(tmp_path, {
         "plan": [js({"needs_tools": True, "tools": ["write_file"], "success_criteria": [f"{target} exists"]})],
-        "chat": [call("write_file", path=target, content="x"), text("done")],
+        "chat": [call("write_file", path=target, content="x"), text("DONE: done")],
         "verify": [js({"passed": True, "reason": "ok"})],
     })
     seen: list[list[str]] = []
@@ -191,7 +199,7 @@ async def test_memory_ignores_one_off_requests(monkeypatch):
             return text('{"facts": ["User wants to create a file named x.txt", "User uses Delta tool", '
                         '"User prefers short answers in Telugu"]}')
 
-    facts = await extractor.extract_facts(R(), "make x.txt", "done")  # type: ignore[arg-type]
+    facts = await extractor.extract_facts(R(), "I prefer short answers, make x.txt", "done")  # type: ignore[arg-type]
     assert facts == ["User prefers short answers in Telugu"]
 
 

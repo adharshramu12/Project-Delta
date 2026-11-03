@@ -19,9 +19,10 @@ import re
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import Any, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from delta.tools.base import Risk, Tool, ToolResult
 
@@ -37,6 +38,8 @@ SYSTEM_WINDOWS = {"Program Manager", "Taskbar", "Status", "Start", "Search", "No
                   "Windows Input Experience", "NVIDIA GeForce Overlay"}
 OVERRIDE_PX = 40
 BACKOFF_S = 30
+IDLE_QUIET_S = 4    # the user left the mouse alone this long: Delta may carry on
+IDLE_MAX_S = 120    # still busy after this long: stop and hand the task back
 
 
 class UserOverrideError(RuntimeError):
@@ -87,6 +90,23 @@ class DesktopController:
                 self._paused_until = now + BACKOFF_S
                 self._last_pos = None
                 raise UserOverrideError("you moved the mouse, so I stopped and handed control back to you")
+
+    async def wait_until_idle(self, quiet_s: float = IDLE_QUIET_S, max_s: float = IDLE_MAX_S) -> bool:
+        """The user grabbed the mouse: do nothing until they leave it alone for `quiet_s`, then
+        let Delta continue where it was (True). False if they keep using the PC for `max_s`."""
+        loop = asyncio.get_running_loop()
+        end = loop.time() + max_s
+        last, still_since = self.position(), loop.time()
+        while loop.time() < end:
+            await asyncio.sleep(0.5)
+            pos = self.position()
+            if abs(pos[0] - last[0]) > 3 or abs(pos[1] - last[1]) > 3:
+                last, still_since = pos, loop.time()
+            elif loop.time() - still_since >= quiet_s:
+                self._paused_until = 0.0
+                self._last_pos = None
+                return True
+        return False
 
     def mark(self) -> None:
         """Call after every input action: remember where *we* left the mouse."""
@@ -238,13 +258,17 @@ def _focused_text() -> str | None:
     return None
 
 
-def unicode_inputs(text: str) -> list[tuple[int, int, int]]:
+def unicode_inputs(text: str, soft_newlines: bool = False) -> list[tuple[int, int, int]]:
     """(vk, scan, flags) per key event. Characters go as KEYEVENTF_UNICODE so no keyboard layout,
-    modifier or IME can reinterpret them; newline/tab are real Enter/Tab keys."""
-    KEYUP, UNICODE = 0x0002, 0x0004
+    modifier or IME can reinterpret them; newline/tab are real Enter/Tab keys. soft_newlines makes a
+    newline Shift+Enter: in chat boxes (Gemini, ChatGPT) a plain Enter sends a half-typed message."""
+    KEYUP, UNICODE, SHIFT = 0x0002, 0x0004, 0x10
     special = {"\n": 0x0D, "\t": 0x09}
     events: list[tuple[int, int, int]] = []
     for ch in text.replace("\r\n", "\n"):
+        if ch == "\n" and soft_newlines:
+            events += [(SHIFT, 0, 0), (0x0D, 0, 0), (0x0D, 0, KEYUP), (SHIFT, 0, KEYUP)]
+            continue
         if ch in special:
             events += [(special[ch], 0, 0), (special[ch], 0, KEYUP)]
             continue
@@ -255,7 +279,7 @@ def unicode_inputs(text: str) -> list[tuple[int, int, int]]:
     return events
 
 
-def _send_unicode(text: str) -> None:
+def _send_unicode(text: str, soft_newlines: bool = False) -> None:
     import ctypes
     from ctypes import wintypes
 
@@ -271,10 +295,53 @@ def _send_unicode(text: str) -> None:
         _fields_ = [("type", wintypes.DWORD), ("u", _U)]
 
     send = ctypes.windll.user32.SendInput
-    for vk, scan, flags in unicode_inputs(text):
+    for vk, scan, flags in unicode_inputs(text, soft_newlines):
         inp = INPUT(type=1, ki=KEYBDINPUT(vk, scan, flags, 0, 0))
         send(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
         time.sleep(0.01)  # WinUI apps (new Notepad) drop keys that arrive faster than this
+
+
+# --- messaging apps: Enter there SENDS a message ------------------------------------------------
+# A raw click + type + Enter in WhatsApp/Telegram/Slack is a message to another person, so it gets
+# the same approval as send_message (EXTERNAL) and an approval card that says so in plain words.
+
+def messaging_app(title: str) -> str | None:
+    t = title.strip()
+    if t == "WhatsApp":
+        return "WhatsApp"
+    if t.startswith("Telegram"):
+        return "Telegram"
+    if t == "Slack" or t.endswith("- Slack"):
+        return "Slack"
+    return None
+
+
+def _title_at(x: int, y: int) -> str:
+    try:
+        import win32gui
+
+        return str(win32gui.GetWindowText(win32gui.GetAncestor(win32gui.WindowFromPoint((x, y)), 2)))
+    except Exception:
+        return ""
+
+
+def _title_of(window: str | None) -> str:
+    """The title of the named window, or of the one in front."""
+    try:
+        import win32gui
+
+        if window:
+            from delta.tools.screen import find_window_handle
+
+            h = find_window_handle(window)
+            return str(win32gui.GetWindowText(h)) if h else window
+        return str(win32gui.GetWindowText(win32gui.GetForegroundWindow()))
+    except Exception:
+        return window or ""
+
+
+def _presses_enter(keys: list[str] | None) -> bool:
+    return bool({k.lower() for k in keys or []} & {"enter", "return"})
 
 
 def click_risk(name: str) -> Risk:
@@ -291,19 +358,30 @@ class _DesktopTool[A: BaseModel](Tool[A]):
     def __init__(self, ctl: DesktopController) -> None:
         self.ctl = ctl
 
-    async def _act(self, fn: Callable[[], str], evidence: Callable[[], dict[str, Any]] | None = None) -> ToolResult:
-        try:
-            self.ctl.guard()
-            with self.ctl.acting():
-                msg = await self.ctl.call(fn)
-                await asyncio.sleep(0.4)  # let the UI react before we look again
-            self.ctl.mark()
-            ev = await self.ctl.call(evidence) if evidence else {}
-            return ToolResult(True, msg, ev)
-        except UserOverrideError as e:
-            return ToolResult(False, f"STOPPED: {e}. Do not continue desktop actions; tell the user.")
-        except LookupError as e:
-            return ToolResult(False, str(e))
+    async def _act(self, fn: Callable[[], str], evidence: Callable[[], dict[str, Any]] | None = None,
+                   settle: float = 0.4) -> ToolResult:
+        resumed = False
+        while True:
+            try:
+                self.ctl.guard()
+                with self.ctl.acting():
+                    msg = await self.ctl.call(fn)
+                    await asyncio.sleep(settle)  # let the UI react before we look again
+                self.ctl.mark()
+                ev = await self.ctl.call(evidence) if evidence else {}
+                if resumed:
+                    msg += " (paused while you used the mouse, then continued)"
+                    ev["resumed_after_user"] = True
+                return ToolResult(True, msg, ev)
+            except UserOverrideError as e:
+                # Pause, don't quit: the user is often just glancing at something.
+                if not resumed and await self.ctl.wait_until_idle():
+                    resumed = True
+                    continue
+                return ToolResult(False, f"STOPPED: {e}, and you kept using the computer. Do not continue "
+                                         "desktop actions; tell the user where you got to.")
+            except LookupError as e:
+                return ToolResult(False, str(e))
 
 
 def _window_evidence() -> dict[str, Any]:
@@ -453,8 +531,19 @@ class TypeText(_DesktopTool[TypeArgs]):
     risk = Risk.ACT
     Args = TypeArgs
 
+    def risk_for(self, args: TypeArgs) -> Risk:
+        # A newline is an Enter key press: it can submit a form or send a message, so it needs
+        # the same approval as press_keys Enter (typing "hi\n" must not slip past it).
+        if "\n" not in args.text and "\r" not in args.text:
+            return Risk.ACT
+        return Risk.EXTERNAL if messaging_app(_title_of(args.window)) else Risk.WRITE
+
     def summary(self, args: TypeArgs) -> str:
-        return f"type {len(args.text)} chars" + (f" into {args.window}" if args.window else "")
+        enter = "\n" in args.text or "\r" in args.text
+        if enter and (app := messaging_app(_title_of(args.window))):
+            return f"SEND a message in {app}: \u201c{args.text.strip()}\u201d"
+        return f"type {len(args.text)} chars{' and press Enter' if enter else ''}" + (
+            f" into {args.window}" if args.window else "")
 
     async def run(self, args: TypeArgs) -> ToolResult:
         def go() -> str:
@@ -475,9 +564,19 @@ class TypeText(_DesktopTool[TypeArgs]):
         return await self._act(go, evidence)
 
 
+def key_list(value: object) -> object:
+    """Models often send keys as one string ("enter", "ctrl+s", "ctrl, s"): the same keys as a list.
+    Rejecting it cost a free model several failed steps and a failed check in a Calculator task."""
+    if isinstance(value, str):
+        return [k.strip().lower() for k in value.replace("+", ",").replace(" ", ",").split(",") if k.strip()]
+    return value
+
+
 class KeysArgs(BaseModel):
     keys: list[str] = Field(description="Keys pressed together, e.g. ['ctrl','s'] or ['enter']")
     window: str | None = Field(default=None, description="Window that must receive the keys (part of title)")
+
+    _keys = field_validator("keys", mode="before")(key_list)
 
 
 class PressKeys(_DesktopTool[KeysArgs]):
@@ -491,12 +590,16 @@ class PressKeys(_DesktopTool[KeysArgs]):
         if k & {"delete", "del"} or {"shift", "delete"} <= k:
             return Risk.DESTRUCTIVE
         if "enter" in k or "return" in k:
+            if messaging_app(_title_of(getattr(args, "window", None))):
+                return Risk.EXTERNAL  # Enter in a chat app sends whatever is typed there
             return Risk.WRITE  # Enter can submit forms/messages: needs approval in ask-risky
         if {"alt", "f4"} <= k or {"ctrl", "w"} <= k:
             return Risk.WRITE  # closing things can lose unsaved work
         return Risk.ACT
 
     def summary(self, args: KeysArgs) -> str:
+        if _presses_enter(args.keys) and (app := messaging_app(_title_of(args.window))):
+            return f"press Enter in {app} (this SENDS whatever is typed in the chat)"
         return "press " + "+".join(args.keys)
 
     async def run(self, args: KeysArgs) -> ToolResult:
@@ -587,24 +690,185 @@ class CloseWindow(_DesktopTool[CloseArgs]):
 
 
 class ScrollArgs(BaseModel):
-    amount: int = Field(description="Positive scrolls up, negative scrolls down (wheel clicks)")
+    amount: int = Field(description="Wheel clicks: positive = up (or right), negative = down (or left)")
+    x: int | None = Field(default=None, description="Scroll over this screen point (default: where the mouse is)")
+    y: int | None = None
+    horizontal: bool = Field(default=False, description="Scroll sideways instead of up/down")
 
 
 class Scroll(_DesktopTool[ScrollArgs]):
     name = "scroll"
-    description = "Scroll the window under the mouse."
+    description = ("Scroll a page or list. Give x,y of the area to scroll (e.g. the middle of a web page "
+                   "or a side panel): otherwise whatever is under the mouse scrolls.")
     risk = Risk.ACT
     Args = ScrollArgs
 
     async def run(self, args: ScrollArgs) -> ToolResult:
         def go() -> str:
-            pyautogui = _pg()
-            pyautogui.scroll(args.amount * 120)
-            return f"scrolled {args.amount}"
+            _scroll(args.amount, args.x, args.y, args.horizontal)
+            where = f" at ({args.x},{args.y})" if args.x is not None else ""
+            return f"scrolled {args.amount}{' sideways' if args.horizontal else ''}{where}"
 
-        return await self._act(go)
+        return await self._act(go, _window_evidence)
+
+
+def _scroll(amount: int, x: int | None, y: int | None, horizontal: bool) -> None:
+    pyautogui = _pg()
+    if x is not None and y is not None:
+        pyautogui.moveTo(x, y)  # instant: the wheel goes to the window under the pointer
+    if horizontal:
+        pyautogui.hscroll(amount * 120)
+    else:
+        pyautogui.scroll(amount * 120)
+
+
+# --- several mouse/keyboard steps in one go --------------------------------------------------
+
+ACTION_KINDS = ("click", "double_click", "right_click", "middle_click", "move", "drag", "scroll", "type",
+                "keys", "wait")
+
+
+class Step(BaseModel):
+    action: str = Field(description=" | ".join(ACTION_KINDS))
+    x: int | None = None
+    y: int | None = None
+    to_x: int | None = Field(default=None, description="drag: end point")
+    to_y: int | None = None
+    amount: int | None = Field(default=None, description="scroll: wheel clicks (+up / -down)")
+    horizontal: bool = False
+    text: str | None = Field(default=None, description="type: the text")
+    keys: list[str] | None = Field(default=None, description="keys: e.g. ['ctrl','a']")
+    seconds: float | None = Field(default=None, description="wait: 0.1-3 s, e.g. for a menu to open")
+
+    _keys = field_validator("keys", mode="before")(key_list)
+
+
+class ActionsArgs(BaseModel):
+    steps: list[Step] = Field(min_length=1, max_length=15, description=(
+        "Mouse/keyboard steps run back to back, e.g. [{action:'click',x:120,y:40}, "
+        "{action:'wait',seconds:0.3}, {action:'click',x:150,y:210}]"))
+
+
+class DoActions(_DesktopTool[ActionsArgs]):
+    name = "do_actions"
+    description = ("Run several mouse/keyboard steps in ONE call: click, double_click, right_click, "
+                   "middle_click, move (hover), drag (x,y -> to_x,to_y), scroll (amount at x,y), type, keys, "
+                   "wait. Much faster than one tool call per click: use it whenever you already know the "
+                   "positions (from a screenshot), e.g. open a menu and pick an item, or scroll and click. "
+                   "The screen is shown to you once, after the last step.")
+    risk = Risk.ACT
+    Args = ActionsArgs
+
+    def risk_for(self, args: ActionsArgs) -> Risk:
+        """The riskiest step decides: a batch can't slip an Enter or Delete past the approval rules."""
+        order = [Risk.READ, Risk.ACT, Risk.WRITE, Risk.EXTERNAL, Risk.DESTRUCTIVE]
+        worst = Risk.ACT
+        if self._sends_in(args):
+            worst = Risk.EXTERNAL
+        for s in args.steps:
+            if s.action == "type" and s.text and ("\n" in s.text or "\r" in s.text):
+                r = Risk.WRITE
+            elif s.action == "keys" and s.keys:
+                r = PressKeys.risk_for(None, KeysArgs(keys=s.keys))  # type: ignore[arg-type]
+            else:
+                r = Risk.ACT
+            worst = max(worst, r, key=order.index)
+        return worst
+
+    @staticmethod
+    def _sends_in(args: ActionsArgs) -> str | None:
+        """The chat app this batch sends a message in (it presses Enter there), if any."""
+        enter = any((s.action == "keys" and _presses_enter(s.keys)) or
+                    (s.action == "type" and s.text and ("\n" in s.text or "\r" in s.text)) for s in args.steps)
+        if not enter:
+            return None
+        point = next(((s.x, s.y) for s in args.steps if s.x is not None and s.y is not None), None)
+        return messaging_app(_title_at(*point) if point else _title_of(None))
+
+    def summary(self, args: ActionsArgs) -> str:
+        if app := self._sends_in(args):
+            typed = " ".join(s.text or "" for s in args.steps if s.action == "type").strip()
+            return f"SEND a message in {app}: \u201c{typed}\u201d (by clicking and typing)"
+        parts = []
+        for s in args.steps:
+            if s.action == "type":
+                parts.append(f"type {len(s.text or '')} chars")
+            elif s.action == "keys":
+                parts.append("press " + "+".join(s.keys or []))
+            elif s.action == "drag":
+                parts.append(f"drag ({s.x},{s.y})->({s.to_x},{s.to_y})")
+            elif s.action == "scroll":
+                parts.append(f"scroll {s.amount}")
+            elif s.action == "wait":
+                parts.append(f"wait {s.seconds}s")
+            else:
+                parts.append(f"{s.action} ({s.x},{s.y})")
+        return "; ".join(parts)
+
+    async def run(self, args: ActionsArgs) -> ToolResult:
+        for i, s in enumerate(args.steps):  # check everything before moving the mouse at all
+            problem = _step_problem(s)
+            if problem:
+                return ToolResult(False, f"step {i + 1} ({s.action}): {problem}. Nothing was done.")
+        done: list[str] = []
+        last = len(args.steps) - 1
+        for i, s in enumerate(args.steps):
+            # Short pauses inside the batch, the full settle only before the screen is shown.
+            r = await self._act(partial(_run_step, s), settle=0.4 if i == last else 0.12)
+            if not r.ok:
+                ran = "; ".join(done) or "nothing"
+                return ToolResult(False, f"stopped at step {i + 1} ({s.action}): {r.output}. Done before: {ran}")
+            done.append(r.output)
+        ev = await self.ctl.call(_window_evidence)
+        return ToolResult(True, "; ".join(done), {**ev, "steps_done": len(done)})
+
+
+def _step_problem(s: Step) -> str:
+    if s.action not in ACTION_KINDS:
+        return f"unknown action, use one of {', '.join(ACTION_KINDS)}"
+    if s.action in ("click", "double_click", "right_click", "middle_click", "move", "drag") and (
+            s.x is None or s.y is None):
+        return "needs x and y"
+    if s.action == "drag" and (s.to_x is None or s.to_y is None):
+        return "needs to_x and to_y"
+    if s.action == "scroll" and not s.amount:
+        return "needs amount"
+    if s.action == "type" and not s.text:
+        return "needs text"
+    if s.action == "keys" and not s.keys:
+        return "needs keys"
+    return ""
+
+
+def _run_step(s: Step) -> str:
+    pyautogui = _pg()
+    if s.action in ("click", "double_click", "right_click", "middle_click"):
+        button = {"right_click": "right", "middle_click": "middle"}.get(s.action, "left")
+        pyautogui.click(s.x, s.y, clicks=2 if s.action == "double_click" else 1, button=button)
+        return f"{s.action} ({s.x},{s.y})"
+    if s.action == "move":
+        pyautogui.moveTo(s.x, s.y)  # instant
+        return f"moved to ({s.x},{s.y})"
+    if s.action == "drag":
+        pyautogui.moveTo(s.x, s.y)
+        # A short glide: many apps ignore a drag that jumps to the end point instantly.
+        pyautogui.dragTo(s.to_x, s.to_y, duration=0.25, button="left")
+        return f"dragged ({s.x},{s.y})->({s.to_x},{s.to_y})"
+    if s.action == "scroll":
+        _scroll(s.amount or 0, s.x, s.y, s.horizontal)
+        return f"scrolled {s.amount}"
+    if s.action == "type":
+        if _focused_is_password():
+            raise LookupError("REFUSED: the focused field is a password field. Ask the user to type it.")
+        _send_unicode(s.text or "")
+        return f"typed {len(s.text or '')} chars"
+    if s.action == "keys":
+        pyautogui.hotkey(*[k.lower() for k in s.keys or []])
+        return "pressed " + "+".join(s.keys or [])
+    time.sleep(min(max(s.seconds or 0.3, 0.1), 3.0))
+    return f"waited {s.seconds}s"
 
 
 def desktop_tools(ctl: DesktopController) -> list[Tool]:
     return [ListWindows(ctl), ReadWindow(ctl), FocusWindow(ctl), ClickElement(ctl), ClickAt(ctl),
-            TypeText(ctl), PressKeys(ctl), SetField(ctl), CloseWindow(ctl), Scroll(ctl)]
+            TypeText(ctl), PressKeys(ctl), SetField(ctl), CloseWindow(ctl), Scroll(ctl), DoActions(ctl)]

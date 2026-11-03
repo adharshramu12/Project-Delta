@@ -5,11 +5,12 @@ validate args -> policy decision -> (approval) -> run -> audit. Nothing runs any
 
 from __future__ import annotations
 
+import difflib
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AliasChoices, BaseModel, ValidationError
 
 from delta.learning.store import TRUSTABLE_RISKS, Learned, LearningStore, is_folder_scope, split_key
 from delta.safety.approvals import ApprovalBroker, ApprovalRequest
@@ -17,6 +18,64 @@ from delta.safety.audit import AuditLog
 from delta.safety.policy import PolicyEngine, Verdict, norm_path
 from delta.system.logging import log
 from delta.tools.base import Tool, ToolResult
+
+
+def accepted_names(model: type[BaseModel]) -> set[str]:
+    """Every key a tool's Args accepts: field names plus their validation aliases."""
+    names: set[str] = set()
+    for field_name, info in model.model_fields.items():
+        names.add(field_name)
+        alias = info.validation_alias
+        if isinstance(alias, str):
+            names.add(alias)
+        elif isinstance(alias, AliasChoices):
+            names.update(c for c in alias.choices if isinstance(c, str))
+        if info.alias:
+            names.add(info.alias)
+    return names
+
+
+# Names models commonly use for a tool's real argument. Renamed only when the tool has that field and
+# it was not given: certain, unlike a fuzzy guess. Saves a whole AI round trip ("did you mean...").
+SYNONYMS: dict[str, tuple[str, ...]] = {
+    "text": ("content", "message"), "body": ("content", "message"), "data": ("content",),
+    "file": ("path",), "filepath": ("path",), "file_path": ("path",), "filename": ("path",),
+    "folder": ("path",), "directory": ("path",), "dir": ("path",),
+    "link": ("url",), "href": ("url",), "q": ("query",), "search": ("query",), "keywords": ("query",),
+    "cmd": ("command",), "app": ("name",), "application": ("name",),
+}
+
+
+def fix_synonyms(model: type[BaseModel], raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Rename unknown keys that are sure synonyms of the tool's fields: (args, ["text->content", ...])."""
+    if not isinstance(raw, dict) or not model.model_fields:
+        return raw, []
+    accepted, fixed, out = accepted_names(model), [], dict(raw)
+    for key in list(raw):
+        if key in accepted:
+            continue
+        targets = [t for t in SYNONYMS.get(key.lower(), ()) if t in model.model_fields and t not in out]
+        if len(targets) >= 1:
+            out[targets[0]] = out.pop(key)
+            fixed.append(f"{key}->{targets[0]}")
+    return out, fixed
+
+
+def unknown_arguments(model: type[BaseModel], raw: dict[str, Any]) -> str:
+    """'' when every key is known, else a fix-it message ('attendees' -> did you mean 'guests'?).
+    Models open to arbitrary keys (extra='allow' or no declared fields) are not checked."""
+    if not isinstance(raw, dict) or model.model_config.get("extra") == "allow" or not model.model_fields:
+        return ""
+    accepted = accepted_names(model)
+    unknown = [k for k in raw if k not in accepted]
+    if not unknown:
+        return ""
+    hints = []
+    for key in unknown:
+        close = difflib.get_close_matches(key, sorted(accepted), n=1, cutoff=0.5)
+        hints.append(f"'{key}' (did you mean '{close[0]}'?)" if close else f"'{key}'")
+    return (f"unknown argument {', '.join(hints)}. Valid arguments: {', '.join(sorted(model.model_fields))}. "
+            "Call the tool again with the right names.")
 
 
 class ToolRegistry:
@@ -34,7 +93,15 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def specs(self) -> list[dict[str, Any]]:
-        return [t.spec() for t in self._tools.values()]
+        """Specs of the tools usable right now; unusable ones are not offered to the model."""
+        out = []
+        for t in self._tools.values():
+            try:
+                if t.available():
+                    out.append(t.spec())
+            except Exception:  # a broken availability check must not hide every other tool
+                continue
+        return out
 
     def names(self) -> list[str]:
         return list(self._tools)
@@ -113,6 +180,13 @@ class ToolExecutor:
         tool = self.registry.get(name)
         if tool is None:
             return ToolResult(False, f"unknown tool '{name}'. Available: {', '.join(self.registry.names())}")
+        raw_args, fixed = fix_synonyms(tool.Args, raw_args)
+        if fixed:
+            self.audit.record("tool.args_fixed", task=task_id, tool=name, renamed=fixed)
+        if problem := unknown_arguments(tool.Args, raw_args):
+            # Pydantic ignores unknown keys: a guest list sent as "attendees" would simply vanish.
+            self.audit.record("tool.bad_args", task=task_id, tool=name, problem=problem)
+            return ToolResult(False, f"invalid arguments for {name}: {problem}")
         try:
             args: BaseModel = tool.Args.model_validate(raw_args)
         except ValidationError as e:

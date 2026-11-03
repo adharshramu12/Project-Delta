@@ -43,11 +43,19 @@ class Tool[A: BaseModel](ABC):
     def paths(self, args: A) -> list[str]:
         return []
 
+    def undoable(self, args: A) -> bool:
+        """The change can be taken back (it goes to the Recycle Bin). Trusted runs these without asking."""
+        return False
+
     def domains(self, args: A) -> list[str]:
         return []
 
     def app(self, args: A) -> str | None:
         return None
+
+    def available(self) -> bool:
+        """False hides the tool from the model for now (e.g. it needs a model or app that is missing)."""
+        return True
 
     def scope(self, args: A) -> str:
         """The *kind* of thing acted on, so Delta can learn per kind ("deletes in Downloads"),

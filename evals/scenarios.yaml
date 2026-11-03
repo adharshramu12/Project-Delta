@@ -1,0 +1,76 @@
+# Live "hard test" scenarios: realistic requests from different users, run with the real model
+# against the real desktop and the user's own browser. Run: uv run python evals/run_live.py
+#
+# fields
+#   id        short name
+#   user      who would ask this (for the report)
+#   task      exactly what the user types
+#   approve   what the test does if Delta asks for approval: approve | deny
+#   expect    words that should appear in Delta's final answer (case-insensitive, any of them)
+#   minutes   time budget
+#   side_effects  what this changes outside Delta (shown in the report)
+
+- id: web-weather
+  user: Commuter
+  task: Search for today's weather in Hyderabad in my browser and tell me the temperature and conditions.
+  approve: deny
+  expect: ["°", "temperature"]
+  minutes: 4
+
+- id: wiki-multihop
+  user: Student
+  task: >-
+    In my browser, open Wikipedia's article on Ada Lovelace, find who her famous collaborator was,
+    open his article, and tell me the year he was born.
+  approve: deny
+  expect: ["1791"]
+  minutes: 5
+
+- id: youtube-video
+  user: Learner
+  task: >-
+    Open YouTube in my browser, search for "3Blue1Brown neural networks", open the first video
+    result, and tell me its exact title and the channel name.
+  approve: deny
+  expect: ["3blue1brown"]
+  minutes: 5
+
+- id: notebooklm-notebook
+  user: Researcher
+  task: >-
+    Open NotebookLM (notebooklm.google.com) in my browser, create a new notebook, add this website
+    as a source: https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture) , then ask
+    the notebook "What problem did transformers solve?" and tell me its answer.
+  approve: approve
+  expect: ["attention", "recurren", "parallel"]
+  minutes: 10
+  side_effects: creates a notebook in the user's NotebookLM
+
+- id: gemini-deep-research
+  user: Analyst
+  task: >-
+    Open Gemini (gemini.google.com) in my browser, switch to Deep Research mode, and start a research
+    on "state of small language models for on-device AI in 2026". Tell me once the research has
+    started and what research plan Gemini shows.
+  approve: approve
+  expect: ["research", "plan"]
+  minutes: 10
+  side_effects: starts a Deep Research run in the user's Gemini
+
+- id: notepad-save
+  user: Office worker
+  task: >-
+    Open Notepad, write "Meeting notes: launch Delta v0.2 on Friday", and save it as
+    meeting_notes.txt in my Delta save folder. Then confirm the file exists.
+  approve: approve
+  expect: ["meeting_notes"]
+  minutes: 5
+  side_effects: creates meeting_notes.txt in the Delta save folder (removed after the run)
+  cleanup_files: ["meeting_notes.txt"]
+
+- id: screen-vision
+  user: Curious user
+  task: Take a screenshot of my screen and tell me which apps or windows are visible.
+  approve: deny
+  expect: ["window", "screen", "visible"]
+  minutes: 3

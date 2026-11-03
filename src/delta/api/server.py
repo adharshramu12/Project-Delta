@@ -33,6 +33,12 @@ def load_token(data_dir: Path) -> str:
 
 class TaskIn(BaseModel):
     text: str
+    chat_id: str = ""  # empty: a new chat is started
+
+
+class ChatPatch(BaseModel):
+    title: str | None = None
+    pinned: bool | None = None
 
 
 class ApprovalIn(BaseModel):
@@ -75,14 +81,19 @@ def _approval_json(r: ApprovalRequest) -> dict[str, Any]:
 
 
 def _result_json(r: TaskResult) -> dict[str, Any]:
+    v = r.verification
     return {"task_id": r.task_id, "status": r.status, "answer": r.answer, "attempts": r.attempts,
-            "provider": r.provider, "steps": [{"tool": s.tool, "ok": s.ok} for s in r.steps]}
+            "provider": r.provider, "steps": [{"tool": s.tool, "ok": s.ok} for s in r.steps],
+            "checks": v.checks if v else [], "seen_screen": bool(v and v.screenshot), "tokens": r.tokens,
+            "fallback": r.fallback,
+            "options": r.options, "questions": r.questions, "asked_about": r.asked_about}
 
 
 def create_app(c: Container, token: str) -> FastAPI:
     app = FastAPI(title="Delta", docs_url=None, redoc_url=None, openapi_url=None)
     hub = Hub()
     results: dict[str, dict[str, Any]] = {}
+    by_id: dict[str, asyncio.Task[None]] = {}  # running tasks, so the dashboard can stop one
     running: set[asyncio.Task[None]] = set()
     bearer = HTTPBearer(auto_error=False)
 
@@ -101,7 +112,12 @@ def create_app(c: Container, token: str) -> FastAPI:
 
     @app.get("/")
     async def index() -> FileResponse:
-        return FileResponse(STATIC / "index.html")
+        # Never cached: after an update the app window otherwise kept showing the old page.
+        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
+
+    @app.get("/favicon.ico")
+    async def favicon() -> FileResponse:
+        return FileResponse(STATIC / "delta.ico")
 
     @app.get("/api/status", dependencies=[Depends(auth)])
     async def get_status() -> dict[str, Any]:
@@ -112,18 +128,85 @@ def create_app(c: Container, token: str) -> FastAPI:
 
     @app.post("/api/tasks", dependencies=[Depends(auth)])
     async def create_task(body: TaskIn) -> dict[str, str]:
-        req = TaskRequest(body.text, channel="api")
-        results[req.id] = {"task_id": req.id, "status": "running"}
+        chats = c.chats
+        chat_id = body.chat_id
+        history = ""
+        if chats is not None:
+            if not chat_id or chats.get(chat_id) is None:
+                chat_id = chats.create().id
+            history = chats.context_for(chat_id)  # before this message is added
+            chats.add(chat_id, "user", body.text)
+        req = TaskRequest(body.text, channel="api", chat_id=chat_id, history=history)
+        results[req.id] = {"task_id": req.id, "status": "running", "chat_id": chat_id}
 
         async def work() -> None:
-            res = await c.submit(req)
-            results[req.id] = _result_json(res)
+            try:
+                res = await c.submit(req)
+            except asyncio.CancelledError:
+                # Stopped from the dashboard: nothing more runs for this task (clean-up already ran).
+                res = TaskResult(req.id, "cancelled", "Stopped. I won't do anything more for this request.")
+            results[req.id] = _result_json(res) | {"chat_id": chat_id}
+            if chats is not None and chats.get(chat_id) is not None:  # the chat may have been deleted meanwhile
+                chats.add(chat_id, "delta", res.answer, {k: v for k, v in results[req.id].items()
+                                                        if k not in ("answer", "chat_id")})
             await hub.broadcast({"type": "result", "result": results[req.id]})
 
-        t = asyncio.create_task(work())
+        t = asyncio.create_task(work(), name=f"task-{req.id}")
         running.add(t)
+        by_id[req.id] = t
         t.add_done_callback(running.discard)
-        return {"task_id": req.id}
+        t.add_done_callback(lambda _: by_id.pop(req.id, None))
+        return {"task_id": req.id, "chat_id": chat_id}
+
+    # --- chats (sidebar) -----------------------------------------------------------------------
+    def _chats() -> Any:
+        if c.chats is None:
+            raise HTTPException(503, "chats are not available")
+        return c.chats
+
+    def _running_chats() -> set[str]:
+        return {r.get("chat_id", "") for r in results.values() if r.get("status") == "running"}
+
+    @app.get("/api/chats", dependencies=[Depends(auth)])
+    async def list_chats(q: str = "") -> list[dict[str, Any]]:
+        busy = _running_chats()
+        return [ch.to_dict() | {"running": ch.id in busy} for ch in _chats().list(q)]
+
+    @app.post("/api/chats", dependencies=[Depends(auth)])
+    async def new_chat() -> dict[str, Any]:
+        return dict(_chats().create().to_dict())
+
+    @app.get("/api/chats/{chat_id}", dependencies=[Depends(auth)])
+    async def get_chat(chat_id: str) -> dict[str, Any]:
+        ch = _chats().get(chat_id)
+        if ch is None:
+            raise HTTPException(404, "unknown chat")
+        running = [r["task_id"] for r in results.values()
+                   if r.get("status") == "running" and r.get("chat_id") == chat_id]
+        return {"chat": ch.to_dict(), "messages": _chats().messages(chat_id), "running": running}
+
+    @app.patch("/api/chats/{chat_id}", dependencies=[Depends(auth)])
+    async def patch_chat(chat_id: str, body: ChatPatch) -> dict[str, Any]:
+        ch = _chats().update(chat_id, body.title, body.pinned)
+        if ch is None:
+            raise HTTPException(404, "unknown chat")
+        return dict(ch.to_dict())
+
+    @app.delete("/api/chats/{chat_id}", dependencies=[Depends(auth)])
+    async def delete_chat(chat_id: str) -> dict[str, bool]:
+        for r in list(results.values()):  # deleting a chat stops its work too
+            if r.get("chat_id") == chat_id and r.get("status") == "running" and (t := by_id.get(r["task_id"])):
+                t.cancel()
+        return {"ok": _chats().delete(chat_id)}
+
+    @app.post("/api/tasks/{task_id}/cancel", dependencies=[Depends(auth)])
+    async def cancel_task(task_id: str) -> dict[str, bool]:
+        t = by_id.get(task_id)
+        if t is None or t.done():
+            return {"ok": False}
+        c.audit.record("task.cancel_requested", task=task_id)
+        t.cancel()
+        return {"ok": True}
 
     @app.get("/api/tasks/{task_id}", dependencies=[Depends(auth)])
     async def get_task(task_id: str) -> dict[str, Any]:
@@ -207,11 +290,37 @@ def create_app(c: Container, token: str) -> FastAPI:
         c.lifecycle.request_stop()
         return {"ok": True}
 
+    from delta.api.apps_routes import register as register_apps
     from delta.api.settings_routes import register as register_settings
     from delta.api.setup_routes import register as register_setup
 
     register_setup(app, c, auth)
     register_settings(app, c, auth)
+    register_apps(app, c, auth)
+
+    @app.get("/api/runs/unfinished", dependencies=[Depends(auth)])
+    async def unfinished_run() -> dict[str, Any]:
+        proof = c.orchestrator.proof
+        return {"run": proof.unfinished() if proof else None}
+
+    @app.post("/api/runs/{task_id}/dismiss", dependencies=[Depends(auth)])
+    async def dismiss_run(task_id: str) -> dict[str, bool]:
+        proof = c.orchestrator.proof
+        return {"ok": bool(proof and proof.close_unfinished(task_id))}
+
+    @app.get("/api/runs/{task_id}", dependencies=[Depends(auth)])
+    async def run_proof(task_id: str) -> dict[str, Any]:
+        proof = c.orchestrator.proof
+        if proof is None or not task_id.isalnum():
+            raise HTTPException(404, "no proof")
+        return {"images": proof.files(task_id)}
+
+    @app.get("/api/runs/{task_id}/{name}", dependencies=[Depends(auth)])
+    async def run_image(task_id: str, name: str) -> FileResponse:
+        proof = c.orchestrator.proof
+        if proof is None or not task_id.isalnum() or name not in proof.files(task_id):
+            raise HTTPException(404, "no such image")  # only listed files: no path tricks
+        return FileResponse(proof.root / task_id / name, media_type="image/jpeg")
 
     @app.websocket("/api/ws")
     async def ws(socket: WebSocket) -> None:

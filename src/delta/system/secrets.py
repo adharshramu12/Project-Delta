@@ -13,12 +13,16 @@ SERVICE = "delta-agent"
 KNOWN_SECRETS = {
     "groq_api_key": "Groq API key",
     "nvidia_api_key": "NVIDIA NIM API key",
+    "deepseek_api_key": "DeepSeek API key (platform.deepseek.com; the one DeepSeek Harness uses)",
     "tavily_api_key": "Tavily search API key",
     "serpapi_api_key": "SerpAPI key",
     "telegram_bot_token": "Telegram bot token (BotFather)",
     "slack_bot_token": "Slack bot token (xoxb-...)",
     "slack_app_token": "Slack app-level token for Socket Mode (xapp-...)",
     "vapi_api_key": "Vapi API key",
+    "google_client_id": "Google OAuth client ID (Desktop app) for Calendar",
+    "google_client_secret": "Google OAuth client secret (Desktop app)",
+    "google_refresh_token": "Google sign-in (set by Connected apps, not by hand)",
 }
 
 

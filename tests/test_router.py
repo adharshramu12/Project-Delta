@@ -47,3 +47,30 @@ async def test_unload_local_models():
 def test_extract_json_from_fenced_prose():
     assert extract_json('Sure!\n```json\n{"a": 1}\n```') == {"a": 1}
     assert extract_json('blah {"b": {"c": 2}} trailing') == {"b": {"c": 2}}
+
+
+async def test_main_ai_is_tried_first_for_every_task():
+    local = FakeProvider("lmstudio", [text("local")], local=True)
+    claude = FakeProvider("claude_code", [text("claude")] * 2)
+    router = ModelRouter({"lmstudio": local, "claude_code": claude},
+                         {"chat": ["lmstudio", "claude_code"], "plan": ["lmstudio"]}, preferred="claude_code")
+    assert (await router.complete([], task="chat")).content == "claude"
+    assert (await router.complete([], task="plan")).content == "claude"
+    assert local.calls == [] and router.usable()[0] == "claude_code"
+
+
+async def test_chosen_ai_out_of_credits_is_reported_and_rested():
+    """User picked Cline; it was out of credits and Claude Code answered with no word about why."""
+    cline = FakeProvider("cline", [LLMError("cline: your Cline credits are used up", kind="quota")])
+    claude = FakeProvider("claude_code", [text("hi"), text("again")])
+    router = ModelRouter({"cline": cline, "claude_code": claude}, {"chat": ["claude_code", "cline"]},
+                         preferred="cline")
+    router.reset_meter()
+    assert (await router.complete([{"role": "user", "content": "x"}])).content == "hi"
+    assert router.fallback_note() == "cline skipped: your Cline credits are used up"
+    router.reset_meter()
+    await router.complete([{"role": "user", "content": "y"}])
+    assert len(cline.calls) == 1  # rested: no second paid-for failure
+    assert "credits are used up" in router.fallback_note()  # still explained on the next answer
+    router.preferred = "claude_code"
+    assert router.fallback_note() == ""

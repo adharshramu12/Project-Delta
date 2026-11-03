@@ -1,4 +1,4 @@
-"""OpenAI-compatible provider (Ollama, Groq, NVIDIA NIM all use this one class).
+"""OpenAI-compatible provider (Ollama, LM Studio, Groq, NVIDIA NIM all use this one class).
 
 Small local models often lack reliable native function calling, so a provider can run in
 `native_tools=False` mode: tool specs go into the system prompt and the model answers with a
@@ -13,6 +13,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Protocol
 
 from delta.config import ProviderConfig
@@ -60,6 +61,51 @@ def extract_json(text: str) -> Any:
         raise
 
 
+def inject_tool_prompt(messages: list[Message], tools: list[dict] | None) -> list[Message]:
+    """Flatten tool history to text and append the JSON tool protocol to the system prompt."""
+    specs = json.dumps([t["function"] for t in tools or []], separators=(",", ":"))
+    out = flatten_messages(messages)
+    sys = JSON_TOOL_PROMPT.format(tools=specs)
+    if out and out[0]["role"] == "system":
+        out[0] = {"role": "system", "content": out[0]["content"] + "\n\n" + sys}
+    else:
+        out.insert(0, {"role": "system", "content": sys})
+    return out
+
+
+def parse_prompt_tools(content: str, provider: str, model: str) -> LLMResponse:
+    try:
+        data = extract_json(content)
+    except (json.JSONDecodeError, ValueError):
+        return LLMResponse(content=content, provider=provider, model=model)
+    if not isinstance(data, dict):
+        return LLMResponse(content=content, provider=provider, model=model)
+    calls = [
+        ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name=c["name"], arguments=c.get("arguments", {}))
+        for c in data.get("tool_calls", [])
+        if isinstance(c, dict) and "name" in c
+    ]
+    return LLMResponse(content=str(data.get("final", "")), tool_calls=calls, provider=provider, model=model,
+                       final="final" in data and not calls)
+
+
+def flatten_messages(messages: list[Message]) -> list[Message]:
+    """Rewrite tool-call history as plain text turns (for models without native tools)."""
+    out: list[Message] = []
+    for m in messages:
+        if m["role"] == "tool":
+            out.append({"role": "user", "content": f"[tool result {m.get('name', '')}]\n{m['content']}"})
+        elif m["role"] == "assistant" and m.get("tool_calls"):
+            calls = [
+                {"name": c["function"]["name"], "arguments": _loads(c["function"]["arguments"])}
+                for c in m["tool_calls"]
+            ]
+            out.append({"role": "assistant", "content": json.dumps({"tool_calls": calls})})
+        else:
+            out.append({"role": m["role"], "content": m.get("content") or ""})
+    return out
+
+
 class OpenAICompatProvider:
     def __init__(self, name: str, cfg: ProviderConfig, api_key: str | Callable[[], str | None] | None) -> None:
         self.name = name
@@ -73,6 +119,8 @@ class OpenAICompatProvider:
         self._stand_in: dict[str, str] = {}     # exhausted model -> model used meanwhile
         self._ping_at = -1e9
         self._ping_ok = False
+        self._auto: dict[bool, str] = {}  # vision? -> model picked for `models.<task>: auto`
+        self._no_json_mode = False  # server rejected response_format=json_object
 
     def _key(self) -> str | None:
         """Keys are read on first use and re-checked every minute, so a key added while Delta
@@ -94,6 +142,30 @@ class OpenAICompatProvider:
         self._api_key = None
         self._key_checked_at = -1e9
         self._client_obj = None
+        self._models_cache = None
+
+    _models_cache: tuple[float, list[dict]] | None = None
+    NOT_CHAT = ("whisper", "guard", "embed", "orpheus", "reward", "safety", "parse", "tts", "rerank",
+                "speech", "vision-only", "clip")
+
+    def model_options(self) -> list[dict]:
+        """The service's own list of chat models right now (Groq, NVIDIA, LM Studio...), cached for an
+        hour: users pick from what really exists, not from a list that went stale."""
+        import httpx
+
+        if self._models_cache and time.monotonic() - self._models_cache[0] < 3600:
+            return self._models_cache[1]
+        headers = {"Authorization": f"Bearer {key}"} if (key := self._key()) else {}
+        try:
+            data = httpx.get(f"{self.cfg.base_url.rstrip('/')}/models", headers=headers, timeout=10).json()
+        except (httpx.HTTPError, ValueError):
+            return []
+        ids = sorted({str(m["id"]) for m in data.get("data", []) if isinstance(m, dict) and m.get("id")
+                      and m.get("active", True)})
+        opts = [{"id": i, "label": i.split("/")[-1], "efforts": []} for i in ids
+                if not any(w in i.lower() for w in self.NOT_CHAT)]
+        self._models_cache = (time.monotonic(), opts)
+        return opts
 
     def ping(self) -> bool:
         """Is anything answering at base_url? Cached for 30 s (status screens call this often)."""
@@ -130,10 +202,43 @@ class OpenAICompatProvider:
 
     def model_for(self, task: str) -> str:
         model = self.cfg.models.get(task) or self.cfg.models["chat"]
+        if model == AUTO_MODEL:
+            model = self._auto.get(task == "vision", AUTO_MODEL)
         # A model whose daily quota is used up is swapped for a sibling until the quota resets.
         if self._exhausted.get(model, 0) > time.monotonic() and model in self._stand_in:
             return self._stand_in[model]
         return model
+
+    async def _resolve_auto(self, task: str) -> str:
+        """`auto` = use whatever the server has (LM Studio, Jan, llama.cpp: model ids differ per
+        user, so a fixed name in config would break for most people)."""
+        vision = task == "vision"
+        if vision not in self._auto:
+            try:
+                available = [m.id for m in (await self._client.models.list()).data]
+            except Exception as e:
+                raise LLMError(f"{self.name}: not reachable at {self.cfg.base_url}", kind="unreachable") from e
+            choice = pick_model(available, vision=vision)
+            if choice is None:
+                raise LLMError(f"{self.name}: no chat model downloaded/loaded", kind="unreachable")
+            self._auto[vision] = choice
+        return self._auto[vision]
+
+    async def _check_room(self, model: str) -> None:
+        import httpx
+        import psutil
+
+        free_gb = psutil.virtual_memory().available / 1e9
+        if free_gb >= self.cfg.min_free_ram_gb:
+            return
+        root = self.cfg.base_url.removesuffix("/v1").rstrip("/")
+        with contextlib.suppress(httpx.HTTPError, ValueError):
+            async with httpx.AsyncClient(timeout=3) as client:
+                models = (await client.get(f"{root}/api/v0/models")).json().get("data", [])
+            if any(m.get("id") == model and m.get("state") == "loaded" for m in models):
+                return  # already in memory: answering costs no extra RAM
+        raise LLMError(f"{self.name}: only {free_gb:.1f} GB RAM free; loading {model} needs about "
+                       f"{self.cfg.min_free_ram_gb:g} GB", kind="unreachable")
 
     async def _stand_in_for(self, model: str, task: str) -> str | None:
         """Another model on this provider that still has quota (free tiers count quota per model)."""
@@ -170,6 +275,10 @@ class OpenAICompatProvider:
         self, task: str, messages: list[Message], tools: list[dict] | None, json_mode: bool = False
     ) -> LLMResponse:
         model = self.model_for(task)
+        if model == AUTO_MODEL:
+            model = await self._resolve_auto(task)
+        if self.local and self.cfg.min_free_ram_gb:
+            await self._check_room(model)
         native = bool(tools) and self.cfg.native_tools
         prompt_tools = bool(tools) and not self.cfg.native_tools
         msgs = self._inject_tool_prompt(messages, tools) if prompt_tools else self._flatten(messages, native)
@@ -177,7 +286,7 @@ class OpenAICompatProvider:
         kwargs: dict[str, Any] = {"model": model, "messages": msgs, "temperature": 0.2}
         if native:
             kwargs["tools"] = tools
-        if json_mode or prompt_tools:
+        if (json_mode or prompt_tools) and not self._no_json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if self.cfg.keep_alive:
             kwargs["extra_body"] = {"keep_alive": self.cfg.keep_alive}
@@ -189,13 +298,20 @@ class OpenAICompatProvider:
             try:
                 resp = await client.chat.completions.create(**kwargs)
             except (openai.NotFoundError, openai.BadRequestError) as e:
-                # Providers retire models often. Instead of breaking for every user until they edit
-                # config, pick the best model the provider still offers and carry on.
-                replacement = await self._replacement_for(task, model, e)
-                if replacement is None:
-                    raise
-                kwargs["model"] = model = replacement
-                resp = await client.chat.completions.create(**kwargs)
+                if "response_format" in kwargs and "response_format" in f"{e} {e.body}":
+                    # LM Studio only takes json_schema/text. The JSON tool protocol is parsed from
+                    # plain text anyway, so ask without it from now on.
+                    self._no_json_mode = True
+                    del kwargs["response_format"]
+                    resp = await client.chat.completions.create(**kwargs)
+                else:
+                    # Providers retire models often. Instead of breaking for every user until they edit
+                    # config, pick the best model the provider still offers and carry on.
+                    replacement = await self._replacement_for(task, model, e)
+                    if replacement is None:
+                        raise
+                    kwargs["model"] = model = replacement
+                    resp = await client.chat.completions.create(**kwargs)
             except openai.RateLimitError as e:
                 if not is_daily_limit(e):
                     raise
@@ -220,73 +336,73 @@ class OpenAICompatProvider:
         except openai.APIConnectionError as e:
             raise LLMError(f"{self.name}: not reachable at {self.cfg.base_url}", kind="unreachable") from e
         except openai.APIStatusError as e:
+            text = str(e.message).lower()
+            if e.status_code == 413 or "too large" in text or "reduce your message size" in text \
+                    or "context length" in text or "maximum context" in text:
+                raise LLMError(f"{self.name}: request too large", kind="too_large") from e
+            if "tool call" in text or "tool_use_failed" in text or "failed_generation" in text \
+                    or "parse tool" in text:
+                # The model wrote a malformed tool call; asking again usually works.
+                raise LLMError(f"{self.name}: malformed tool call", kind="bad_tool_call") from e
             raise LLMError(f"{self.name}: HTTP {e.status_code}: {e.message}") from e
 
         choice = resp.choices[0].message
         content = choice.content or ""
         if prompt_tools:
-            return self._parse_prompt_tools(content, model)
+            parsed = self._parse_prompt_tools(content, model)
+            parsed.usage = _openai_usage(resp)
+            return parsed
         calls = [
             ToolCall(id=tc.id, name=tc.function.name, arguments=_loads(tc.function.arguments))
             for tc in (choice.tool_calls or [])
             if tc.type == "function"
         ]
-        return LLMResponse(content=content, tool_calls=calls, provider=self.name, model=model)
+        return LLMResponse(content=content, tool_calls=calls, provider=self.name, model=model,
+                           usage=_openai_usage(resp))
 
     # --- JSON tool protocol -------------------------------------------------------------
     def _inject_tool_prompt(self, messages: list[Message], tools: list[dict] | None) -> list[Message]:
-        specs = json.dumps([t["function"] for t in tools or []], indent=1)
-        out = self._flatten(messages, native=False)
-        sys = JSON_TOOL_PROMPT.format(tools=specs)
-        if out and out[0]["role"] == "system":
-            out[0] = {"role": "system", "content": out[0]["content"] + "\n\n" + sys}
-        else:
-            out.insert(0, {"role": "system", "content": sys})
-        return out
+        return inject_tool_prompt(messages, tools)
 
     def _parse_prompt_tools(self, content: str, model: str) -> LLMResponse:
-        try:
-            data = extract_json(content)
-        except (json.JSONDecodeError, ValueError):
-            return LLMResponse(content=content, provider=self.name, model=model)
-        calls = [
-            ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name=c["name"], arguments=c.get("arguments", {}))
-            for c in data.get("tool_calls", [])
-            if isinstance(c, dict) and "name" in c
-        ]
-        return LLMResponse(content=str(data.get("final", "")), tool_calls=calls, provider=self.name, model=model)
+        return parse_prompt_tools(content, self.name, model)
 
     @staticmethod
     def _flatten(messages: list[Message], native: bool) -> list[Message]:
-        """Without native tools, rewrite tool-call history as plain text turns."""
-        if native:
-            return list(messages)
-        out: list[Message] = []
-        for m in messages:
-            if m["role"] == "tool":
-                out.append({"role": "user", "content": f"[tool result {m.get('name', '')}]\n{m['content']}"})
-            elif m["role"] == "assistant" and m.get("tool_calls"):
-                calls = [
-                    {"name": c["function"]["name"], "arguments": _loads(c["function"]["arguments"])}
-                    for c in m["tool_calls"]
-                ]
-                out.append({"role": "assistant", "content": json.dumps({"tool_calls": calls})})
-            else:
-                out.append({"role": m["role"], "content": m.get("content") or ""})
-        return out
+        return list(messages) if native else flatten_messages(messages)
 
     async def unload(self) -> None:
         """Free VRAM right away (Ollama only): keep_alive=0 evicts the model."""
         import httpx
 
-        if not self.local:
+        if not self.local or not self.cfg.keep_alive:  # keep_alive is an Ollama setting
             return
         root = self.cfg.base_url.removesuffix("/v1").rstrip("/")
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            try:  # nothing listening (Ollama not installed or stopped): nothing to free
+                await client.get(f"{root}/api/version")
+            except httpx.HTTPError:
+                return
             for model in set(self.cfg.models.values()):
                 with contextlib.suppress(httpx.HTTPError):
                     await client.post(f"{root}/api/generate", json={"model": model, "keep_alive": 0})
 
+
+AUTO_MODEL = "auto"
+
+
+def lmstudio_base_url(default: str, home: Path | None = None) -> str:
+    """LM Studio lets users change the server port, and saves it in http-server-config.json
+    (under ~/.lmstudio/.internal or ~/.lmstudio/apps/<app>/.internal, depending on the version)."""
+    root = (home or Path.home()) / ".lmstudio"
+    for f in [root / ".internal" / "http-server-config.json", *root.glob("apps/*/.internal/http-server-config.json")]:
+        with contextlib.suppress(OSError, ValueError, TypeError):
+            data = json.loads(f.read_text(encoding="utf-8"))
+            host = data.get("networkInterface") or "127.0.0.1"
+            if host in ("0.0.0.0", "::"):
+                host = "127.0.0.1"
+            return f"http://{host}:{int(data['port'])}/v1"
+    return default
 
 # Ranked name fragments of models known to handle tool calling well. Order = preference.
 # Unknown future models still work: anything not matching falls to a size-based guess.
@@ -323,6 +439,14 @@ def _retry_after(e: Any) -> float | None:
     if m:
         return float(m.group(1)) / (1000 if m.group(2) == "ms" else 1)
     return None
+
+
+def _openai_usage(resp: Any) -> dict[str, int]:
+    u = getattr(resp, "usage", None)
+    if u is None:
+        return {}
+    cached = getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0) or 0
+    return {"input": (u.prompt_tokens or 0) - cached, "cached": cached, "output": u.completion_tokens or 0}
 
 
 def _loads(raw: str | dict | None) -> dict[str, Any]:

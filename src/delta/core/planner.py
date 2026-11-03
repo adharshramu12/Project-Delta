@@ -3,12 +3,14 @@ of tools the task needs (so each model call carries only those tool descriptions
 
 from __future__ import annotations
 
+from delta import CREDIT
 from delta.core.state import Plan
 from delta.llm.providers import extract_json
 from delta.llm.router import ModelRouter
 from delta.memory.skills import Skill
 
 PLANNER_PROMPT = """You are the planner of {name}, a personal AI agent running on the user's Windows PC.
+{credit}
 {environment}
 Tools the agent can use: {tools}.
 
@@ -22,16 +24,43 @@ Reply with JSON only:
   "goal": "<one sentence>",
   "steps": ["<short step>", ...],
   "tools": ["<tool names the steps need, from the list above>"],
-  "success_criteria": ["<observable fact that proves the task is done, checkable with a tool>", ...],
-  "skill_id": <id of a skill below that fits this request, or null>}}
+  "success_criteria": ["<checkpoint>", ...],
+  "skill_id": <id of a skill below that fits this request, or null>,
+  "direct": {{"tool": "<tool name>", "args": {{...}}}} or null}}
+
+FAST PATH (saves the user time and tokens): if ONE tool call does the whole request, fill "direct"
+with it and keep steps short. E.g. "play <song> on YouTube" -> {{"tool": "play_youtube", "args":
+{{"query": "<song + movie/artist>"}}}}; "pause the music" -> media_control; "schedule a meeting with
+x@y.com tomorrow 5pm" -> schedule_meeting (start in ISO local time, from Now above);
+"start a meet and send the link to x@y.com" -> start_meeting with invite; "move my standup to 3pm" /
+"make the review 1 hour" / "cancel the sync" -> edit_meeting (title = the meeting's name; new_start
+is just "HH:MM" when no day is given, so the meeting keeps its own day).
+"send hi to Ravi on WhatsApp" -> send_message (write the text the way the user texts: short, natural);
+"chat with Priya on Telegram for me, be funny" -> chat_for_me (goal and mood from the request).
+If the person or app is not clear, ask instead of guessing. Leave it null when the
+job needs several steps or looking at the screen.
+
+DEEP RESEARCH ("deep research ...", "research ... in ChatGPT/Gemini") is a TOOL task, never answered from
+memory: the agent asks what it needs, writes an expert brief and starts Deep Research in the user's own
+ChatGPT or Gemini in the browser (tools: browser_open, browser_read, browser_click, browser_fill).
+Its checkpoints end at "the brief is sent and the app is answering or researching" (Stop button, Researching,
+a reply appearing); the finished report is never a checkpoint, it takes up to 30 minutes.
+
+WEBSITES and web apps (NotebookLM, Gmail, YouTube, any URL), even when the user says "open Chrome":
+plan browser_open/browser_read/browser_click/browser_fill, which read the page as text and click by
+name. Never run_shell "start chrome", and no screenshots or pixel clicks unless the page cannot be read.
 
 Skills the agent learned from earlier verified successes on this PC (reuse one when it fits;
 adapt its steps to this request):
 {skills}
 
 Use the folders above directly; do not plan steps to search for them.
-Success criteria must be concrete, e.g. "file C:/Users/x/Desktop/notes.txt exists and contains 'hello'",
-"process Antigravity.exe is running", "answer cites at least one source URL".
+success_criteria are CHECKPOINTS, in order, that a person could confirm by looking at the final
+screen (or a file/process): 2-5 of them, each one concrete fact about the END STATE, e.g.
+"NotebookLM is open in the browser", "the page shows the user's Google account (signed in)",
+"a new notebook is open", "the notebook's sources list includes a source about the Indian
+Constitution", "file C:/Users/x/Desktop/notes.txt exists and contains 'hello'".
+Not checkpoints: "clicked X", "typed Y" (actions are not results).
 
 What you know about the user:
 {memory}"""
@@ -42,7 +71,8 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
     skills = skills or []
     resp = await router.complete(
         [{"role": "system", "content": PLANNER_PROMPT.format(
-            name=name, tools=", ".join(tool_names), memory=memory or "(nothing yet)", environment=environment,
+            name=name, credit=CREDIT, tools=", ".join(tool_names), memory=memory or "(nothing yet)",
+            environment=environment,
             skills="\n".join(s.prompt_line() for s in skills) or "(none yet)")},
          {"role": "user", "content": text}],
         task="plan", json_mode=True)
@@ -60,6 +90,10 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
         answer=str(data.get("answer", "")),
         tools=[t for t in data.get("tools", []) if isinstance(t, str) and t in tool_names],
     )
+    direct = data.get("direct")
+    if isinstance(direct, dict) and direct.get("tool") in tool_names and isinstance(direct.get("args", {}), dict):
+        plan.direct = {"tool": direct["tool"], "args": direct.get("args") or {}}
+        plan.needs_tools = True
     sid = data.get("skill_id")
     if isinstance(sid, int) and any(s.id == sid for s in skills):  # never trust an invented id
         plan.skill_id = sid

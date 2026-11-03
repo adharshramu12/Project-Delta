@@ -17,24 +17,36 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class ProviderConfig(BaseModel):
-    base_url: str
+    # "openai": any OpenAI-compatible server (Ollama, LM Studio, Groq, NIM, ...).
+    # "claude_code" / "codex" / "cline": the user's own signed-in AI app, so their plan or credits pay.
+    kind: Literal["openai", "claude_code", "codex", "cline"] = "openai"
+    base_url: str = ""
+    command: str | None = None  # CLI kinds: path to the executable (default: found automatically)
+    discover: Literal["lmstudio"] | None = None  # read the server's port from the app's own settings
     secret: str | None = None  # name of the secret holding the API key
     local: bool = False
     native_tools: bool = True
     keep_alive: str | None = None
+    # Local servers that load models on demand (LM Studio): skip them when the model is not loaded
+    # yet and less RAM than this is free, instead of freezing the PC while it loads.
+    min_free_ram_gb: float = 0
     timeout_s: float = 60
     models: dict[str, str] = Field(default_factory=dict)
+    # CLI kinds: thinking effort per job (plan/chat/verify; "chat" is the default for the others)
+    efforts: dict[str, str] = Field(default_factory=dict)
 
 
 class LLMConfig(BaseModel):
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     routes: dict[str, list[str]] = Field(default_factory=dict)
+    preferred: str = "auto"  # provider tried first for every job; "auto" = follow `routes`
 
 
 class AgentConfig(BaseModel):
     name: str = "Delta"
     owner_name: str = ""
-    max_steps: int = 15
+    max_steps: int = 15  # scaled by the brain: frontier models get more, small local ones fewer
+    auto_observe: bool = True  # after each mouse/keyboard/browser action, show the model the result
     max_attempts: int = 3
     approval_timeout_s: float = 300
 
@@ -95,7 +107,9 @@ def in_onedrive(path: Path) -> bool:
 def save_dir(cfg: FilesConfig, create: bool = True) -> Path:
     """Default folder for files Delta creates for the user.
 
-    auto: <Desktop>\\Delta when the Desktop is a normal local folder. When OneDrive has taken over
+    auto: <Desktop>\\Delta files when the Desktop is a normal local folder. Not "Delta": that name is
+    the app's own shortcut, and two Desktop icons called "Delta" make a double-click open an empty
+    folder instead of the app. A Desktop\\Delta folder that already holds files is kept. When OneDrive has taken over
     the Desktop, files go to a local folder OneDrive never syncs (%USERPROFILE%\\Delta), so a full
     or offline OneDrive cannot break saving; a Desktop shortcut keeps it one click away
     (see ensure_desktop_shortcut).
@@ -104,7 +118,13 @@ def save_dir(cfg: FilesConfig, create: bool = True) -> Path:
         path = Path(os.path.expandvars(os.path.expanduser(cfg.save_dir)))
     else:
         desktop = known_folder("Desktop")
-        path = Path.home() / "Delta" if in_onedrive(desktop) else desktop / "Delta"
+        legacy = desktop / "Delta"
+        if in_onedrive(desktop):
+            path = Path.home() / "Delta"
+        elif legacy.is_dir() and any(legacy.iterdir()):
+            path = legacy
+        else:
+            path = desktop / "Delta files"
     if create:
         path.mkdir(parents=True, exist_ok=True)
     return path
@@ -115,7 +135,7 @@ def ensure_desktop_shortcut(folder: Path) -> Path | None:
     desktop = known_folder("Desktop")
     if folder.parent == desktop or not desktop.exists():
         return None
-    link = desktop / "Delta.lnk"
+    link = desktop / "Delta files.lnk"
     if link.exists():
         return link
     import subprocess
@@ -151,7 +171,7 @@ class QuietHours(BaseModel):
     end: str = "07:00"
 
 
-Autonomy = Literal["ask-everything", "ask-risky", "trusted"]
+Autonomy = Literal["ask-everything", "ask-risky", "trusted", "autopilot"]
 
 
 class Boundaries(BaseModel):

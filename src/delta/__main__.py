@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import getpass
 import logging
 import os
 import sys
 import warnings
+from datetime import datetime
+from pathlib import Path
 
 import httpx
 
@@ -46,6 +49,19 @@ async def _cli() -> int:
     return 0
 
 
+def _update() -> int:
+    """Newest version over the installed one (data untouched): the installer again, from GitHub."""
+    import subprocess
+
+    root = Path(__file__).resolve().parents[2]
+    if (root / ".git").exists():
+        print("This is a developer checkout: update it with 'git pull', then 'uv sync --extra all'.")
+        return 1
+    script = root / "scripts" / "install.ps1"
+    return subprocess.call(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                            "-FromGitHub", "-InstallDir", str(root), "-NoLaunch"])
+
+
 def _doctor() -> int:
     from delta.system.governor import SystemSensor
 
@@ -54,7 +70,24 @@ def _doctor() -> int:
     print(f"Delta {__version__}\nconfig: {s.config_dir}\ndata:   {s.data_dir}\n")
     print("Model providers:")
     for name, p in s.llm.providers.items():
-        if p.local:
+        if p.kind != "openai":
+            from delta.llm.cli_providers import CLI_KINDS
+
+            cli = CLI_KINDS[p.kind](name, p)
+            exe = cli.executable()
+            state = f"found {exe}" if exe else f"not installed (optional: uses your {cli.label} plan)"
+            print(f"  {name:<8} {state}")
+        elif p.local and not p.keep_alive:  # LM Studio / Jan / llama.cpp: plain OpenAI-style server
+            if p.discover == "lmstudio":
+                from delta.llm.providers import lmstudio_base_url
+
+                p = p.model_copy(update={"base_url": lmstudio_base_url(p.base_url)})
+            try:
+                ids = [m["id"] for m in httpx.get(f"{p.base_url.rstrip('/')}/models", timeout=3).json().get("data", [])]
+                print(f"  {name:<8} running, models: {', '.join(ids) or 'none loaded'}")
+            except (httpx.HTTPError, ValueError):
+                print(f"  {name:<8} not running at {p.base_url} (optional)")
+        elif p.local:
             root = p.base_url.removesuffix("/v1")
             try:
                 tags = {m["name"] for m in httpx.get(f"{root}/api/tags", timeout=3).json().get("models", [])}
@@ -115,6 +148,9 @@ def _secrets(action: str, name: str | None) -> int:
 def main() -> None:
     # Old third-party code (pywinauto) emits SyntaxWarnings on Python 3.12; users should never see them.
     warnings.filterwarnings("ignore", category=SyntaxWarning)
+    no_console = sys.stdout is None  # started by double-click (pythonw): give libraries a sink to write to
+    if no_console:
+        sys.stdout = sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
     if os.name == "nt":
         os.system("")  # enable ANSI colours in classic consoles
         reconfigure = getattr(sys.stdout, "reconfigure", None)
@@ -126,16 +162,20 @@ def main() -> None:
     sub.add_parser("cli", help="interactive terminal")
     rp = sub.add_parser("run", help="background service: dashboard API + Telegram/Slack")
     rp.add_argument("--open", action="store_true", help="open the dashboard window")
+    sub.add_parser("app", help="open Delta (starts the service in the background if needed)")
     sub.add_parser("doctor", help="check setup")
     sp = sub.add_parser("secrets", help="manage API keys and tokens")
     sp.add_argument("action", choices=["set", "delete", "list"])
     sp.add_argument("name", nargs="?")
     ap = sub.add_parser("audit", help="audit log tools")
     ap.add_argument("action", choices=["verify"])
+    sub.add_parser("update", help="update Delta to the newest version (keeps your data)")
     args = parser.parse_args()
 
     if args.cmd == "doctor":
         sys.exit(_doctor())
+    if args.cmd == "update":
+        sys.exit(_update())
     if args.cmd == "secrets":
         sys.exit(_secrets(args.action, args.name))
     if args.cmd == "audit":
@@ -144,13 +184,37 @@ def main() -> None:
         good = AuditLog(load_settings().data_dir / "audit.jsonl").verify()
         print("audit chain intact" if good else "AUDIT CHAIN BROKEN: log was modified")
         sys.exit(0 if good else 1)
+    if args.cmd == "app":
+        # Run hidden from the Desktop shortcut: an error here would otherwise show NOTHING at all.
+        try:
+            from delta.daemon import launch_app
+
+            sys.exit(launch_app())
+        except Exception:
+            import traceback
+
+            detail = traceback.format_exc()
+            log_file = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Delta" / "logs" / "launcher.log"
+            with contextlib.suppress(OSError):
+                log_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(log_file, "a", encoding="utf-8") as f:
+                    f.write(f"\n--- {datetime.now():%Y-%m-%d %H:%M:%S}\n{detail}")
+            from delta.daemon import alert
+
+            alert(f"Delta could not open.\n\n{detail.strip().splitlines()[-1]}\n\nDetails: {log_file}")
+            sys.exit(1)
     if args.cmd == "run":
-        from delta.daemon import run
+        from delta.daemon import alert, run
 
         try:
             sys.exit(asyncio.run(run(open_ui=args.open)))
         except KeyboardInterrupt:
             sys.exit(0)
+        except Exception as e:
+            if no_console:  # started from the shortcut (pythonw): no console to print to
+                alert(f"Delta could not start:\n\n{e}\n\nRun 'delta doctor' in a terminal for details.")
+                sys.exit(1)
+            raise
     try:
         sys.exit(asyncio.run(_cli()))
     except KeyboardInterrupt:

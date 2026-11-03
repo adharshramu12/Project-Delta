@@ -2,12 +2,43 @@
 
 Delta controls a real computer, so its safety rules are part of the design, not settings.
 
-- **Hard floor (not configurable):** OS/security settings, disk formatting, user accounts, credentials, firewall/antivirus changes and money movement are denied. Deletes, overwrites and anything sent off the machine always need a human.
-- **Boundaries:** `config/boundaries.yaml` can only add restrictions or relax plain writes inside allowed folders. Delta has no tool that edits it.
+## Safety floor (no setting can unlock it)
+
+- **Denied always:** OS/security settings, disk formatting, user accounts, stored credentials, firewall/antivirus
+  changes and money movement. Protected folders (Windows, credential stores, SSH/AWS/GPG keys, Delta's own data).
+- **Asked always:** changes that cannot be undone, such as a shell deleting files or Shift+Delete.
+- **Permission levels** decide the rest: Careful, Balanced, Trusted (undoable work without asking: deletes and
+  overwrites go to the Recycle Bin first), Autopilot (also sends messages).
 - **Approvals** time out to *deny*.
-- **Secrets** live in Windows Credential Manager, never in config or logs.
+- **Secrets** live in Windows Credential Manager, never in config, logs or chats.
 - **Audit log** is hash-chained; `delta audit verify` detects tampering.
-- **Prompt injection:** web pages, files and tool output are data. They cannot grant approval; only a human on an allow-listed channel can.
-- **Remote access** (planned) is opt-in, over Tailscale or Cloudflare Tunnel, with device pairing; the API binds to localhost only.
+- **Prompt injection:** web pages, files and tool output are data. They cannot grant approval; only a human on an
+  allow-listed channel can.
+- **The dashboard API** listens on this PC only (127.0.0.1) and needs a per-install secret token.
+
+## Remote control (Telegram): threat model
+
+| Threat | Defence |
+|---|---|
+| A stranger finds or guesses the bot | Only paired Telegram accounts are served. Pairing needs a single-use 6-digit code shown only on the PC's screen (10 minutes). |
+| **The owner's Telegram account or phone is stolen** | **Remote Guard**: camera, screenshot, sending files, closing apps, changing keys and Autopilot need the owner's **Delta PIN** (once per 15 minutes). |
+| PIN guessing | **5 wrong PINs lock all remote control.** Only someone at the PC can unlock it; the phone never can. |
+| PIN or key left in chat history | Delta deletes the message holding a PIN or API key right after reading it. |
+| PIN stolen from the PC | Never stored: only a salted **scrypt** hash in Credential Manager, compared in constant time. |
+| Something happens without the owner knowing | A **Windows notification** on the PC for every remote request and sensitive action; every unlock, failure, lock and action is in the audit log. |
+| Owner suspects misuse | `/lock` from the phone locks all remote control at once; unlock only on the PC. |
+| Bot token leaked | Stored in Credential Manager; replace it from the PC. Pairing still stops a token holder from controlling the PC. |
+
+**Recommended for every user:** turn on Telegram's **Two-Step Verification**, and set a **Delta PIN**
+(Settings → Remote security). Delta reminds you when pairing.
+
+### What is *not* protected (honestly)
+
+- **Telegram bot chats are not end-to-end encrypted.** Messages travel encrypted, but Telegram's servers can
+  read them. Delta minimises what passes through (keys and PINs are deleted at once; pictures are deleted
+  from the PC after sending). For end-to-end encryption, a Matrix channel is planned.
+- **Malware already running as the same Windows user** can read what that user can. Encrypting Delta's own
+  data with Windows DPAPI is planned.
+- **Cloud AI providers** see the requests sent to them. Use a local model (LM Studio, Ollama) for private work.
 
 Report vulnerabilities privately via GitHub Security Advisories, not public issues.

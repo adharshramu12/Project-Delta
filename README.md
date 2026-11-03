@@ -1,12 +1,28 @@
-# Δ Delta
+# Δ Delta: personal AI agent for Windows, by Adharsh Kumar Bachu
 
-**A personal, local-first, OS-level AI agent for Windows.**
-Talk to it from the terminal, Telegram, Slack or your voice. It plans, uses your computer,
-asks before anything risky, and **verifies every task before it says "done".**
+**Delta is an open-source, local-first personal AI agent for Windows, created by
+[Adharsh Kumar Bachu](https://github.com/adharshramu12).** It does real work on your PC and in your
+browser, asks before anything risky, verifies every task before it says "done", and can be
+controlled securely from your own Telegram.
 
-> Status: `v0.1` — foundation and agent core are working (model routing, safety, tools,
-> memory, web search, verify loop, CLI). Desktop app, channels, computer-use and voice are
-> next on the [roadmap](#roadmap).
+> **Creator:** Adharsh Kumar Bachu · **License:** Apache 2.0 (keep the [NOTICE](NOTICE) credit) ·
+> Ask Delta "who made you?" and it will tell you.
+
+## What Delta can do
+
+- **Use your computer like a person:** open apps, manage files, type, click, read the screen.
+- **Use your own signed-in browser** (Chrome or Edge): open sites, read pages, fill forms, play YouTube.
+- **Deep Research in ChatGPT or Gemini:** asks what you need, writes an expert research brief,
+  starts Deep Research in your own account, and recovers by itself when the site fails.
+- **Asks instead of guessing:** tick-box and pick-one question forms, in the app and in Telegram.
+- **Telegram remote control:** voice notes, files, screenshots, camera, volume, brightness, apps,
+  switching the AI model or key, all only for your paired account.
+- **Remote Guard security:** PIN for sensitive actions, lockout after wrong tries, PC alerts,
+  hash-chained audit log of every action.
+- **Any AI model:** Codex, Claude Code, Cline, Groq, NVIDIA NIM, DeepSeek, LM Studio or Ollama,
+  with automatic fallback when one fails.
+- **Learns your workflows** as reusable skills, and **remembers** your preferences locally.
+- **Meetings and messages:** schedule or start Google Meet calls, send WhatsApp/Telegram messages.
 
 ## Why Delta is different
 
@@ -44,7 +60,21 @@ asks before anything risky, and **verifies every task before it says "done".**
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Quick start (Windows 11)
+## Install (Windows 10/11): one step
+
+**Double-click `Install Delta.cmd`** in the Delta folder (or in the zip someone shared with you).
+Or, from PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/adharshramu12/Project-Delta/main/scripts/install.ps1 | iex
+```
+
+It installs the official Python 3.12 if needed, sets Delta up in `%LOCALAPPDATA%\Programs\Delta`,
+adds a **Delta** icon to your Desktop and Start menu, and opens Delta's setup wizard (AI sign-in,
+permissions, Telegram). Run it again to repair. `delta update` gets the newest version;
+`scripts\uninstall.ps1` removes Delta (your chats and memory stay unless you add `-RemoveData`).
+
+## Developer setup
 
 ```powershell
 # 1. tools

@@ -65,6 +65,8 @@ def test_unicode_typing_events():
     assert ev[0] == (0, ord("a"), 0x4) and ev[1] == (0, ord("a"), 0x6)
     assert (0x0D, 0, 0) in ev  # newline is a real Enter key
     assert len(ev) == 2 + 2 + 2 + 4  # emoji = two UTF-16 units, each down+up
+    soft = unicode_inputs("a\nb", soft_newlines=True)  # chat boxes: Shift+Enter, never a bare Enter
+    assert soft[2:6] == [(0x10, 0, 0), (0x0D, 0, 0), (0x0D, 0, 0x2), (0x10, 0, 0x2)]
 
 
 def test_browser_risks(tmp_path):
