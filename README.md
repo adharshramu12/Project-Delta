@@ -1,6 +1,6 @@
 <div align="center">
 
-# Δ Delta
+# Δ Project - Delta
 
 ### The personal AI agent that actually does the work on your Windows PC
 
