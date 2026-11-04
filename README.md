@@ -37,7 +37,7 @@ asks before anything risky, and **verifies every task before it says "done".**
 - Schedule or start Google Meet calls; send WhatsApp and Telegram messages (it asks first)
 - **🆘 Emergency help:** say you're unwell or in trouble and Delta can message your chosen emergency
   contacts on WhatsApp in your name and start a WhatsApp call, from the app or Telegram. Say it clearly
-  ("message Kushi now") and it acts at once; otherwise it asks you first. It also tells you
+  ("message Ravi now") and it acts at once; otherwise it asks you first. It also tells you
   to call 112 when it's serious
 
 **In your browser** (your own signed-in Chrome or Edge)
@@ -94,7 +94,7 @@ memory stay unless you add `-RemoveData`).
 | `/volume` `/brightness` `/theme` | Sound, screen brightness, Windows light/dark |
 | `/apps` | Open apps; tap to close one |
 | `/lock` `/unlock` | Lock remote control now / enter your PIN |
-| *"I'm not well, message Kushi now"* | 🆘 Emergency alert to your saved contacts (WhatsApp message or call) |
+| *"I'm not well, message Ravi now"* | 🆘 Emergency alert to your saved contacts (WhatsApp message or call) |
 | `/stop` `/status` `/help` | Stop a task, PC health and AIs, all commands |
 
 ## Safety by design

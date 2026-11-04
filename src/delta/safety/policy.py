@@ -46,7 +46,7 @@ def _help_request() -> bool:
     return bool(req and EMERGENCY.search(req.text))
 
 
-# The user's own words saying to reach someone ("message Kushi now", "call Amma", "alert my contacts") are
+# The user's own words saying to reach someone ("message Ravi now", "call Amma", "alert my contacts") are
 # the approval: in an emergency a second tap costs time. Vague distress ("I'm not well") still asks first.
 CLEAR_SEND = re.compile(r"\b(send|message|msg|text|whats\s?app|alert|call|ring|inform|notify)\b"
                         r"|\btell (?!you\b|me\b)\w+", re.I)
