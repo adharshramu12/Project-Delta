@@ -21,7 +21,7 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 - **The dashboard API** listens on this PC only (127.0.0.1) and needs a per-install secret token.
 - **Your own browser:** Delta never types into password or payment fields; it asks you to do that.
 - **Emergency contacts** are stored encrypted (DPAPI). During a help request, reaching anyone needs your yes
-  (even in Autopilot) unless your own message clearly says to ("message Kushi now"). Delta is not an emergency service: for anything life-threatening it tells you to call 112.
+  (even in Autopilot) unless your own message clearly says to ("message Ravi now"). Delta is not an emergency service: for anything life-threatening it tells you to call 112.
 - **AI apps you sign in to** (Claude Code, Codex, Cline) are used only as text brains: their own tools are
   switched off or read-only, so Delta's rules apply to every action whichever AI is thinking.
 - **Your data stays on your PC** (`%LOCALAPPDATA%\Delta`): memory, chats, skills, audit log. Shutdown stops

@@ -79,20 +79,20 @@ def test_any_message_during_a_help_request_is_confirmed_even_on_autopilot():
     from delta.messaging.tools import SendArgs, SendMessage
 
     policy = PolicyEngine(Boundaries(autonomy="autopilot"))
-    tool, args = SendMessage(), SendArgs(app="whatsapp", to="Kushi", text="please come, I'm unwell")
+    tool, args = SendMessage(), SendArgs(app="whatsapp", to="Ravi", text="please come, I'm unwell")
     token = CURRENT_REQUEST.set(TaskRequest("I'm not feeling well"))  # vague: Delta asks before reaching anyone
     try:
         assert policy.evaluate(tool, args).verdict == Verdict.ASK
     finally:
         CURRENT_REQUEST.reset(token)
-    token = CURRENT_REQUEST.set(TaskRequest("I'm not feeling well, message Kushi now"))  # clear: that IS the yes
+    token = CURRENT_REQUEST.set(TaskRequest("I'm not feeling well, message Ravi now"))  # clear: that IS the yes
     try:
         assert policy.evaluate(tool, args).verdict == Verdict.ALLOW
         alert = AlertEmergencyContacts(EmergencyContacts(Path(".")))
         assert policy.evaluate(alert, AlertArgs(message="please come, unwell")).verdict == Verdict.ALLOW
     finally:
         CURRENT_REQUEST.reset(token)
-    token = CURRENT_REQUEST.set(TaskRequest("send hi to Kushi on WhatsApp"))
+    token = CURRENT_REQUEST.set(TaskRequest("send hi to Ravi on WhatsApp"))
     try:
         assert policy.evaluate(tool, args).verdict == Verdict.ALLOW  # everyday autopilot is unchanged
     finally:
