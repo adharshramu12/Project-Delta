@@ -5,7 +5,15 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 ## Safety floor (no setting can unlock it)
 
 - **Denied always:** OS/security settings, disk formatting, user accounts, stored credentials, firewall/antivirus
-  changes and money movement. Protected folders (Windows, credential stores, SSH/AWS/GPG keys, Delta's own data).
+  changes and money movement. Protected folders, for reading and for writing: Windows, Windows Credential
+  Manager and DPAPI key folders (`Credentials`, `Protect`, `Crypto`, `Vault`), SSH/AWS/GPG/Azure/Kubernetes/Docker
+  keys, `gh` and gcloud sign-ins, `.git-credentials`, `.netrc`, `.npmrc`, `.pypirc`, Codex/Claude/Gemini CLI
+  sign-ins (`~/.codex`, `~/.claude`, `~/.claude.json`, `~/.gemini`), browser profiles of Chrome, Edge, Brave,
+  Vivaldi, Opera and Firefox (cookies, saved passwords), Telegram Desktop's session folder, and Delta's own data.
+  Secret files anywhere are denied too: `.env` and `.env.*` (not `.env.example`/`.sample`/`.template`), SSH
+  private keys (`id_rsa`, `id_ed25519`, …), password-manager vaults (`.kdbx`, `.opvault`), certificate keys
+  (`.pfx`, `.p12`, `.ppk`) and browser cookie/password databases (`Cookies`, `Login Data`, `logins.json`, …),
+  whether a tool names them as its path or a command names them by path.
 - **Asked always:** changes that cannot be undone, such as a shell deleting files or Shift+Delete.
 - **Permission levels** decide the rest: Careful, Balanced, Trusted (undoable work without asking: deletes and
   overwrites go to the Recycle Bin first), Autopilot (also sends messages).
@@ -15,7 +23,21 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 - **Prompt injection (enforced in code):** web pages, files and tool output are data and can never grant
   approval. Once a task has read outside content (a page, search result, file, chat message or the screen),
   every send, delete, code run or memory write in that task needs a human yes, **even in Autopilot and even
-  for actions Delta has learned to trust**. Steps inside the open page (click, fill) stay free.
+  for actions Delta has learned to trust**. So does desktop input that can submit or close something (Enter
+  typed or pressed in an app, Alt+F4). Steps inside the open page (click, fill) stay free.
+- **No read-then-leak through web addresses:** after a task has read outside content, opening a web address
+  (`fetch_page`, `browser_open` in either browser mode, `open_target` with a URL) needs your yes when the site
+  is new to the task. A site is not new when the task already opened it, when your own request names it, when
+  it is in your `allowed_domains`, or when the exact address came back from `web_search` in that task. An
+  address whose path, query or fragment carries a long encoded value (48+ base64/hex-like characters, or one
+  query value over 200 characters) needs your yes even on a known site, and so does a `browser_search` whose
+  text carries one or is over 200 characters.
+- **Desktop clicks and typing:** a coordinate click (`click_at`, clicks in `do_actions`) is judged by the
+  button or link under the point, like a named click: Send/Pay/Submit-type buttons count as sending,
+  Delete/Remove-type buttons as deleting. Typing, keys, field-filling or clicks aimed at a **terminal** (Command
+  Prompt, PowerShell, Windows Terminal, the Run box) or at **Delta's own window** always need your yes, at every
+  level, and are never learned as trusted. If Delta cannot tell which window or button an input lands on, it
+  asks you rather than guessing.
 - **Encryption at rest:** memories, chat titles and messages are encrypted with **Windows DPAPI**, tied to
   your Windows account. Another account, a copied disk or a stolen database file cannot read them.
 - **The dashboard API** listens on this PC only (127.0.0.1) and needs a per-install secret token.
@@ -77,7 +99,11 @@ Delta can help with **simple image/text captchas** on sites where you log in to 
 - **Malware already running as the same Windows user** can ask Windows to decrypt that user's DPAPI data,
   like any other app the user runs. DPAPI protects against other accounts and stolen files, not that.
 - **Prompt-injection containment** guards risky actions, not reading: an injected page can still mislead
-  Delta's answers or in-page steps, so check important results.
+  Delta's answers or in-page steps, so check important results. In-page steps include following a link by
+  clicking it and filling a search box, so a page can still move the browser to another page with a short
+  piece of data in its address; long encoded values and new sites opened by address are what is guarded.
+- **Clicks in a `do_actions` batch** are judged by what is on screen before the batch starts, so a click on a
+  menu item the batch itself opens is judged by what was under that point before the menu appeared.
 - **Cloud AI providers** see the requests sent to them. Use a local model (LM Studio, Ollama) for private work.
 
 ## Reporting a vulnerability
