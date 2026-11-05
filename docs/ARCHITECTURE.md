@@ -147,7 +147,7 @@ double-click icon ─► launcher (pythonw) ─► service: python -m delta run 
   window. Nothing keeps listening.
 
 ## Remote control (Telegram)
-- **Pairing:** a single-use 6-digit code shown only on the PC (10 minutes) binds one Telegram account;
+- **Pairing:** a single-use 8-character code shown only on the PC (10 minutes) binds one Telegram account;
   all others are ignored.
 - **Remote Guard:** camera, screenshot, sending files, closing apps, keys and Autopilot need the owner's
   PIN (scrypt hash; 15-minute unlock). 5 wrong PINs lock remote control until someone at the PC unlocks

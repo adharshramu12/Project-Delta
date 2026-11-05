@@ -34,11 +34,11 @@ async def test_the_right_code_pairs_the_phone_once():
     ch.on_pair = lambda ids: saved.append(list(ids))
     code = ch.new_pairing_code()
 
-    wrong = update(42, "000000")
+    wrong = update(42, "AAAAAAAA")
     await ch._on_message(wrong, None)
     assert ch.allowed == [] and "Connect my phone" in wrong.message.replies[0]
 
-    right = update(42, f"here it is {code}")
+    right = update(42, f"  {code.lower()}\n")  # surrounding spaces and case don't matter
     await ch._on_message(right, None)
     assert ch.allowed == ["42"] and saved == [["42"]] and "Paired" in right.message.replies[0]
 
@@ -53,6 +53,56 @@ async def test_start_link_carries_the_code():
     up = update(7, "/start")
     await ch._start_cmd(up, SimpleNamespace(args=[code]))
     assert ch.allowed == ["7"]
+
+
+def test_codes_are_long_random_and_unambiguous():
+    from delta.channels.telegram import PAIR_ALPHABET, PAIR_LENGTH
+
+    ch = channel()
+    codes = {ch.new_pairing_code() for _ in range(50)}
+    assert len(codes) == 50 and PAIR_LENGTH >= 8
+    assert all(len(c) == PAIR_LENGTH and set(c) <= set(PAIR_ALPHABET) for c in codes)
+    assert not set("0O1IL") & set(PAIR_ALPHABET)
+
+
+async def test_the_code_hidden_in_a_longer_message_does_not_pair():
+    """Used to be a substring check: one long message of characters could hold thousands of guesses."""
+    ch = channel()
+    code = ch.new_pairing_code()
+    for text in (f"here it is {code}", f"{code}{code}", f"x{code}", code[:-1]):
+        await ch._on_message(update(42, text), None)
+    assert ch.allowed == []
+
+
+async def test_too_many_wrong_codes_lock_pairing_until_a_new_code():
+    from delta.channels.telegram import PAIR_MAX_FAILS
+
+    ch = channel()
+    warned: list[str] = []
+    ch.c.warn = warned.append
+    code = ch.new_pairing_code()
+    for i in range(PAIR_MAX_FAILS):
+        await ch._on_message(update(100 + i, "WRONG123"), None)
+    right = update(42, code)  # the real code no longer works
+    await ch._on_message(right, None)
+    assert ch.allowed == [] and "Connect my phone" in right.message.replies[0]
+    fails = [d for e, d in ch.c.audit.events if e == "telegram.pair_failed"]
+    assert len(fails) == PAIR_MAX_FAILS and fails[-1]["locked"] and warned
+
+    fresh = ch.new_pairing_code()  # only the PC can start pairing again
+    await ch._on_message(update(42, fresh), None)
+    assert ch.allowed == ["42"]
+
+
+async def test_an_expired_code_does_not_pair(monkeypatch):
+    import delta.channels.telegram as tg
+
+    ch = channel()
+    code = ch.new_pairing_code()
+    later = tg.time.monotonic() + 601
+    monkeypatch.setattr(tg.time, "monotonic", lambda: later)
+    await ch._on_message(update(42, code), None)
+    assert ch.allowed == []
 
 
 def controlled(tmp_path):
