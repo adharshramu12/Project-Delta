@@ -126,7 +126,7 @@ pulsing dot while it works and a green dot when an answer is waiting.
 | the whole page listing after every browser action | on the same page only the changes are sent (`browser.snapshot_diffs`, on by default; `browser.full_snapshot_every`, default 8) |
 | old page listings in the history | a listing superseded by a newer full one becomes a one-line stub; the latest full listing and the diffs after it stay whole; older results keep their page text, not stale refs |
 | element lines sent twice | the AFTER page read drops element lines the model already holds in its listing |
-| fixed waits after browser actions | settle ends when the network and the DOM have been quiet briefly (200 ms / 150 ms), capped at the old 1.5 s; no 500 ms "networkidle" floor |
+| fixed waits after browser actions | settle ends when the network and the DOM have been quiet briefly (200 ms / 150 ms), capped at the old 1.5 s; no 500 ms "networkidle" floor; a page restored by Back from the browser's back-forward cache no longer waits out a 10 to 15 s load-event timeout |
 | screenshots in browser tasks | not sent: browser steps are checked from the page text and element listing; screenshots are kept for pixel actions and as a fallback when no page read exists |
 
 ## Safety

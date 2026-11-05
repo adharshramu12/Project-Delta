@@ -195,6 +195,24 @@ async def test_back_waits_for_commit_not_load_events(tmp_path):
     assert out.ok and seen == ["commit"] and out.evidence["snapshot"] == "full"
 
 
+async def test_settle_asks_the_document_before_waiting_for_load_events():
+    """Back-forward cache restores fire no load events: a parsed document needs no load-state wait."""
+
+    class Restored(_StillPage):
+        async def evaluate(self, js: str) -> Any:
+            if js == "document.readyState":
+                return "complete"
+            return await super().evaluate(js)
+
+        async def wait_for_load_state(self, state: str, **kw: Any) -> None:
+            await asyncio.sleep(10)  # would never fire
+
+    page = Restored()
+    start = time.monotonic()
+    await settle(page)
+    assert time.monotonic() - start < 1.0
+
+
 # --- 3. leaner history -----------------------------------------------------------------------------
 
 

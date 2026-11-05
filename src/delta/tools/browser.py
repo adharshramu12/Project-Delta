@@ -347,6 +347,16 @@ async def _dom_quiet(page: Any, deadline: float) -> None:
         await asyncio.wait_for(page.evaluate(js), left_ms / 1000 + 0.5)
 
 
+async def _dom_ready(page: Any, timeout_ms: int) -> None:
+    """Until the document is parsed. Asks the document first: a page restored from the back-forward
+    cache fires no load events, so Playwright's load-state wait would sit out its whole timeout."""
+    with contextlib.suppress(Exception):
+        if await asyncio.wait_for(page.evaluate("document.readyState"), 2.0) in ("interactive", "complete"):
+            return
+    with contextlib.suppress(Exception):
+        await page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+
+
 async def settle(page: Any, idle_ms: int = SETTLE_IDLE_MS) -> None:
     """Wait for the page to be ready after an action, driven by events and bounded: the document
     parsed, then (together, both capped at idle_ms) the network quiet for QUIET_S, including requests
@@ -355,16 +365,14 @@ async def settle(page: Any, idle_ms: int = SETTLE_IDLE_MS) -> None:
     (Playwright's "networkidle" is not used: it always waits 500 ms of silence after a load, and
     returns at once for requests started after the page reached it.) Every step gives up quietly:
     a busy page (live feeds, ads) must not stall the agent."""
-    with contextlib.suppress(Exception):
-        await page.wait_for_load_state("domcontentloaded", timeout=10000)
+    await _dom_ready(page, 10000)
     deadline = time.monotonic() + idle_ms / 1000
     pending = _INFLIGHT.get(page)
     waits = [_dom_quiet(page, deadline)]
     if pending is not None:
         waits.append(_network_quiet(pending, deadline))
     await asyncio.gather(*waits)
-    with contextlib.suppress(Exception):  # the action may have started a navigation meanwhile
-        await page.wait_for_load_state("domcontentloaded", timeout=3000)  # at once when nothing navigated
+    await _dom_ready(page, 3000)  # the action may have started a navigation meanwhile
     with contextlib.suppress(Exception):
         await asyncio.wait_for(page.evaluate(
             "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))"), 1.0)
