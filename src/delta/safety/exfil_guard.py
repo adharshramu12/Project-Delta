@@ -9,6 +9,8 @@
        attacker's own page is a visited host).
    browser_search goes to the search engine, never to a host the page chose, so only the second rule
    applies to its query.
+   Autopilot drops the first rule (a new site with no encoded data in the address opens without a
+   question) and keeps the second: an address carrying a long encoded value still asks at every level.
 
 2. Desktop input into places that run commands or control Delta. Typing, keys or clicks aimed at a
    terminal (cmd, PowerShell, Windows Terminal, the Run box) would run commands outside run_shell's
@@ -18,11 +20,15 @@
    closed to a question, never to a refusal).
 
 Every rule here only turns ALLOW into ASK. Nothing is denied that was allowed before.
+
+Each question comes back as a GuardAsk with a `kind`. STRICT_KINDS are the ones a person must answer
+every time: "Allow for this task" never covers them (see ToolExecutor).
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
@@ -41,6 +47,23 @@ DESKTOP_INPUT = {"click_at", "click_element", "type_text", "press_keys", "set_fi
 # url-encoded sentences do not count; an encoded document or key does.
 BLOB = re.compile(r"[A-Za-z0-9+/=_]{48,}")
 MAX_VALUE = 200  # one query value or fragment this long (decoded) is carrying data, not a search
+AUTOPILOT = "autopilot"
+
+# Questions "Allow for this task" never answers: input into terminals or Delta itself, input whose
+# target could not be checked, and addresses or searches that carry encoded data.
+STRICT_KINDS = frozenset({"terminal", "delta_window", "unknown_target", "data_url", "search_data"})
+
+
+@dataclass(frozen=True)
+class GuardAsk:
+    reason: str
+    kind: str  # terminal | delta_window | unknown_target | data_url | search_data | new_host
+
+    @property
+    def strict(self) -> bool:
+        return self.kind in STRICT_KINDS
+
+
 _SECOND_LEVEL = {"co", "com", "org", "net", "ac", "gov", "edu", "gob", "nic", "or", "ne", "go"}
 
 
@@ -115,28 +138,39 @@ class ExfilGuard:
         return any(host == d or host.endswith("." + d) for d in allowed)
 
     def ask_reason(self, tool: Tool[Any], args: BaseModel, task_id: str, taint_source: str | None,
-                   allowed_domains: list[str] | None = None) -> str:
+                   allowed_domains: list[str] | None = None, autonomy: str = "") -> str:
         """Why this call needs a human yes on top of the policy decision, or ''."""
+        found = self.check(tool, args, task_id, taint_source, allowed_domains, autonomy)
+        return found.reason if found else ""
+
+    def check(self, tool: Tool[Any], args: BaseModel, task_id: str, taint_source: str | None,
+              allowed_domains: list[str] | None = None, autonomy: str = "") -> GuardAsk | None:
+        """The question this call needs on top of the policy decision (and what kind it is), or None."""
         name = tool.name
-        if name in DESKTOP_INPUT and (why := _desktop_reason(tool, args)):
-            return why
+        if name in DESKTOP_INPUT and (found := _desktop_ask(tool, args)):
+            return found  # every level, tainted or not
         if not taint_source:
-            return ""
+            return None
         if name in SEARCH_TOOLS:
             why = carries_data(str(getattr(args, "query", "")), is_query=True)
-            return f"this task read outside content ({taint_source}) and {why}; please confirm" if why else ""
+            if not why:
+                return None
+            return GuardAsk(f"this task read outside content ({taint_source}) and {why}; please confirm",
+                            "search_data")
         if name not in URL_TOOLS or not (url := _url_of(name, args)):
-            return ""
+            return None
         if url.strip() in self._urls.get(task_id, set()):
-            return ""  # a result web_search gave us, unchanged: it cannot carry anything read later
+            return None  # a result web_search gave us, unchanged: it cannot carry anything read later
         host = host_of(url)
         if why := carries_data(url):
-            return (f"this task read outside content ({taint_source}) and {why}, which could be sending your "
-                    "data to that site; please confirm")
+            return GuardAsk(f"this task read outside content ({taint_source}) and {why}, which could be sending "
+                            "your data to that site; please confirm", "data_url")
+        if autonomy == AUTOPILOT:
+            return None  # Autopilot: a plain address on a new site opens without a question
         if not self._known(task_id, host, allowed_domains or []):
-            return (f"this task read outside content ({taint_source}) and {host or 'this address'} is a new "
-                    "site for it; opening it could send data there. Please confirm")
-        return ""
+            return GuardAsk(f"this task read outside content ({taint_source}) and {host or 'this address'} is a "
+                            "new site for it; opening it could send data there. Please confirm", "new_host")
+        return None
 
     def observe(self, task_id: str, name: str, args: BaseModel, result: ToolResult) -> None:
         """Remember the sites a task really visited and the URLs its searches returned."""
@@ -185,21 +219,39 @@ def is_delta_window(title: str, process: str) -> bool:
     return process.lower() in BROWSER_PROCESSES and bool(re.match(r"^Delta( [-–—] |$)", t))
 
 
-def _desktop_reason(tool: Tool[Any], args: BaseModel) -> str:
+def input_classes(tool: Tool[Any], args: BaseModel) -> list[str] | None:
+    """The apps (process names) a desktop input call lands on, or None if they cannot be told."""
     probe = getattr(tool, "input_targets", None)
     if probe is None:
-        return ""
+        return None
+    try:
+        targets = probe(args)
+    except Exception:
+        return None
+    if not targets:
+        return None
+    names = sorted({(process or cls or title).lower() for title, cls, process in targets})
+    return names if all(names) else None
+
+
+def _desktop_ask(tool: Tool[Any], args: BaseModel) -> GuardAsk | None:
+    probe = getattr(tool, "input_targets", None)
+    if probe is None:
+        return None
     try:
         targets = probe(args)
     except Exception:
         targets = None
     if targets is None:
-        return "I could not check where this input goes (which window or button), so please confirm it"
+        return GuardAsk("I could not check where this input goes (which window or button), so please confirm it",
+                        "unknown_target")
     for title, cls, process in targets:
         if is_delta_window(title, process):
-            return "this input goes to Delta's own window (its settings and approvals); please confirm"
+            return GuardAsk("this input goes to Delta's own window (its settings and approvals); please confirm",
+                            "delta_window")
         if is_terminal(title, cls, process):
             label = title or process or "a terminal"
-            return (f"this input goes to a terminal ({label}), where typing runs commands outside Delta's shell "
-                    "checks; please confirm")
-    return ""
+            return GuardAsk(f"this input goes to a terminal ({label}), where typing runs commands outside Delta's "
+                            "shell checks; please confirm", "terminal")
+    return None
+

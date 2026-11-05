@@ -34,7 +34,8 @@ class CliChannel:
 
     async def present_approval(self, req: ApprovalRequest) -> None:
         print(f"\n{YELLOW}{BOLD}⚠ Approval needed [{req.id}]{RESET} {req.summary}\n"
-              f"{DIM}  risk={req.risk} · {req.reason}{RESET}\n  approve? [y/N] ", end="", flush=True)
+              f"{DIM}  risk={req.risk} · {req.reason}{RESET}\n  approve? "
+              f"{'[y/N, t = allow for this task] ' if req.for_task else '[y/N] '}", end="", flush=True)
 
     async def on_event(self, event: str, data: dict[str, Any]) -> None:
         if event == "task.plan" and data["plan"].get("needs_tools"):
@@ -78,8 +79,9 @@ class CliChannel:
                 self._prompt()
                 continue
             pending = self.c.approvals.pending()
-            if pending and text.lower() in {"y", "yes", "n", "no"}:
-                self.c.approvals.resolve(pending[0].id, text.lower().startswith("y"), by="cli")
+            if pending and text.lower() in {"y", "yes", "n", "no", "t", "task"}:
+                answer = text.lower()
+                self.c.approvals.resolve(pending[0].id, answer[0] in "yt", by="cli", for_task=answer[0] == "t")
                 continue
             if text.startswith("/"):
                 if text in {"/quit", "/exit"}:

@@ -15,8 +15,15 @@ LEVEL_HELP = {
     "ask-everything": "asks before anything except reading",
     "ask-risky": "asks before changing or sending anything",
     "trusted": "doesn't ask about undoable work; asks before sending",
-    "autopilot": "also sends messages without asking",
+    "autopilot": "sends too; still asks on the riskiest steps",
 }
+# The whole truth about what still asks, for places with room for it (Telegram /mode, docs).
+AUTOPILOT_STILL_ASKS = (
+    "Autopilot still asks before: deleting anything that can't be undone, changing files outside your allowed "
+    "folders, typing or clicking in a terminal, the Run box or Delta itself, emergency alerts you didn't clearly "
+    "ask for, and, once a task has read a web page, file or message, before sending, deleting, running code, "
+    "saving to memory, or opening a link that carries hidden data."
+)
 JOBS = ("plan", "chat", "verify")
 
 

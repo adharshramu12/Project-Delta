@@ -101,6 +101,12 @@ memory stay unless you add `-RemoveData`).
 
 - **You stay in charge:** every action is risk-checked. Deleting, sending and anything that leaves
   your PC need your approval (unless you choose autopilot). Deletes go to the Recycle Bin.
+- **Autopilot still asks** before deleting anything that can't be undone, changing files outside your
+  folders, typing or clicking in a terminal, the Run box or Delta itself, and, once a task has read a web page,
+  file or message, before sending, deleting, running code, saving to memory or opening a link that carries
+  hidden data. Full list: [SECURITY.md](SECURITY.md).
+- **"Allow for this task":** approve the same kind of action (same app, same site) once for the rest of a
+  task. Never saved, and never offered for permanent deletes, terminals or links carrying data.
 - **Hard limits:** passwords, payment details and security settings are always refused.
 - **Prompt-injection containment:** after Delta reads a web page, file or message, anything that sends,
   deletes or runs code needs your yes, even in autopilot. A malicious page can't quietly take over.

@@ -167,7 +167,7 @@ main{flex:1;display:flex;min-height:0;overflow:hidden}
 .card .ttl{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
 .card .ttl svg{width:14px;height:14px}
 .card b{font-weight:600;line-height:1.45}.card .why{color:var(--muted);font-size:12.5px}
-.card .row{display:flex;gap:8px;margin-top:2px}
+.card .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
 
 /* composer */
 form#send{position:absolute;left:0;right:0;bottom:0;padding:16px 20px 22px;
@@ -339,7 +339,7 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
     <label class="choice"><input type="radio" name="s_autonomy" value="ask-everything"><b>Careful</b><small>Ask before anything except reading.</small></label>
     <label class="choice"><input type="radio" name="s_autonomy" value="ask-risky"><b>Balanced</b><small>Ask before changing or sending anything.</small></label>
     <label class="choice"><input type="radio" name="s_autonomy" value="trusted"><b>Trusted</b><small>Don't ask about everyday work that can be undone: editing, replacing or deleting files in your folders (old versions go to the Recycle Bin), keys and commands. Still asks before sending anything to anyone.</small></label>
-    <label class="choice"><input type="radio" name="s_autonomy" value="autopilot"><b>Autopilot</b><small>Trusted, and also sends messages and emails without asking. Only permanent deletes still ask.</small></label>
+    <label class="choice"><input type="radio" name="s_autonomy" value="autopilot"><b>Autopilot</b><small>Trusted, and also sends messages and emails without asking. Still asks before: deleting anything that can't be undone, changing files outside your folders, typing or clicking in a terminal, the Run box or Delta itself, emergency alerts you didn't clearly ask for, and, once a task has read a web page, file or message, before sending, deleting, running code, saving to memory, or opening a link that carries hidden data.</small></label>
     <label class="check"><input type="checkbox" id="s_quiet"> Quiet hours: only reading allowed between
       <input id="s_qstart" class="time" placeholder="23:30"> and <input id="s_qend" class="time" placeholder="07:00"></label>
     <h3>Remote security <span class="tag">phone control</span></h3>
@@ -416,11 +416,11 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
     </section>
     <section data-step="trust">
       <h2>How careful should Delta be?</h2>
-      <p class="lead">Deleting files, sending messages and system changes always need your OK, whatever you pick here.</p>
+      <p class="lead">Deleting files for good always needs your OK, and security and payment changes are never made, whatever you pick here.</p>
       <label class="choice"><input type="radio" name="autonomy" value="ask-everything"><b>Careful</b><small>Ask before anything except reading. Best for your first days.</small></label>
       <label class="choice"><input type="radio" name="autonomy" value="ask-risky" checked><b>Balanced</b> <span class="tag">recommended</span><small>Open apps and read freely; ask before changing or sending anything.</small></label>
       <label class="choice"><input type="radio" name="autonomy" value="trusted"><b>Trusted</b><small>Don't ask about everyday work that can be undone (files go to the Recycle Bin). Still asks before sending anything.</small></label>
-      <label class="choice"><input type="radio" name="autonomy" value="autopilot"><b>Autopilot</b><small>Also sends messages and emails without asking.</small></label>
+      <label class="choice"><input type="radio" name="autonomy" value="autopilot"><b>Autopilot</b><small>Like Trusted, and also sends messages and emails without asking. Still asks before: deleting anything that can't be undone, changing files outside your folders, typing or clicking in a terminal, the Run box or Delta itself, emergency alerts you didn't clearly ask for, and, once a task has read a web page, file or message, before sending, deleting, running code, saving to memory, or opening a link that carries hidden data.</small></label>
     </section>
     <section data-step="telegram">
       <h2>Talk to Delta from your phone <span class="tag">optional</span></h2>
@@ -535,12 +535,14 @@ async function refreshStatus() {
 const BELL_SVG = $("bell").querySelector("svg").outerHTML;
 function approvalCard(a) {
   const c = document.createElement("div"); c.className = "card"; c.dataset.approval = a.id; if (a.task_id) c.dataset.task = a.task_id;
-  c.innerHTML = `<div class="ttl">${BELL_SVG} Needs your OK</div><b></b><div class="why"></div><div class="row"><button class="primary">Approve</button><button>Deny</button></div>`;
+  // "Allow for this task" shows only when Delta offers it: never for permanent deletes, terminals, data in a link.
+  const task = a.for_task ? '<button class="task" title="Also allow this same kind of action here until this task ends. Not saved.">Allow for this task</button>' : "";
+  c.innerHTML = `<div class="ttl">${BELL_SVG} Needs your OK</div><b></b><div class="why"></div><div class="row"><button class="primary">Approve</button>${task}<button class="deny">Deny</button></div>`;
   c.querySelector("b").textContent = a.summary; c.querySelector(".why").textContent = `${a.risk} · ${a.reason}`;
-  const [yes, no] = c.querySelectorAll("button");
-  const answer = ok => { yes.disabled = no.disabled = true;
-    api(`/api/approvals/${a.id}`, {method: "POST", body: JSON.stringify({approved: ok})}).finally(() => dropApproval(a.id)); };
-  yes.onclick = () => answer(true); no.onclick = () => answer(false);
+  const buttons = c.querySelectorAll("button"), yes = c.querySelector(".primary"), no = c.querySelector(".deny"), all = c.querySelector(".task");
+  const answer = (ok, forTask) => { buttons.forEach(b => b.disabled = true);
+    api(`/api/approvals/${a.id}`, {method: "POST", body: JSON.stringify({approved: ok, for_task: !!forTask})}).finally(() => dropApproval(a.id)); };
+  yes.onclick = () => answer(true); no.onclick = () => answer(false); if (all) all.onclick = () => answer(true, true);
   return c;
 }
 function renderApproval(a) {

