@@ -75,18 +75,43 @@ Delta can help with **simple image/text captchas** on sites where you log in to 
   worked. The captcha answer is never logged or shown to the model.
 - Works in the **delta-profile** browser mode (it needs to see the captcha element), not in your-browser mode.
 
-## Remote control (Telegram): threat model
+## Remote control (Telegram, Slack): threat model
 
 | Threat | Defence |
 |---|---|
 | A stranger finds or guesses the bot | Only paired Telegram accounts are served. Pairing needs a single-use 8-character code shown only on the PC's screen (10 minutes). The message must be exactly the code, and 5 wrong tries drop it until a new one is made on the PC. |
-| **The owner's Telegram account or phone is stolen** | **Remote Guard**: camera, screenshot, sending files, closing apps, changing keys and Autopilot need the owner's **Delta PIN** (once per 15 minutes). |
+| **The owner's Telegram account or phone is stolen** | **Remote Guard** (see below): seeing the screen or webcam, reading files, windows, messages or the clipboard, sending files, running commands or code, closing apps, changing keys, turning on Autopilot, and approving deletes or sends from the phone all need the owner's **Delta PIN** (once per 15 minutes). |
 | PIN guessing | **5 wrong PINs lock all remote control.** Only someone at the PC can unlock it; the phone never can. |
 | PIN or key left in chat history | Delta deletes the message holding a PIN or API key right after reading it. |
 | PIN stolen from the PC | Never stored: only a salted **scrypt** hash in Credential Manager, compared in constant time. |
 | Something happens without the owner knowing | A **Windows notification** on the PC for every remote request and sensitive action; every unlock, failure, lock and action is in the audit log. |
-| Owner suspects misuse | `/lock` from the phone locks all remote control at once; unlock only on the PC. |
+| Owner suspects misuse | `/lock` from Telegram (or *Lock* in Settings → Remote security on the PC) locks all remote control at once: no request from Telegram or Slack runs, and an Approve tapped in Telegram or Slack counts as **Deny** (logged). Unlock only on the PC. |
 | Bot token leaked | Stored in Credential Manager; replace it from the PC. Pairing still stops a token holder from controlling the PC. |
+
+### Remote Guard: exactly what is enforced
+
+Enforced in code at three central points, so every remote channel (Telegram, Slack and any channel added
+later) gets the same rules. A channel counts as remote unless it is this PC itself (the terminal or the
+dashboard).
+
+1. **Every task** (`Container.submit`): while remote control is locked, a request from a remote channel is
+   refused before any AI or tool runs.
+2. **Every tool call** (`ToolExecutor.execute`), for a request from a remote channel:
+   - while locked, no tool runs;
+   - without a PIN unlock in the last 15 minutes, these are refused: `look_at_screen`, `take_screenshot`,
+     `read_window`, `camera_photo`, `read_file`, `send_file`, `read_messages`, `run_shell`, `run_python`,
+     any tool with `clipboard` in its name, and `list_dir`, `search_files` or `path_info` on a path outside
+     your allowed folders. With no PIN set, they are refused with how to set one.
+3. **Every approval answer** (`ApprovalBroker.answer`), from a remote channel:
+   - while locked, any answer (Approve or Deny) counts as **Deny**, is logged as `guard.approval_blocked`,
+     and is not learned as your preference;
+   - **Approve** on a delete/overwrite, a send, or one of the PIN tools above needs a PIN unlock; until then
+     the request stays open (unlock, then tap Approve again, or answer on the PC). **Deny** never needs the
+     PIN. Answers given on the PC are not affected.
+
+Slack cannot take the PIN (there is no `/unlock` in Slack yet), so from Slack the PIN-protected actions are
+refused: do them on the PC, or from Telegram after `/unlock`. `/lock` is a Telegram command; a lock from
+anywhere also stops Slack.
 
 **Recommended for every user:** turn on Telegram's **Two-Step Verification**, and set a **Delta PIN**
 (Settings → Remote security). Delta reminds you when pairing.

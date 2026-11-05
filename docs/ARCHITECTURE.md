@@ -82,7 +82,10 @@ loop attempts ≤ max_attempts:
 - **Checkpoints, not actions.** The planner writes 2–5 end-state facts ("a new notebook is open"), never "clicked X".
 - **Fresh evidence.** After `DONE:` Delta photographs the exact window it worked in (even if covered, via `PrintWindow`) and the verifier judges each checkpoint against it. The checkpoint verdicts decide; an overall flag cannot contradict them.
 - **Hard proof beats pictures.** Tools that can prove their own result (`verified` evidence: Windows says *Playing*, Google returns the event, the message is seen in the chat) skip the verifier call.
-- **Proof on disk.** `%LOCALAPPDATA%\Delta\runs\<task>\` keeps screenshots, `progress.json` (after every step), and `run.json`. The newest 30 runs are kept.
+- **Proof on disk.** `%LOCALAPPDATA%\Delta\runs\<task>\` keeps screenshots, `progress.json` (after every step), and `run.json`. The newest 30 runs are kept; pruning never deletes the run in progress or any run touched in the last 30 minutes.
+
+## Failure handling
+- A task always ends with a result. Any exception in a task (not only an AI error) becomes a *failed* task with a plain message (details in the log and the audit log as `task.error`); the run record is closed, the UI is told and the one-task lock is released. A Stop is cleaned up the same way and still ends as *cancelled*.
 
 ## Run control
 - **Stop.** Every task runs as its own asyncio task; `POST /api/tasks/{id}/cancel` cancels it. Clean-up still runs: live CLI sessions closed, run record closed, audit entry written, its approval cards withdrawn.
@@ -149,9 +152,14 @@ double-click icon ─► launcher (pythonw) ─► service: python -m delta run 
 ## Remote control (Telegram)
 - **Pairing:** a single-use 8-character code shown only on the PC (10 minutes) binds one Telegram account;
   all others are ignored.
-- **Remote Guard:** camera, screenshot, sending files, closing apps, keys and Autopilot need the owner's
-  PIN (scrypt hash; 15-minute unlock). 5 wrong PINs lock remote control until someone at the PC unlocks
-  it; `/lock` locks at once.
+- **Remote Guard** (`safety/remote_guard.py`), enforced centrally for every remote channel (anything but
+  the terminal and the dashboard): `Container.submit` refuses remote tasks while locked; `ToolExecutor`
+  needs the owner's PIN for sensitive reads and code runs (screen, webcam, windows, files, messages,
+  clipboard, shell, Python; listing outside allowed folders) and runs nothing remote while locked;
+  `ApprovalBroker.answer` turns a locked remote answer into a logged *deny* and needs the PIN to approve
+  deletes and sends from a phone. The Telegram menu also needs the PIN for camera, screenshot, closing apps,
+  keys and Autopilot. PIN: scrypt hash, 15-minute unlock. 5 wrong PINs lock remote control until someone at
+  the PC unlocks it; `/lock` locks at once. Full list in SECURITY.md.
 - Every remote request shows a Windows notification and is audited. Results (pictures, files) are sent
   back into the chat.
 
@@ -186,7 +194,7 @@ double-click icon ─► launcher (pythonw) ─► service: python -m delta run 
 The governor samples every 15 s and opens the NVIDIA driver only when a local model is configured, so a laptop's dedicated GPU can sleep. The default thread pool is capped at 4. The app window runs without GPU, extensions, sync or background mode. The daemon runs at BELOW_NORMAL priority. Local models unload after `keep_alive` and on shutdown; LM Studio is skipped when loading a model would exhaust RAM. Claude Code sessions (≈250 MB each) are capped at two and closed at the end of every task.
 
 ## Next
-- Slack remote control (same commands and Remote Guard as Telegram).
+- Slack commands and PIN entry (Slack already gets the same Remote Guard lock and PIN rules).
 - Scheduled tasks and routines.
 - End-to-end encrypted channel (Matrix), signed releases.
 - OAuth for Gmail and Outlook.

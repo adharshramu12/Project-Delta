@@ -11,26 +11,31 @@ import base64
 import json
 import shutil
 import time
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 KEEP_RUNS = 30
+PROTECT_RECENT_S = 30 * 60  # a run touched this recently may still be in use: never pruned
 
 
 class ProofRecorder:
-    def __init__(self, root: Path, keep: int = KEEP_RUNS) -> None:
+    def __init__(self, root: Path, keep: int = KEEP_RUNS, protect_recent_s: float = PROTECT_RECENT_S,
+                 now: Callable[[], float] = time.time) -> None:
         self.root = root
         self.keep = keep
+        self.protect_recent_s = protect_recent_s
+        self.now = now
         self.dir: Path | None = None
         self._n = 0
 
     def start(self, task_id: str, request: str) -> None:
         self.dir = self.root / task_id
+        self._prune()  # before this run exists, and it skips the current run anyway
         self.dir.mkdir(parents=True, exist_ok=True)
         self._n = 0
         (self.dir / "request.txt").write_text(request, encoding="utf-8")
-        self._prune()
 
     def save_image(self, b64_jpeg: str, label: str) -> str | None:
         """Store a screenshot of the current run; returns its file name (None outside a run)."""
@@ -93,6 +98,24 @@ class ProofRecorder:
         return sorted(p.name for p in d.glob("*.jpg")) if d.is_dir() else []
 
     def _prune(self) -> None:
-        runs = sorted((p for p in self.root.iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime)
-        for old in runs[:-self.keep]:
-            shutil.rmtree(old, ignore_errors=True)
+        """Keep the newest `keep` runs. Never deletes the current run, nor any run touched in the last
+        `protect_recent_s` seconds (another task may still be writing it; coarse file clocks make
+        modification times tie). Ties are broken by name so the order is stable."""
+        if not self.root.is_dir():
+            return
+        current = self.dir.resolve() if self.dir is not None else None
+        runs: list[tuple[float, str, Path]] = []
+        for p in self.root.iterdir():
+            try:
+                if p.is_dir():
+                    runs.append((p.stat().st_mtime, p.name, p))
+            except OSError:
+                continue  # vanished meanwhile
+        runs.sort()
+        newest_first_kept = max(self.keep - (1 if current is not None else 0), 0)
+        old = runs[:-newest_first_kept] if newest_first_kept else runs
+        cutoff = self.now() - self.protect_recent_s
+        for mtime, _, path in old:
+            if (current is not None and path.resolve() == current) or mtime >= cutoff:
+                continue
+            shutil.rmtree(path, ignore_errors=True)

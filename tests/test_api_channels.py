@@ -74,3 +74,24 @@ def test_core_import_stays_light():
     code = f"import sys, delta.bootstrap; print([m for m in {heavy!r} if m in sys.modules])"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "[]"
+
+
+def test_a_crashing_task_is_reported_failed_not_left_running(client):
+    """API work(): an unexpected exception still ends the task with a result for the dashboard."""
+    import time
+
+    from delta.core.state import TASK_CRASHED
+
+    tc, c = client
+
+    async def boom(req):
+        raise RuntimeError("disk on fire")
+
+    c.submit = boom
+    task_id = tc.post("/api/tasks", json={"text": "x"}).json()["task_id"]
+    for _ in range(100):
+        r = tc.get(f"/api/tasks/{task_id}").json()
+        if r.get("status") != "running":
+            break
+        time.sleep(0.02)
+    assert r["status"] == "failed" and r["answer"] == TASK_CRASHED and "disk on fire" not in str(r)

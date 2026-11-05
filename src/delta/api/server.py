@@ -18,8 +18,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from delta.bootstrap import Container
-from delta.core.state import TaskRequest, TaskResult
+from delta.core.state import TASK_CRASHED, TaskRequest, TaskResult
 from delta.safety.approvals import ApprovalRequest
+from delta.system.logging import log
 
 STATIC = Path(__file__).parent / "static"
 
@@ -141,16 +142,32 @@ def create_app(c: Container, token: str) -> FastAPI:
         results[req.id] = {"task_id": req.id, "status": "running", "chat_id": chat_id}
 
         async def work() -> None:
+            """Whatever happens, the task ends with a result in `results`, the chat and every open
+            dashboard: it is never left "running"."""
+            cancelled = False
             try:
                 res = await c.submit(req)
             except asyncio.CancelledError:
                 # Stopped from the dashboard: nothing more runs for this task (clean-up already ran).
+                cancelled = True
                 res = TaskResult(req.id, "cancelled", "Stopped. I won't do anything more for this request.")
+            except Exception as e:
+                log.exception("api.task_crashed", task=req.id)
+                c.audit.record("task.error", task=req.id, error=type(e).__name__, where="api")
+                res = TaskResult(req.id, "failed", TASK_CRASHED)
             results[req.id] = _result_json(res) | {"chat_id": chat_id}
-            if chats is not None and chats.get(chat_id) is not None:  # the chat may have been deleted meanwhile
-                chats.add(chat_id, "delta", res.answer, {k: v for k, v in results[req.id].items()
-                                                        if k not in ("answer", "chat_id")})
-            await hub.broadcast({"type": "result", "result": results[req.id]})
+            try:
+                if chats is not None and chats.get(chat_id) is not None:  # the chat may have been deleted
+                    chats.add(chat_id, "delta", res.answer, {k: v for k, v in results[req.id].items()
+                                                            if k not in ("answer", "chat_id")})
+            except Exception:
+                log.exception("api.chat_save_failed", task=req.id)
+            try:
+                await hub.broadcast({"type": "result", "result": results[req.id]})
+            except Exception:
+                log.exception("api.broadcast_failed", task=req.id)
+            if cancelled:
+                raise asyncio.CancelledError  # finish as cancelled, after the result is recorded
 
         t = asyncio.create_task(work(), name=f"task-{req.id}")
         running.add(t)

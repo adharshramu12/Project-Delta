@@ -10,6 +10,11 @@ them apart from the owner, so sensitive remote actions need a second factor only
   phone. The owner can also lock it from the phone at any time (/lock).
 - Every unlock, failure, lock and sensitive action is audit-logged.
 
+Enforced centrally, not per channel: `Container.submit` refuses remote tasks while locked,
+`ToolExecutor.execute` asks `tool_refusal()` before any tool runs for a remote request, and
+`ApprovalBroker.answer()` asks `approval_refusal()` before accepting an approval button from a phone.
+A channel is remote unless it is one of LOCAL_CHANNELS, so a new chat channel is covered by default.
+
 State that must survive a restart (locked, why) lives in remote_guard.json in Delta's data folder."""
 
 from __future__ import annotations
@@ -36,6 +41,93 @@ SENSITIVE = {
     "send_file": "send a file from the PC", "keys": "change an API key", "autopilot": "turn on Autopilot",
     "unlock": "unlock sensitive actions",
 }
+
+
+# Channels that are this PC itself (terminal, dashboard/API). Every other channel (telegram, slack, and any
+# channel added later) is remote: fail closed.
+LOCAL_CHANNELS = frozenset({"cli", "api", "dashboard"})
+# Approver names that are not people on a channel (ApprovalBroker): never remote.
+SYSTEM_APPROVERS = frozenset({"timeout", "shutdown"})
+
+# Tools that need the PIN whenever the request came from a remote channel: they show what is on the PC
+# (screen, webcam, windows, files, private messages, clipboard) or run arbitrary code that could.
+REMOTE_PIN_TOOLS = {
+    "look_at_screen": "see the screen", "take_screenshot": "take a screenshot", "read_window": "read a window",
+    "camera_photo": "take a webcam photo", "read_file": "read a file on the PC", "send_file": "send a file from the PC",
+    "read_messages": "read your messages", "run_shell": "run a command on the PC",
+    "run_python": "run code on the PC",
+}
+# Read tools that need the PIN remotely only when they look outside the allowed folders.
+REMOTE_PIN_OUTSIDE_ALLOWED = {"list_dir": "list a folder", "search_files": "search files",
+                              "path_info": "look at a file"}
+# Approving these from a phone needs the PIN (denying never does).
+PIN_TO_APPROVE_RISKS = {"destructive", "external", "system"}
+
+
+def is_remote(channel: str | None) -> bool:
+    return (channel or "").lower() not in LOCAL_CHANNELS
+
+
+def needs_remote_pin(tool: str, outside_allowed: bool = False) -> str | None:
+    """What a remote request would do with this tool, if that needs the PIN; else None."""
+    if tool in REMOTE_PIN_TOOLS:
+        return REMOTE_PIN_TOOLS[tool]
+    if "clipboard" in tool.lower():
+        return "read the clipboard"
+    if outside_allowed and tool in REMOTE_PIN_OUTSIDE_ALLOWED:
+        return REMOTE_PIN_OUTSIDE_ALLOWED[tool] + " outside your allowed folders"
+    return None
+
+
+def pin_hint(guard: Any, channel: str, then: str = "ask again") -> str:
+    if not guard.has_pin:
+        return "Set a remote PIN on the PC first (Delta > Settings > Remote security)."
+    if channel == "telegram":
+        return f"Send /unlock, enter the PIN, then {then}."
+    return f"{channel.capitalize()} cannot take the PIN: do this from the PC or from Telegram after /unlock."
+
+
+def tool_refusal(guard: Any, channel: str, user: str, tool: str, outside_allowed: bool = False) -> str | None:
+    """None when a tool call from this request may run; otherwise why not (for the model and the user).
+    Called by ToolExecutor for every call, so no tool and no channel can skip it."""
+    if guard is None or not is_remote(channel):
+        return None
+    if guard.locked:
+        guard.audit.record("guard.blocked", tool=tool, channel=channel, user=user, why="locked")
+        return guard.locked_message()
+    what = needs_remote_pin(tool, outside_allowed)
+    if what is None:
+        return None
+    if guard.is_unlocked(user):
+        guard.audit.record("guard.sensitive", action=tool, channel=channel, user=user)
+        return None
+    guard.audit.record("guard.blocked", tool=tool, channel=channel, user=user, why="needs_pin")
+    return f"To {what} from {channel}, the owner's PIN is needed. {pin_hint(guard, channel)}"
+
+
+def approver_channel(by: str) -> tuple[str, str]:
+    """'telegram:123' -> ('telegram', '123'); 'dashboard' -> ('dashboard', '')."""
+    channel, _, user = by.partition(":")
+    return channel.lower(), user
+
+
+def approval_refusal(guard: Any, by: str, approved: bool, tool: str, risk: str) -> tuple[bool, str] | None:
+    """None when an approval answer may be accepted as given. Otherwise (deny_instead, message):
+    deny_instead=True: remote control is locked, so the answer counts as a "no" (logged);
+    deny_instead=False: approving this from a phone needs the PIN first; the request stays open."""
+    channel, user = approver_channel(by)
+    if guard is None or channel in SYSTEM_APPROVERS or not is_remote(channel):
+        return None
+    if guard.locked:
+        guard.audit.record("guard.approval_blocked", by=by, tool=tool, risk=risk, answered=approved,
+                           why="locked")
+        return True, guard.locked_message()
+    if approved and (risk in PIN_TO_APPROVE_RISKS or needs_remote_pin(tool)) and not guard.is_unlocked(user):
+        guard.audit.record("guard.approval_blocked", by=by, tool=tool, risk=risk, answered=approved,
+                           why="needs_pin")
+        return False, ("Approving this from your phone needs your PIN. "
+                       + pin_hint(guard, channel, "tap Approve again"))
+    return None
 
 
 def hash_pin(pin: str, salt: bytes | None = None) -> str:

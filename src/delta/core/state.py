@@ -79,5 +79,9 @@ class TaskResult:
     asked_about: str = ""  # needs_user: the original request, so an answer can continue it
 
 
+# What the user sees when a task fails for a reason that is not theirs (a bug, a full disk): no traceback.
+TASK_CRASHED = ("Something went wrong on my side and I stopped this task. Nothing more will run for it. "
+                "Please try again; if it keeps happening, the details are in Delta's log on the PC.")
+
 # The request being worked on, for tools that answer to whoever asked (send_file -> their chat).
 CURRENT_REQUEST: ContextVar[TaskRequest | None] = ContextVar("current_request", default=None)
