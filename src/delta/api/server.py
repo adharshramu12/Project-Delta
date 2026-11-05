@@ -66,7 +66,8 @@ class Hub:
 
     async def broadcast(self, message: dict[str, Any]) -> None:
         dead = []
-        for ws in self.clients:
+        # Loop over a snapshot: a client can connect or disconnect while we await a send (#8).
+        for ws in list(self.clients):
             try:
                 await ws.send_json(message)
             except Exception:
