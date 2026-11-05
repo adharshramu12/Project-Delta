@@ -8,6 +8,11 @@ wins; no answer before the timeout means DENY.
 Remote Guard is enforced here for every channel at once (delta.safety.remote_guard.approval_refusal):
 while remote control is locked, an answer from a phone counts as a "no" (logged), and approving a
 destructive, sending or sensitive action from a phone needs the owner's PIN.
+
+"Allow for this task": when a request offers it (`for_task`), one yes also covers the same tool on the
+same kind of target for the rest of that task. The broker only reports the choice; ToolExecutor keeps
+the grant in memory for that task and drops it when the task ends. It is never saved. From a phone,
+an action that needs the PIN to approve is approved once only, never for the task.
 """
 
 from __future__ import annotations
@@ -19,7 +24,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from delta.safety.remote_guard import approval_refusal
+from delta.safety.remote_guard import (
+    PIN_TO_APPROVE_RISKS,
+    approval_refusal,
+    approver_channel,
+    is_remote,
+    needs_remote_pin,
+)
 from delta.system.logging import log
 
 
@@ -30,6 +41,7 @@ class ApprovalRequest:
     risk: str
     reason: str
     task_id: str = ""
+    for_task: bool = False  # offer "Allow for this task" (ToolExecutor decides when it may)
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     created: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -39,6 +51,7 @@ class ApprovalOutcome:
     approved: bool
     by: str  # who answered, or "timeout"
     human: bool = True  # False when no person chose this answer (a lock turned it into a "no")
+    for_task: bool = False  # the person chose "Allow for this task" (only ever with approved=True)
 
 
 Presenter = Callable[[ApprovalRequest], Awaitable[None]]
@@ -86,13 +99,15 @@ class ApprovalBroker:
             if showing is not None and not showing.done():
                 showing.cancel()  # answered already: stop waiting on a slow channel
 
-    def resolve(self, request_id: str, approved: bool, by: str) -> bool:
+    def resolve(self, request_id: str, approved: bool, by: str, for_task: bool = False) -> bool:
         """True when this answer settled the request (see answer() for why it may not)."""
-        return self.answer(request_id, approved, by)[0]
+        return self.answer(request_id, approved, by, for_task)[0]
 
-    def answer(self, request_id: str, approved: bool, by: str) -> tuple[bool, str]:
+    def answer(self, request_id: str, approved: bool, by: str, for_task: bool = False) -> tuple[bool, str]:
         """Settle a request: (settled, what to show the person who answered).
-        `by` is "<channel>:<user>" for a chat channel, or a local name like "dashboard" or "cli"."""
+        `by` is "<channel>:<user>" for a chat channel, or a local name like "dashboard" or "cli".
+        for_task: "Allow for this task". Honoured only with approved=True on a request that offered it,
+        and never from a phone for an action that needs the PIN (that counts as approving once)."""
         entry = self._pending.get(request_id)
         if not entry or entry[1].done():
             return False, "already answered or expired"
@@ -106,7 +121,15 @@ class ApprovalBroker:
             log.warning("approval.locked_deny", id=request_id, by=by)
             fut.set_result(ApprovalOutcome(False, f"{by} (remote control locked)", human=False))
             return True, "denied: " + message
-        fut.set_result(ApprovalOutcome(approved, by))
+        task_wide = bool(approved and for_task and req.for_task)
+        if task_wide and is_remote(approver_channel(by)[0]) and (
+                str(req.risk) in PIN_TO_APPROVE_RISKS or needs_remote_pin(req.tool)):
+            task_wide = False
+            fut.set_result(ApprovalOutcome(True, by))
+            return True, "approved this time only (from a phone, this kind of action is approved one at a time)"
+        fut.set_result(ApprovalOutcome(approved, by, for_task=task_wide))
+        if task_wide:
+            return True, "approved for this task"
         return True, "approved" if approved else "denied"
 
     def deny_all(self, by: str = "shutdown") -> None:

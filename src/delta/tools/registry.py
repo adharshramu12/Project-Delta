@@ -17,9 +17,19 @@ from delta.core.state import CURRENT_REQUEST
 from delta.learning.store import TRUSTABLE_RISKS, Learned, LearningStore, is_folder_scope, split_key
 from delta.safety.approvals import ApprovalBroker, ApprovalRequest
 from delta.safety.audit import AuditLog
-from delta.safety.exfil_guard import DESKTOP_INPUT, ExfilGuard
-from delta.safety.policy import PolicyEngine, Verdict, _under, norm_path
-from delta.safety.remote_guard import tool_refusal
+from delta.safety.exfil_guard import (
+    AUTOPILOT,
+    DESKTOP_INPUT,
+    SEARCH_TOOLS,
+    URL_TOOLS,
+    ExfilGuard,
+    GuardAsk,
+    host_of,
+    input_classes,
+    site_of,
+)
+from delta.safety.policy import MESSAGING_TOOLS, Decision, PolicyEngine, Verdict, _help_request, _under, norm_path
+from delta.safety.remote_guard import PIN_TO_APPROVE_RISKS, is_remote, needs_remote_pin, tool_refusal
 from delta.system.logging import log
 from delta.tools.base import Risk, Tool, ToolResult
 
@@ -124,12 +134,21 @@ ALWAYS_GUARDED = {"run_shell", "run_python", "remember", "send_file", "send_mess
 IN_PAGE = {"browser_click", "browser_fill", "browser_press"}
 
 
-def needs_taint_check(tool_name: str, risk: str) -> bool:
+def needs_taint_check(tool_name: str, risk: str, autonomy: str = "") -> bool:
     if tool_name in IN_PAGE:
         return False
-    if tool_name in DESKTOP_INPUT and risk == Risk.WRITE:  # Enter in a desktop app can submit or run things
-        return True
+    if tool_name in DESKTOP_INPUT and risk == Risk.WRITE:
+        # Enter or Alt+F4 in a desktop app can submit or close things. Autopilot lets that through in
+        # ordinary apps; terminals, the Run box and Delta's own window still ask (ExfilGuard), and an Enter
+        # that sends in a chat app is EXTERNAL, which stays guarded below.
+        return autonomy != AUTOPILOT
     return tool_name in ALWAYS_GUARDED or risk in GUARDED_RISKS
+
+
+# "Allow for this task" never covers these: they run arbitrary code or change Delta's memory.
+NEVER_FOR_TASK = {"run_shell", "run_python", "remember"}
+# ...nor anything that cannot be undone or is hard-blocked anyway.
+NEVER_FOR_TASK_RISKS = {Risk.DESTRUCTIVE, Risk.SYSTEM}
 
 
 class ToolExecutor:
@@ -148,6 +167,9 @@ class ToolExecutor:
         self._tainted: dict[str, str] = {}
         self.guard: Any = None  # the Container's RemoteGuard, set at start-up (see _remote_refusal)
         self.exfil = ExfilGuard()  # read-then-exfiltrate via URLs, input into terminals / Delta itself
+        # task_id -> "tool|risk|target class" the user allowed for the rest of that task. Memory only:
+        # never saved, dropped in forget_task, so a new task asks again.
+        self._task_grants: dict[str, set[str]] = {}
 
     @staticmethod
     def action_key(tool: Tool, args: BaseModel, risk: str) -> str:
@@ -205,7 +227,45 @@ class ToolExecutor:
     def forget_task(self, task_id: str) -> None:
         self._refused.pop(task_id, None)
         self._tainted.pop(task_id, None)
+        self._task_grants.pop(task_id, None)
         self.exfil.forget(task_id)
+
+    @staticmethod
+    def target_class(tool: Tool, args: BaseModel) -> str:
+        """The kind of target "Allow for this task" covers: the app a desktop input lands on, the site an
+        address is on, else the tool's scope (folder, site or app). '' when it cannot be told."""
+        name = tool.name
+        if name in DESKTOP_INPUT and getattr(tool, "input_targets", None) is not None:
+            apps = input_classes(tool, args)
+            return "app:" + ",".join(apps) if apps else ""
+        if name in URL_TOOLS:
+            raw = str(getattr(args, "target" if name == "open_target" else "url", "") or "")
+            if name != "open_target" or "://" in raw:
+                host = host_of(raw)
+                return "site:" + site_of(host) if host else ""
+        if name in SEARCH_TOOLS:
+            return ""
+        scope = tool.scope(args)
+        return "scope:" + scope if scope else ""
+
+    def task_grant_key(self, tool: Tool, args: BaseModel, decision: Decision, task_id: str,
+                       guard: GuardAsk | None) -> str:
+        """The key a "Allow for this task" answer would cover for this call, or '' when it may not be
+        offered: permanent deletes, code and memory tools, terminal / Delta-window / unchecked input,
+        addresses or searches carrying data, always-confirmed actions, and phone requests whose approval
+        needs the PIN."""
+        if not task_id or decision.risk in NEVER_FOR_TASK_RISKS or tool.name in NEVER_FOR_TASK:
+            return ""
+        if guard is not None and guard.strict:
+            return ""
+        if getattr(tool, "always_ask", False) or (tool.name in MESSAGING_TOOLS and _help_request()):
+            return ""
+        req = CURRENT_REQUEST.get()
+        if req is not None and is_remote(req.channel) and (
+                str(decision.risk) in PIN_TO_APPROVE_RISKS or needs_remote_pin(tool.name)):
+            return ""
+        cls = self.target_class(tool, args)
+        return f"{tool.name}|{decision.risk}|{cls}" if cls else ""
 
     async def execute(self, name: str, raw_args: dict[str, Any], task_id: str = "") -> ToolResult:
         tool = self.registry.get(name)
@@ -224,15 +284,18 @@ class ToolExecutor:
             return ToolResult(False, f"invalid arguments for {name}: {e.errors(include_url=False)}")
 
         decision = self.policy.evaluate(tool, args)
+        autonomy = str(self.policy.b.autonomy)
         source = self._tainted.get(task_id) if task_id else None
-        tainted = bool(source) and decision.verdict != Verdict.DENY and needs_taint_check(name, decision.risk)
+        tainted = (bool(source) and decision.verdict != Verdict.DENY
+                   and needs_taint_check(name, decision.risk, autonomy))
         if tainted:
             decision = replace(decision, verdict=Verdict.ASK,
                                reason=f"this task read outside content ({source}), which could be steering me; "
                                       "please confirm")
-        if decision.verdict != Verdict.DENY and (why := self.exfil.ask_reason(
-                tool, args, task_id, source, self.policy.b.allowed_domains)):
-            decision, tainted = replace(decision, verdict=Verdict.ASK, reason=why), True  # never learned trust
+        guard: GuardAsk | None = None
+        if decision.verdict != Verdict.DENY and (guard := self.exfil.check(
+                tool, args, task_id, source, self.policy.b.allowed_domains, autonomy)):
+            decision, tainted = replace(decision, verdict=Verdict.ASK, reason=guard.reason), True  # never learned trust
         summary = tool.summary(args)
         self.audit.record("policy", task=task_id, tool=name, summary=summary,
                           verdict=decision.verdict, risk=decision.risk, reason=decision.reason)
@@ -258,14 +321,22 @@ class ToolExecutor:
                                   {"user_denied": True,
                                    "denied_action": f"{summary} (you said no to this before; undo it in "
                                                     f"Delta's learned list if you changed your mind)"})
-            if (self.learning and not tainted and decision.risk in TRUSTABLE_RISKS
+            grant = self.task_grant_key(tool, args, decision, task_id, guard)
+            if grant and grant in self._task_grants.get(task_id, set()):
+                self.audit.record("approval", task=task_id, tool=name, approved=True, by="allowed for this task",
+                                  target=grant.split("|", 2)[2])
+            elif (self.learning and not tainted and decision.risk in TRUSTABLE_RISKS
                     and (trust := self._learned_match("trust", key, tool, args, decision.risk))):
                 self.audit.record("approval", task=task_id, tool=name, approved=True, by="learned trust",
                                   learned=trust.id)
             else:
                 outcome = await self.approvals.request(ApprovalRequest(
-                    tool=name, summary=summary, risk=decision.risk, reason=decision.reason, task_id=task_id))
-                self.audit.record("approval", task=task_id, tool=name, approved=outcome.approved, by=outcome.by)
+                    tool=name, summary=summary, risk=decision.risk, reason=decision.reason, task_id=task_id,
+                    for_task=bool(grant)))
+                self.audit.record("approval", task=task_id, tool=name, approved=outcome.approved, by=outcome.by,
+                                  for_task=bool(outcome.for_task and grant))
+                if outcome.approved and outcome.for_task and grant:
+                    self._task_grants.setdefault(task_id, set()).add(grant)
                 if self.learning and outcome.by != "timeout" and outcome.human:  # only real human answers teach
                     learned = self.learning.record_decision(key, decision.risk, summary, outcome.approved)
                     if learned:

@@ -239,11 +239,12 @@ class TelegramChannel(PCMenu):
     async def _mode_cmd(self, update: Any, ctx: Any) -> None:
         if not is_allowed(update.effective_user.id, self.allowed):
             return
-        from delta.control import LEVEL_HELP, LEVELS
+        from delta.control import AUTOPILOT_STILL_ASKS, LEVEL_HELP, LEVELS
 
         now = self.c.settings.boundaries.autonomy
         rows = [[(f"{'✅ ' if k == now else ''}{v}: {LEVEL_HELP[k]}"[:60], f"ctl:mode:{k}")] for k, v in LEVELS.items()]
-        await update.message.reply_text("Permission level. Tap to switch:", reply_markup=self._buttons(rows))
+        await update.message.reply_text(f"Permission level. Tap to switch:\n\n{AUTOPILOT_STILL_ASKS}",
+                                        reply_markup=self._buttons(rows))
 
     async def _stop_cmd(self, update: Any, ctx: Any) -> None:
         if not is_allowed(update.effective_user.id, self.allowed):
@@ -560,8 +561,11 @@ class TelegramChannel(PCMenu):
     async def _present(self, req: ApprovalRequest) -> None:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Approve", callback_data=f"appr:{req.id}:y"),
-                                    InlineKeyboardButton("⛔ Deny", callback_data=f"appr:{req.id}:n")]])
+        rows = [[InlineKeyboardButton("✅ Approve", callback_data=f"appr:{req.id}:y"),
+                 InlineKeyboardButton("⛔ Deny", callback_data=f"appr:{req.id}:n")]]
+        if req.for_task:  # offered only for actions it may cover (see ToolExecutor.task_grant_key)
+            rows.append([InlineKeyboardButton("🔁 Allow for this task", callback_data=f"appr:{req.id}:t")])
+        kb = InlineKeyboardMarkup(rows)
         for uid in self.allowed:
             await self.app.bot.send_message(int(uid), approval_text(req), reply_markup=kb)
 
@@ -572,10 +576,12 @@ class TelegramChannel(PCMenu):
             return
         _, req_id, answer = q.data.split(":")
         # Remote Guard (lock, PIN to approve) is checked inside the broker, for every channel alike.
-        settled, why = self.c.approvals.answer(req_id, answer == "y", by=f"telegram:{q.from_user.id}")
+        settled, why = self.c.approvals.answer(req_id, answer in ("y", "t"), by=f"telegram:{q.from_user.id}",
+                                               for_task=answer == "t")
         if not settled and why != "already answered or expired":
             await q.answer(why[:200], show_alert=True)  # needs the PIN: the buttons stay for after /unlock
             return
         await q.answer()
-        verdict = {"approved": "✅ approved", "denied": "⛔ denied"}.get(why, why)
+        verdict = {"approved": "✅ approved", "denied": "⛔ denied",
+                   "approved for this task": "🔁 approved for this task"}.get(why, why)
         await q.edit_message_text(f"{q.message.text}\n\n→ {verdict}")

@@ -9,7 +9,18 @@ Autonomy (the user's choice):
   trusted         also change things without asking when it can be undone: edit, overwrite or
                   delete files in allowed folders (old versions go to the Recycle Bin), keys and
                   ordinary commands. Still asks before sending anything to anyone.
-  autopilot       trusted, and also sends messages and emails without asking.
+  autopilot       trusted, and also sends messages and emails without asking. Still asks before:
+                  deleting anything that cannot be undone, changing files outside the allowed folders,
+                  typing, keys or clicks in a terminal, the Run box or Delta's own window, alerts to
+                  emergency contacts the user did not clearly ask for, and, once a task has read outside
+                  content (a web page, file, message or the screen), sending, deleting, running code,
+                  saving to memory, or opening an address that carries a long encoded value.
+                  Unlike the other levels, after such a read it opens plain addresses on new sites and
+                  presses Enter / Alt+F4 in ordinary apps without asking (ToolExecutor, ExfilGuard).
+
+Every level: denied tools, apps and sites, secret files, protected and read-only paths stay denied, and
+Remote Guard (PIN, lock) applies on top. "Allow for this task" on an approval covers the same tool on the
+same kind of target until the task ends, in memory only (ToolExecutor.task_grant_key).
 """
 
 from __future__ import annotations

@@ -30,6 +30,7 @@ class SlackChannel:
         self.app.event("message")(self._on_message)
         self.app.action("delta_approve")(self._on_action)
         self.app.action("delta_deny")(self._on_action)
+        self.app.action("delta_approve_task")(self._on_action)
 
     async def start(self) -> None:
         self.c.approvals.add_presenter(self.name, self._present)
@@ -51,13 +52,17 @@ class SlackChannel:
             await say(part)
 
     async def _present(self, req: ApprovalRequest) -> None:
+        buttons: list[dict[str, Any]] = [
+            {"type": "button", "style": "primary", "action_id": "delta_approve", "value": req.id,
+             "text": {"type": "plain_text", "text": "Approve"}}]
+        if req.for_task:  # offered only for actions it may cover (see ToolExecutor.task_grant_key)
+            buttons.append({"type": "button", "action_id": "delta_approve_task", "value": req.id,
+                            "text": {"type": "plain_text", "text": "Allow for this task"}})
+        buttons.append({"type": "button", "style": "danger", "action_id": "delta_deny", "value": req.id,
+                        "text": {"type": "plain_text", "text": "Deny"}})
         blocks: list[dict[str, Any]] = [
             {"type": "section", "text": {"type": "plain_text", "text": approval_text(req)}},
-            {"type": "actions", "elements": [
-                {"type": "button", "style": "primary", "action_id": "delta_approve", "value": req.id,
-                 "text": {"type": "plain_text", "text": "Approve"}},
-                {"type": "button", "style": "danger", "action_id": "delta_deny", "value": req.id,
-                 "text": {"type": "plain_text", "text": "Deny"}}]},
+            {"type": "actions", "elements": buttons},
         ]
         for uid in self.allowed:
             dm = await self.app.client.conversations_open(users=uid)
@@ -70,9 +75,10 @@ class SlackChannel:
         if not is_allowed(user, self.allowed):
             return
         action = body["actions"][0]
-        approved = action["action_id"] == "delta_approve"
+        approved = action["action_id"] in ("delta_approve", "delta_approve_task")
         # Remote Guard (lock, PIN to approve) is checked inside the broker, for every channel alike.
-        settled, verdict = self.c.approvals.answer(action["value"], approved, by=f"slack:{user}")
+        settled, verdict = self.c.approvals.answer(action["value"], approved, by=f"slack:{user}",
+                                                   for_task=action["action_id"] == "delta_approve_task")
         if not settled and verdict != "already answered or expired":
             await client.chat_postMessage(channel=body["channel"]["id"], text=verdict)  # buttons stay
             return

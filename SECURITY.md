@@ -16,7 +16,14 @@ Delta controls a real computer, so its safety rules are part of the design, not 
   whether a tool names them as its path or a command names them by path.
 - **Asked always:** changes that cannot be undone, such as a shell deleting files or Shift+Delete.
 - **Permission levels** decide the rest: Careful, Balanced, Trusted (undoable work without asking: deletes and
-  overwrites go to the Recycle Bin first), Autopilot (also sends messages).
+  overwrites go to the Recycle Bin first), Autopilot (also sends messages and emails without asking).
+- **What still asks in Autopilot:** deleting anything that cannot be undone; changing files outside your
+  allowed folders; typing, keys or clicks in a terminal, the Run box or Delta's own window; emergency alerts
+  you did not clearly ask for; and, once a task has read outside content (a web page, file, message or the
+  screen), sending, deleting, running code, saving to memory, or opening a web address that carries a long
+  encoded value. Two things Careful, Balanced and Trusted ask about after such a read do not ask in Autopilot:
+  opening a plain address on a site that is new to the task, and pressing Enter or Alt+F4 (or typing a line
+  break) in an ordinary app. Quiet hours pause autonomous actions at every level.
 - **Approvals** time out to *deny*.
 - **Secrets** live in Windows Credential Manager, never in config, logs or chats.
 - **Audit log** is hash-chained; `delta audit verify` detects tampering.
@@ -24,14 +31,24 @@ Delta controls a real computer, so its safety rules are part of the design, not 
   approval. Once a task has read outside content (a page, search result, file, chat message or the screen),
   every send, delete, code run or memory write in that task needs a human yes, **even in Autopilot and even
   for actions Delta has learned to trust**. So does desktop input that can submit or close something (Enter
-  typed or pressed in an app, Alt+F4). Steps inside the open page (click, fill) stay free.
+  typed or pressed in an app, Alt+F4), except in Autopilot, where only input into a terminal, the Run box or
+  Delta's own window still asks (an Enter that sends in a chat app counts as sending, so it still asks after
+  such a read). Steps inside the open page (click, fill) stay free.
 - **No read-then-leak through web addresses:** after a task has read outside content, opening a web address
   (`fetch_page`, `browser_open` in either browser mode, `open_target` with a URL) needs your yes when the site
   is new to the task. A site is not new when the task already opened it, when your own request names it, when
   it is in your `allowed_domains`, or when the exact address came back from `web_search` in that task. An
   address whose path, query or fragment carries a long encoded value (48+ base64/hex-like characters, or one
   query value over 200 characters) needs your yes even on a known site, and so does a `browser_search` whose
-  text carries one or is over 200 characters.
+  text carries one or is over 200 characters. In Autopilot the new-site rule is off (a plain address on a new
+  site opens without asking); the encoded-value rules stay on.
+- **"Allow for this task":** some approvals offer a third answer. One yes then also covers the same tool on
+  the same kind of target (the same site, the same app, the same folder) until that task ends. It is kept in
+  memory only, never saved, and a new task asks again. It is never offered for permanent deletes, running
+  commands or code, saving to memory, input into a terminal, the Run box or Delta's own window, input whose
+  target Delta cannot check, addresses or searches that carry encoded data, emergency alerts, or, for a task
+  started from your phone, actions that need your PIN. Pressed on a phone, it follows the PIN rules like
+  Approve, and for an action that needs the PIN it approves that one action only.
 - **Desktop clicks and typing:** a coordinate click (`click_at`, clicks in `do_actions`) is judged by the
   button or link under the point, like a named click: Send/Pay/Submit-type buttons count as sending,
   Delete/Remove-type buttons as deleting. Typing, keys, field-filling or clicks aimed at a **terminal** (Command

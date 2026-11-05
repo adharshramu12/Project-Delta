@@ -168,7 +168,16 @@ double-click icon ─► launcher (pythonw) ─► service: python -m delta run 
   `fetch_page`, `web_search`, `read_file`, `read_messages`, `read_window`, `look_at_screen`) the task is
   marked. From then on EXTERNAL and DESTRUCTIVE actions, code (`run_shell`, `run_python`), `send_file`,
   messages and `remember` turn into an approval, overriding autonomy and learned trust. In-page browser
-  steps are exempt. The mark is cleared when the task ends.
+  steps are exempt. The mark is cleared when the task ends. WRITE-level desktop input (Enter, Alt+F4) is
+  taint-guarded too, except in Autopilot; `safety/exfil_guard.py` still asks for input into terminals, the
+  Run box and Delta's own window at every level, and for addresses carrying encoded data after a read (its
+  new-site rule is off in Autopilot).
+- **Allow for this task** (`ToolExecutor.task_grant_key`): an approval may offer a third answer that covers
+  the same tool, risk and target class (site, app, folder) for the rest of the task. Grants live in memory,
+  are dropped in `forget_task`, and are never offered for DESTRUCTIVE/SYSTEM risk, code or memory tools,
+  ExfilGuard's strict kinds (terminal, Delta window, unchecked target, encoded data), always-asked actions,
+  or remote requests whose approval needs the PIN. `ApprovalBroker.answer` approves once only when a phone
+  picks it for an action that needs the PIN.
 - **Vault** (`system/vault.py`): memory contents and chat titles/messages are sealed with DPAPI
   (app-specific entropy). Old plain rows are sealed on start and the file is vacuumed; the plain-text
   FTS index was removed, and recall scores keywords in Python (memories are few, so this is fast).
