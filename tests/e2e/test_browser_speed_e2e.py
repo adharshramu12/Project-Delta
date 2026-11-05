@@ -48,7 +48,8 @@ pytestmark = [
 
 def ref_of(mgr: BrowserManager, role: str, name: str) -> ElementRef:
     found = [e for e in mgr.refs.values() if e.role == role and e.name == name]
-    assert len(found) == 1, f"expected one {role} '{name}', got {found}"
+    assert len(found) == 1, (f"expected one {role} '{name}', got {found}; refs read at {mgr.refs_url}, "
+                             f"now at {mgr.current_url}: {[e.line() for e in mgr.refs.values()]}")
     return found[0]
 
 
@@ -76,8 +77,12 @@ async def test_spa_actions_send_diffs_and_every_ref_still_works(mgr: BrowserMana
     ok(await BrowserClick(mgr).run(RefClickArgs(ref=star.ref)))
     assert await (await mgr.page()).inner_text("#picked") == "picked Star message"
 
-    cleared = ok(await BrowserClick(mgr).run(RefClickArgs(ref=clear.ref)))
-    assert f'- [{star.ref}] button "Star message"' in cleared, cleared
+    cleared = await BrowserClick(mgr).run(RefClickArgs(ref=clear.ref))
+    # Three buttons gone from a two-button page: the diff is not smaller, so the full listing is sent.
+    if cleared.evidence["snapshot"] == "diff":
+        assert f'- [{star.ref}] button "Star message"' in ok(cleared), cleared.output
+    else:
+        assert 'button "Star message"' not in ok(cleared) and 'button "Load items"' in cleared.output
     stale = await BrowserClick(mgr).run(RefClickArgs(ref=star.ref))
     assert not stale.ok and "no longer on the page" in stale.output
     # A ref listed only in the first, full listing still works after several diffs.
@@ -211,7 +216,10 @@ async def _run_mode(mgr: BrowserManager, site: str, mode: str, monkeypatch: pyte
     rows: dict[str, dict[str, float]] = {}
     for name, scenario in SCENARIOS.items():
         start = time.perf_counter()
-        results = await scenario(mgr, site)
+        try:
+            results = await scenario(mgr, site)
+        except AssertionError as e:
+            raise AssertionError(f"{mode} / {name}: {e}") from e
         took = time.perf_counter() - start
         for _, r in results:
             assert r.ok, (mode, name, r.output)
