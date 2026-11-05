@@ -13,10 +13,12 @@ from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ValidationError
 
+from delta.core.state import CURRENT_REQUEST
 from delta.learning.store import TRUSTABLE_RISKS, Learned, LearningStore, is_folder_scope, split_key
 from delta.safety.approvals import ApprovalBroker, ApprovalRequest
 from delta.safety.audit import AuditLog
-from delta.safety.policy import PolicyEngine, Verdict, norm_path
+from delta.safety.policy import PolicyEngine, Verdict, _under, norm_path
+from delta.safety.remote_guard import tool_refusal
 from delta.system.logging import log
 from delta.tools.base import Risk, Tool, ToolResult
 
@@ -141,6 +143,7 @@ class ToolExecutor:
         self._refused: dict[str, set[str]] = {}
         # task_id -> the first tool that brought outside content into the task (see UNTRUSTED_SOURCES)
         self._tainted: dict[str, str] = {}
+        self.guard: Any = None  # the Container's RemoteGuard, set at start-up (see _remote_refusal)
 
     @staticmethod
     def action_key(tool: Tool, args: BaseModel, risk: str) -> str:
@@ -226,6 +229,9 @@ class ToolExecutor:
         self.audit.record("policy", task=task_id, tool=name, summary=summary,
                           verdict=decision.verdict, risk=decision.risk, reason=decision.reason)
 
+        if decision.verdict != Verdict.DENY and (refusal := self._remote_refusal(tool, args)):
+            return ToolResult(False, f"BLOCKED: {refusal} Do not try another way; tell the user exactly this.",
+                              {"needs_pin": True})
         if decision.verdict == Verdict.DENY:
             return ToolResult(False, f"BLOCKED by policy: {decision.reason}. Do not retry this action; "
                                      "find another way or tell the user.")
@@ -252,7 +258,7 @@ class ToolExecutor:
                 outcome = await self.approvals.request(ApprovalRequest(
                     tool=name, summary=summary, risk=decision.risk, reason=decision.reason, task_id=task_id))
                 self.audit.record("approval", task=task_id, tool=name, approved=outcome.approved, by=outcome.by)
-                if self.learning and outcome.by != "timeout":  # only real human answers teach anything
+                if self.learning and outcome.by != "timeout" and outcome.human:  # only real human answers teach
                     learned = self.learning.record_decision(key, decision.risk, summary, outcome.approved)
                     if learned:
                         self.audit.record("learned", task=task_id, kind=learned.kind, item=learned.id,
@@ -268,6 +274,15 @@ class ToolExecutor:
                                   {"user_denied": outcome.by != "timeout", "denied_action": summary})
 
         return await self._run(tool, args, name, task_id)
+
+    def _remote_refusal(self, tool: Tool, args: BaseModel) -> str | None:
+        """Remote Guard, for every tool: a request from a phone channel needs the PIN for sensitive reads
+        and nothing runs while remote control is locked (delta.safety.remote_guard.tool_refusal)."""
+        req = CURRENT_REQUEST.get()
+        if self.guard is None or req is None:
+            return None
+        outside = any(not _under(norm_path(p), self.policy.allowed) for p in tool.paths(args) if p)
+        return tool_refusal(self.guard, req.channel, req.user, tool.name, outside)
 
     async def _run(self, tool: Tool, args: BaseModel, name: str, task_id: str) -> ToolResult:
         try:

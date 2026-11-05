@@ -1,5 +1,9 @@
 """Slack channel over Socket Mode (outbound WebSocket, no public URL). Direct messages only,
-allow-listed member ids only. Approvals are DM'd with Approve/Deny buttons."""
+allow-listed member ids only. Approvals are DM'd with Approve/Deny buttons.
+
+Remote Guard applies centrally: while remote control is locked, Container.submit refuses Slack
+requests and ApprovalBroker turns a Slack button press into a "no". Slack cannot take the PIN, so actions
+that need it are done from the PC (or from Telegram after /unlock)."""
 
 from __future__ import annotations
 
@@ -67,7 +71,10 @@ class SlackChannel:
             return
         action = body["actions"][0]
         approved = action["action_id"] == "delta_approve"
-        ok = self.c.approvals.resolve(action["value"], approved, by=f"slack:{user}")
-        verdict = ("approved" if approved else "denied") if ok else "already answered or expired"
+        # Remote Guard (lock, PIN to approve) is checked inside the broker, for every channel alike.
+        settled, verdict = self.c.approvals.answer(action["value"], approved, by=f"slack:{user}")
+        if not settled and verdict != "already answered or expired":
+            await client.chat_postMessage(channel=body["channel"]["id"], text=verdict)  # buttons stay
+            return
         await client.chat_update(channel=body["channel"]["id"], ts=body["message"]["ts"],
                                  text=f"{body['message'].get('text', '')}\n→ {verdict}", blocks=[])

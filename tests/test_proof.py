@@ -2,6 +2,7 @@
 
 import base64
 import json
+import os
 
 from fakes import FakeProvider, js
 
@@ -58,8 +59,11 @@ def test_proof_target_is_the_last_window_or_page_worked_in():
 
 
 def test_runs_are_saved_with_screenshots_and_old_ones_pruned(tmp_path):
-    rec = ProofRecorder(tmp_path, keep=2)
+    rec = ProofRecorder(tmp_path, keep=2, protect_recent_s=0)
     for i in range(3):
+        if i:  # older runs get older times: file clocks can be too coarse to tell them apart
+            for j in range(i):
+                os.utime(tmp_path / f"task{j}", (1000 + j, 1000 + j))
         rec.start(f"task{i}", "make notebook")
         assert rec.save_image(SHOT, "final NotebookLM") == "01-final-notebooklm.jpg"
         rec.finish(TaskResult(f"task{i}", "done", "ok", 1, STEPS,
@@ -98,3 +102,47 @@ def test_finished_runs_are_never_offered(tmp_path):
     rec.start("ok1", "x")
     rec.finish(TaskResult("ok1", "done", "fine"))
     assert rec.unfinished() is None
+
+
+def _aged(path, seconds_ago, now):
+    os.utime(path, (now - seconds_ago, now - seconds_ago))
+
+
+def test_pruning_never_deletes_the_current_run_even_when_times_tie(tmp_path):
+    """Found on a coarse file clock: every run had the same mtime and the run just started was pruned,
+    so its first screenshot failed. The current run is never a candidate."""
+    now = 2_000_000.0
+    rec = ProofRecorder(tmp_path, keep=1, protect_recent_s=0, now=lambda: now)
+    for name in ("a", "b", "c"):
+        (tmp_path / name).mkdir()
+        _aged(tmp_path / name, 3600, now)  # all the same time
+    rec.dir = tmp_path / "b"  # "b" is the live run (e.g. resumed): sorted by name it would go first
+    rec._prune()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["b"]
+    rec.dir = None
+    rec.start("zz", "x")
+    assert rec.save_image(SHOT, "first") == "01-first.jpg"  # the run just started is still there
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["zz"]
+
+
+def test_pruning_keeps_recently_touched_runs(tmp_path):
+    now = 2_000_000.0
+    rec = ProofRecorder(tmp_path, keep=1, protect_recent_s=30 * 60, now=lambda: now)
+    (tmp_path / "old").mkdir()
+    (tmp_path / "busy").mkdir()  # another task may still be writing this one
+    _aged(tmp_path / "old", 2 * 3600, now)
+    _aged(tmp_path / "busy", 5 * 60, now)
+    rec.start("new", "x")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["busy", "new"]
+
+
+def test_pruning_survives_a_missing_root_and_keep_counts_the_current_run(tmp_path):
+    now = 2_000_000.0
+    rec = ProofRecorder(tmp_path / "runs", keep=3, protect_recent_s=0, now=lambda: now)
+    rec.start("r0", "x")  # the runs folder did not exist yet
+    rec.finish(TaskResult("r0", "done", "ok"))
+    for i in range(1, 6):
+        _aged(tmp_path / "runs" / f"r{i - 1}", 3600 - i, now)
+        rec.start(f"r{i}", "x")
+        rec.finish(TaskResult(f"r{i}", "done", "ok"))
+    assert sorted(p.name for p in (tmp_path / "runs").iterdir()) == ["r3", "r4", "r5"]

@@ -42,7 +42,8 @@ HELP = (
     "/screen - a screenshot of the PC now\n"
     "/camera - a photo from the webcam of whoever is at the PC\n\n"
     "/stop - stop what I'm doing now\n"
-    "/unlock - enter your PIN (camera, screen, files, closing apps, keys need it)\n"
+    "/unlock - enter your PIN (screen, camera, files, commands, approving deletes or sends,\n"
+    "  closing apps and keys need it)\n"
     "/lock - lock all remote control now (only the PC can unlock it)\n"
     "/status - PC health and AIs available\n"
     "/help - this list\n\n"
@@ -570,7 +571,11 @@ class TelegramChannel(PCMenu):
             await q.answer("not authorised")
             return
         _, req_id, answer = q.data.split(":")
-        ok = self.c.approvals.resolve(req_id, answer == "y", by=f"telegram:{q.from_user.id}")
+        # Remote Guard (lock, PIN to approve) is checked inside the broker, for every channel alike.
+        settled, why = self.c.approvals.answer(req_id, answer == "y", by=f"telegram:{q.from_user.id}")
+        if not settled and why != "already answered or expired":
+            await q.answer(why[:200], show_alert=True)  # needs the PIN: the buttons stay for after /unlock
+            return
         await q.answer()
-        verdict = ("✅ approved" if answer == "y" else "⛔ denied") if ok else "already answered or expired"
+        verdict = {"approved": "✅ approved", "denied": "⛔ denied"}.get(why, why)
         await q.edit_message_text(f"{q.message.text}\n\n→ {verdict}")

@@ -21,7 +21,15 @@ from delta.core.playbooks import playbooks_for
 from delta.core.proof import ProofRecorder
 from delta.core.questions import parse_questions
 from delta.core.replay import Recipe, fill, match_slots
-from delta.core.state import CURRENT_REQUEST, Plan, StepRecord, TaskRequest, TaskResult, Verification
+from delta.core.state import (
+    CURRENT_REQUEST,
+    TASK_CRASHED,
+    Plan,
+    StepRecord,
+    TaskRequest,
+    TaskResult,
+    Verification,
+)
 from delta.core.verifier import verify
 from delta.learning.corrections import learn_corrections, standing_instructions
 from delta.learning.store import LearningStore
@@ -279,39 +287,62 @@ class Orchestrator:
         self._planned: set[str] = set()  # tasks whose planner call also did the fact learning
         self._learning: set[asyncio.Task[None]] = set()
 
+    def _finish_proof(self, result: TaskResult) -> None:
+        """Close the run record; a proof folder that cannot be written must not fail the task itself."""
+        if not self.proof:
+            return
+        try:
+            self.proof.finish(result)
+        except Exception:
+            log.exception("proof.finish_failed", task=result.task_id)
+            self.proof.dir = None
+
     async def drain(self) -> None:
         """Wait for background learning (used at shutdown and in tests)."""
         if self._learning:
             await asyncio.gather(*self._learning, return_exceptions=True)
 
     async def run(self, req: TaskRequest) -> TaskResult:
+        """Always ends with a result, never with a task left "running": any failure (a bug, a full disk, a
+        broken tool) becomes a failed task with a safe message, the run record is closed and the UI told.
+        A cancel (the user pressed Stop) is cleaned up the same way and then re-raised."""
         self.audit.record("task.start", task=req.id, channel=req.channel, text=req.text)
-        await self.events.publish("task.started", task_id=req.id, text=req.text)
-        if self.proof:
-            self.proof.start(req.id, req.text)
-        self.router.reset_meter()
         current = CURRENT_REQUEST.set(req)
         try:
+            await self.events.publish("task.started", task_id=req.id, text=req.text)
+            if self.proof:
+                self.proof.start(req.id, req.text)
+            self.router.reset_meter()
             result = await self._run(req)
         except LLMError as e:
             result = TaskResult(req.id, "failed", friendly_model_error(e))
         except asyncio.CancelledError:
             # Stopped by the user: close the run record and tell the UI, then let the cancel finish.
             self.audit.record("task.end", task=req.id, status="cancelled", attempts=0)
-            if self.proof:
-                self.proof.finish(TaskResult(req.id, "cancelled", "Stopped by the user."))
-            await self.events.publish("task.finished", task_id=req.id, status="cancelled", answer="Stopped.")
+            self._finish_proof(TaskResult(req.id, "cancelled", "Stopped by the user."))
+            with contextlib.suppress(Exception):
+                await self.events.publish("task.finished", task_id=req.id, status="cancelled", answer="Stopped.")
             raise
+        except Exception as e:
+            # The details go to the log and the audit; the user gets a plain message, never a traceback.
+            log.exception("task.crashed", task=req.id)
+            self.audit.record("task.error", task=req.id, error=type(e).__name__)
+            result = TaskResult(req.id, "failed", TASK_CRASHED)
         finally:
             CURRENT_REQUEST.reset(current)
             self.executor.forget_task(req.id)
-            await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
+            try:
+                await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
+            except Exception:
+                log.exception("router.release_failed", task=req.id)
         result.tokens = dict(self.router.meter)
         result.fallback = self.router.fallback_note()
-        if self.proof:
-            self.proof.finish(result)
+        self._finish_proof(result)
         self.audit.record("task.end", task=req.id, status=result.status, attempts=result.attempts)
-        await self.events.publish("task.finished", task_id=req.id, status=result.status, answer=result.answer)
+        try:
+            await self.events.publish("task.finished", task_id=req.id, status=result.status, answer=result.answer)
+        except Exception:  # a broken listener must not lose the answer the caller is waiting for
+            log.exception("task.finished_publish_failed", task=req.id)
         # Learning happens after the answer is delivered, so the user never waits for it.
         t = asyncio.create_task(self._learn(req, result))
         self._learning.add(t)

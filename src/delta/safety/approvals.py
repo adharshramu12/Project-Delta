@@ -4,6 +4,10 @@ A request is broadcast to every registered presenter (CLI, Telegram, Slack, desk
 remote dashboard), so you can approve from whichever device you have. Presenters run side by side,
 each with its own time limit, so one slow or broken channel cannot hold up the others. The first answer
 wins; no answer before the timeout means DENY.
+
+Remote Guard is enforced here for every channel at once (delta.safety.remote_guard.approval_refusal):
+while remote control is locked, an answer from a phone counts as a "no" (logged), and approving a
+destructive, sending or sensitive action from a phone needs the owner's PIN.
 """
 
 from __future__ import annotations
@@ -13,7 +17,9 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
+from delta.safety.remote_guard import approval_refusal
 from delta.system.logging import log
 
 
@@ -32,6 +38,7 @@ class ApprovalRequest:
 class ApprovalOutcome:
     approved: bool
     by: str  # who answered, or "timeout"
+    human: bool = True  # False when no person chose this answer (a lock turned it into a "no")
 
 
 Presenter = Callable[[ApprovalRequest], Awaitable[None]]
@@ -43,6 +50,7 @@ class ApprovalBroker:
         self.present_timeout_s = present_timeout_s  # per presenter, to show the request
         self._presenters: dict[str, Presenter] = {}
         self._pending: dict[str, tuple[ApprovalRequest, asyncio.Future[ApprovalOutcome]]] = {}
+        self.guard: Any = None  # the Container's RemoteGuard, set at start-up
 
     def add_presenter(self, name: str, presenter: Presenter) -> None:
         self._presenters[name] = presenter
@@ -79,11 +87,27 @@ class ApprovalBroker:
                 showing.cancel()  # answered already: stop waiting on a slow channel
 
     def resolve(self, request_id: str, approved: bool, by: str) -> bool:
+        """True when this answer settled the request (see answer() for why it may not)."""
+        return self.answer(request_id, approved, by)[0]
+
+    def answer(self, request_id: str, approved: bool, by: str) -> tuple[bool, str]:
+        """Settle a request: (settled, what to show the person who answered).
+        `by` is "<channel>:<user>" for a chat channel, or a local name like "dashboard" or "cli"."""
         entry = self._pending.get(request_id)
         if not entry or entry[1].done():
-            return False
-        entry[1].set_result(ApprovalOutcome(approved, by))
-        return True
+            return False, "already answered or expired"
+        req, fut = entry
+        refusal = approval_refusal(self.guard, by, approved, req.tool, str(req.risk))
+        if refusal is not None:
+            deny_instead, message = refusal
+            if not deny_instead:
+                log.warning("approval.needs_pin", id=request_id, by=by)
+                return False, message
+            log.warning("approval.locked_deny", id=request_id, by=by)
+            fut.set_result(ApprovalOutcome(False, f"{by} (remote control locked)", human=False))
+            return True, "denied: " + message
+        fut.set_result(ApprovalOutcome(approved, by))
+        return True, "approved" if approved else "denied"
 
     def deny_all(self, by: str = "shutdown") -> None:
         for rid in list(self._pending):

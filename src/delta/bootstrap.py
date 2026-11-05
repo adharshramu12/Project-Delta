@@ -103,7 +103,13 @@ class Container:
         log.warning("delta.warning", message=message)
 
     async def submit(self, req: TaskRequest) -> TaskResult:
-        """One heavy task at a time keeps the laptop responsive."""
+        """One heavy task at a time keeps the laptop responsive. While remote control is locked, nothing
+        asked from a remote channel (Telegram, Slack, any later one) runs at all."""
+        from delta.safety.remote_guard import is_remote
+
+        if self.guard is not None and self.guard.locked and is_remote(req.channel):
+            self.audit.record("guard.blocked", task=req.id, channel=req.channel, user=req.user, why="locked")
+            return TaskResult(req.id, "failed", self.guard.locked_message())
         async with self._task_lock:
             self.running = asyncio.current_task()
             try:
@@ -262,6 +268,8 @@ def build(settings: Settings) -> Container:
 
     guard = RemoteGuard(data, audit, alert=notify)
     send_file.guard = guard
+    executor.guard = guard  # Remote Guard for every tool call (PIN for sensitive reads, the lock)
+    approvals.guard = guard  # ...and for every approval button pressed on a phone
     return Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
                      Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"),
                      live_channels=live_channels, guard=guard, emergency=emergency)
