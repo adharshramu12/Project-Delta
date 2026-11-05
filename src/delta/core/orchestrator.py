@@ -250,6 +250,19 @@ def held_element_lines(messages: list[Message]) -> set[str]:
     return held
 
 
+UNCHANGED_TEXT = "(page text unchanged since the previous step)"
+
+
+def same_text_as_before(text: str, url: str, prev: tuple[str, str] | None) -> tuple[str, tuple[str, str] | None]:
+    """(text to send, what the next step may compare with). The same page text as the previous tool
+    result's AFTER, on the same page, is sent as a one-line note. Only the immediately previous
+    result counts, and only when it was sent in full: that one is still whole in the history
+    (compact_history keeps the newest results), so nothing the model needs is lost."""
+    if prev is not None and url and snapshot.same_page(prev[0], url) and text == prev[1]:
+        return UNCHANGED_TEXT, None
+    return text, (url, text)
+
+
 def drop_held_lines(text: str, held: set[str]) -> str:
     """An observation without the element lines the model already holds in its page listing."""
     if not held:
@@ -751,6 +764,8 @@ class Orchestrator:
                    tools: list[dict[str, Any]], budget: int | None = None) -> tuple[str, str]:
         """Run tool calls until the model gives a final answer. Returns (final_answer, stop_reason)."""
         nudges = 0
+        # The previous tool result's AFTER page text, when it was sent in full: (address, text).
+        prev_after: tuple[str, str] | None = None
         for _ in range(budget or self.s.agent.max_steps):
             if self.governor and self.governor.health == Health.CRITICAL:
                 reasons = ", ".join(self.governor.assessment.reasons)
@@ -803,8 +818,14 @@ class Orchestrator:
                     if observer == "browser_read":  # elements already in the page listing: not twice
                         text = drop_held_lines(text, held_element_lines(
                             [*messages, {"role": "tool", "name": call.name, "content": content}]))
+                        text, prev_after = same_text_as_before(text, str(result.evidence.get("url") or ""),
+                                                               prev_after)
+                    else:
+                        prev_after = None
                     await self.events.publish("task.step", task_id=req.id, tool=observer, args={"auto": True})
                     content += f"\n\nAFTER ({observer}):\n{text}"
+                else:
+                    prev_after = None
                 if stuck_in_loop(steps):
                     # Small models repeat a failing action; tell them plainly to change approach.
                     content += ("\n\nNOTE: you have now done exactly this 3 times in a row and it is not "

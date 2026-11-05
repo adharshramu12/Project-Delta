@@ -17,7 +17,14 @@ from test_orchestrator import make
 
 from delta.config import ProviderConfig, Settings
 from delta.core import orchestrator as orch_mod
-from delta.core.orchestrator import OLD_RESULT_CHARS, compact_history, drop_held_lines, held_element_lines
+from delta.core.orchestrator import (
+    OLD_RESULT_CHARS,
+    UNCHANGED_TEXT,
+    compact_history,
+    drop_held_lines,
+    held_element_lines,
+    same_text_as_before,
+)
 from delta.core.state import TaskRequest, TaskResult
 from delta.llm import usage
 from delta.llm.cli_providers import CLIProvider
@@ -232,6 +239,39 @@ def test_after_read_drops_element_lines_already_held():
     assert '[1] link "Result 1 ' + "x" * 30 + '"' in held and '[200] button "More 200"' in held
     obs = 'A — https://a.example/\nborn 1815\n[200] button "More 200"\n[999] link "Only here"'
     assert drop_held_lines(obs, held) == 'A — https://a.example/\nborn 1815\n[999] link "Only here"'
+
+
+def test_unchanged_page_text_is_sent_once_per_pair_of_steps():
+    text, prev = same_text_as_before("Born 1815", "https://a.example/p", None)
+    assert text == "Born 1815"
+    text, prev = same_text_as_before("Born 1815", "https://a.example/p#bio", prev)
+    assert text == UNCHANGED_TEXT and prev is None  # the previous result still holds it in full
+    text, prev = same_text_as_before("Born 1815", "https://a.example/p", prev)
+    assert text == "Born 1815"  # compared only with a result that carried the text itself
+    text, _ = same_text_as_before("Born 1815", "https://b.example/", prev)
+    assert text == "Born 1815"  # another page: always in full
+
+
+async def test_agent_loop_sends_repeated_page_text_as_a_note(tmp_path, monkeypatch):
+    import delta.config
+
+    monkeypatch.setattr(orch_mod, "known_folder", lambda name: tmp_path)
+    monkeypatch.setattr(delta.config, "known_folder", lambda name: tmp_path)
+    orch, _, _ = make(tmp_path, {
+        "plan": [js({"needs_tools": True, "goal": "g", "steps": ["s"], "success_criteria": ["c"],
+                     "tools": ["browser_scroll"]})],
+        "chat": [call("browser_scroll"), call("browser_scroll"), text("DONE: read it")],
+        "verify": [js({"passed": True, "reason": "ok"})],
+    })
+    for name in ("browser_scroll", "browser_read"):
+        orch.executor.registry.register(_FakeBrowserTool(name))
+    r = await orch.run(TaskRequest("read the page"))
+    assert r.status == "done", r.answer
+    sent = orch.router.providers["fake"].calls  # type: ignore[attr-defined]
+    last_chat = [m for task, m in sent if task == "chat"][-1]
+    tool_msgs = [m["content"] for m in last_chat if m.get("role") == "tool"]
+    assert "born 1815" in tool_msgs[0] and UNCHANGED_TEXT in tool_msgs[1]
+    assert [s.output for s in r.steps if s.tool == "browser_read"][1] == "Page text\nborn 1815"  # proof keeps it
 
 
 # --- 4. screenshots only when needed ---------------------------------------------------------------

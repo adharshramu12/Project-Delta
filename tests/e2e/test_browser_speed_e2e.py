@@ -21,7 +21,14 @@ from typing import Any
 
 import pytest
 
-from delta.core.orchestrator import CONTEXT_BUDGET_CHARS, compact_history
+from delta.core.orchestrator import (
+    CONTEXT_BUDGET_CHARS,
+    OBSERVE_CHARS,
+    compact_history,
+    drop_held_lines,
+    held_element_lines,
+    same_text_as_before,
+)
 from delta.tools import browser
 from delta.tools.base import ToolResult
 from delta.tools.browser import (
@@ -150,73 +157,97 @@ async def _arrive(mgr: BrowserManager, pattern: str) -> None:
     """Make sure a navigation landed before the next step (timed): a form submit can commit after
     the action returned, and the agent would then need an extra step to see it."""
     page = await mgr.page()
-    await page.wait_for_url(pattern, timeout=10000)
+    await page.wait_for_url(pattern, wait_until="commit", timeout=10000)
 
 
-async def _search(mgr: BrowserManager, site: str) -> list[tuple[str, ToolResult]]:
-    out = [("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/search.html")))]
+async def _search(mgr: BrowserManager, site: str, rec: Recorder) -> None:
+    await rec.add("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/search.html")))
     box = ref_of(mgr, "searchbox", "Search docs")
-    out.append(("browser_fill", await BrowserFill(mgr).run(RefFillArgs(ref=box.ref, value="element refs",
-                                                                        submit=True))))
+    await rec.add("browser_fill", await BrowserFill(mgr).run(RefFillArgs(ref=box.ref, value="element refs",
+                                                                        submit=True)))
     await _arrive(mgr, "**/results.html?q=element+refs")
-    out.append(("browser_back", await BrowserBack(mgr).run(BrowserBack.Args())))
+    await rec.add("browser_back", await BrowserBack(mgr).run(BrowserBack.Args()))
     await _arrive(mgr, "**/search.html")
     if not any(e.role == "searchbox" for e in mgr.refs.values()):  # listed before the page came back
-        out.append(("browser_read", await BrowserRead(mgr).run(ReadArgs())))
+        await rec.add("browser_read", await BrowserRead(mgr).run(ReadArgs()))
     box = ref_of(mgr, "searchbox", "Search docs")
-    out.append(("browser_fill", await BrowserFill(mgr).run(RefFillArgs(ref=box.ref, value="pressed enter"))))
-    out.append(("browser_press", await BrowserPress(mgr).run(PressArgs(key="Enter"))))
+    await rec.add("browser_fill", await BrowserFill(mgr).run(RefFillArgs(ref=box.ref, value="pressed enter")))
+    await rec.add("browser_press", await BrowserPress(mgr).run(PressArgs(key="Enter")))
     await _arrive(mgr, "**/results.html?q=pressed+enter")
-    out.append(("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/search.html"))))
-    out.append(("browser_scroll", await BrowserScroll(mgr).run(ScrollArgs(direction="down", pages=2))))
-    return out
+    await rec.add("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/search.html")))
+    await rec.add("browser_scroll", await BrowserScroll(mgr).run(ScrollArgs(direction="down", pages=2)))
 
 
-async def _login(mgr: BrowserManager, site: str) -> list[tuple[str, ToolResult]]:
-    out = [("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/login.html")))]
+async def _login(mgr: BrowserManager, site: str, rec: Recorder) -> None:
+    await rec.add("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/login.html")))
     user = ref_of(mgr, "textbox", "Username")
-    out.append(("browser_fill", await BrowserFill(mgr).run(RefFillArgs(ref=user.ref, value="ada"))))
+    await rec.add("browser_fill", await BrowserFill(mgr).run(RefFillArgs(ref=user.ref, value="ada")))
     signin = ref_of(mgr, "button", "Sign in")
-    out.append(("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=signin.ref))))
-    out.append(("browser_click", await BrowserClick(mgr).run(RefClickArgs(text="Sign in"))))
-    out.append(("browser_scroll", await BrowserScroll(mgr).run(ScrollArgs(direction="down", pages=1))))
-    return out
+    await rec.add("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=signin.ref)))
+    await rec.add("browser_click", await BrowserClick(mgr).run(RefClickArgs(text="Sign in")))
+    await rec.add("browser_scroll", await BrowserScroll(mgr).run(ScrollArgs(direction="down", pages=1)))
 
 
-async def _spa(mgr: BrowserManager, site: str) -> list[tuple[str, ToolResult]]:
-    out = [("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/spa.html")))]
+async def _spa(mgr: BrowserManager, site: str, rec: Recorder) -> None:
+    await rec.add("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/spa.html")))
     load, clear = ref_of(mgr, "button", "Load items"), ref_of(mgr, "button", "Clear list")
-    out.append(("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=load.ref))))
+    await rec.add("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=load.ref)))
     star = ref_of(mgr, "button", "Star message")
-    out.append(("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=star.ref))))
-    out.append(("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=clear.ref))))
-    out.append(("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=load.ref))))
+    await rec.add("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=star.ref)))
+    await rec.add("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=clear.ref)))
+    await rec.add("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=load.ref)))
     star = ref_of(mgr, "button", "Star message")
-    out.append(("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=star.ref))))
-    return out
+    await rec.add("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=star.ref)))
 
 
-async def _compose(mgr: BrowserManager, site: str) -> list[tuple[str, ToolResult]]:
-    out = [("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/compose.html")))]
+async def _compose(mgr: BrowserManager, site: str, rec: Recorder) -> None:
+    await rec.add("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/compose.html")))
     preview = ref_of(mgr, "button", "Preview")
-    out.append(("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=preview.ref))))
-    out.append(("browser_scroll", await BrowserScroll(mgr).run(ScrollArgs(direction="down", pages=1))))
-    out.append(("browser_scroll", await BrowserScroll(mgr).run(ScrollArgs(direction="up", pages=1))))
-    return out
+    await rec.add("browser_click", await BrowserClick(mgr).run(RefClickArgs(ref=preview.ref)))
+    await rec.add("browser_scroll", await BrowserScroll(mgr).run(ScrollArgs(direction="down", pages=1)))
+    await rec.add("browser_scroll", await BrowserScroll(mgr).run(ScrollArgs(direction="up", pages=1)))
 
 
 SCENARIOS = {"search": _search, "login": _login, "spa": _spa, "compose": _compose}
 
 
-def context_chars(results: list[tuple[str, ToolResult]], compact: Callable[..., None]) -> int:
+class Recorder:
+    """Collects each step as the model would get it: the tool's result plus the agent loop's AFTER
+    page read, taken right after the action the way Orchestrator._act does (browser_read cut at
+    OBSERVE_CHARS; the new way also drops element lines the model already holds and a repeat of
+    the previous step's page text)."""
+
+    def __init__(self, mgr: BrowserManager, new: bool) -> None:
+        self.mgr, self.new = mgr, new
+        self.results: list[tuple[str, ToolResult]] = []
+        self.sent: list[tuple[str, str]] = []
+        self._prev: tuple[str, str] | None = None
+
+    async def add(self, name: str, res: ToolResult) -> None:
+        assert res.ok, res.output
+        self.results.append((name, res))
+        content = res.for_llm()
+        if name != "browser_read":
+            text = (await BrowserRead(self.mgr).run(ReadArgs())).output
+            text = text if len(text) <= OBSERVE_CHARS else text[:OBSERVE_CHARS] + "\n…[more]"
+            if self.new:
+                held = held_element_lines([*({"role": "tool", "name": n, "content": c} for n, c in self.sent),
+                                           {"role": "tool", "name": name, "content": content}])
+                text = drop_held_lines(text, held)
+                text, self._prev = same_text_as_before(text, str(res.evidence.get("url") or ""), self._prev)
+            content += f"\n\nAFTER (browser_read):\n{text}"
+        self.sent.append((name, content))
+
+
+def context_chars(steps: list[tuple[str, str]], compact: Callable[..., None]) -> int:
     """Characters of conversation the model is sent over the scenario: after each tool result, the
     history so far (compacted) goes to the model once. The fixed system prompt is left out."""
     msgs: list[dict[str, Any]] = [{"role": "user", "content": "task"}]
     total = 0
-    for i, (name, res) in enumerate(results):
+    for i, (name, content) in enumerate(steps):
         msgs.append({"role": "assistant", "content": "", "tool_calls": [
             {"id": f"c{i}", "type": "function", "function": {"name": name, "arguments": "{}"}}]})
-        msgs.append({"role": "tool", "tool_call_id": f"c{i}", "name": name, "content": res.for_llm()})
+        msgs.append({"role": "tool", "tool_call_id": f"c{i}", "name": name, "content": content})
         compact(msgs, CONTEXT_BUDGET_CHARS)
         total += sum(len(str(m.get("content") or "")) for m in msgs)
     return total
@@ -229,17 +260,17 @@ async def _run_mode(mgr: BrowserManager, site: str, mode: str, monkeypatch: pyte
     mgr.diff_snapshots = not before
     rows: dict[str, dict[str, float]] = {}
     for name, scenario in SCENARIOS.items():
+        rec = Recorder(mgr, new=not before)
         start = time.perf_counter()
         try:
-            results = await scenario(mgr, site)
+            await scenario(mgr, site, rec)
         except AssertionError as e:
             raise AssertionError(f"{mode} / {name}: {e}") from e
         took = time.perf_counter() - start
-        for _, r in results:
-            assert r.ok, (mode, name, r.output)
-        tool_chars = sum(len(r.for_llm()) for _, r in results)
-        ctx = context_chars(results, legacy_compact if before else compact_history)
-        rows[name] = {"steps": len(results), "tool_chars": tool_chars, "context_chars": ctx,
+        tool_chars = sum(len(r.for_llm()) for _, r in rec.results)
+        ctx = context_chars(rec.sent, legacy_compact if before else compact_history)
+        rows[name] = {"steps": len(rec.results), "tool_chars": tool_chars,
+                      "with_after_chars": sum(len(c) for _, c in rec.sent), "context_chars": ctx,
                       "est_tokens": ctx // 4, "seconds": took}
     return rows
 
@@ -270,23 +301,32 @@ async def test_benchmark_before_and_after(mgr: BrowserManager, site: str, monkey
     def med(mode: str, scen: str, key: str) -> float:
         return statistics.median(r[scen][key] for r in runs[mode])
 
-    lines = ["| scenario | steps | tool chars before -> after | context chars before -> after "
-             "(~tokens) | seconds before -> after (median of 3) |", "|---|---|---|---|---|"]
-    totals = {k: [0.0, 0.0] for k in ("tool_chars", "context_chars", "seconds")}
+    keys = ("tool_chars", "with_after_chars", "context_chars", "seconds")
+    lines = ["| scenario | steps | tool result chars | + AFTER page read | context chars sent over the task "
+             "(~tokens) | seconds (median of 3) |", "|---|---|---|---|---|---|"]
+    totals = {k: [0.0, 0.0] for k in keys}
+
+    def pair(scen: str, key: str) -> str:
+        b, a = med("before", scen, key), med("after", scen, key)
+        if key == "seconds":
+            return f"{b:.2f} -> {a:.2f}"
+        if key == "context_chars":
+            return f"{int(b)} -> {int(a)} (~{int(b) // 4} -> ~{int(a) // 4})"
+        return f"{int(b)} -> {int(a)}"
+
     for scen in SCENARIOS:
-        for k in totals:
+        for k in keys:
             totals[k][0] += med("before", scen, k)
             totals[k][1] += med("after", scen, k)
-        steps = f"{int(med('before', scen, 'steps'))} -> {int(med('after', scen, 'steps'))}"
-        lines.append(f"| {scen} | {steps} | {int(med('before', scen, 'tool_chars'))} -> "
-                     f"{int(med('after', scen, 'tool_chars'))} | {int(med('before', scen, 'context_chars'))} -> "
-                     f"{int(med('after', scen, 'context_chars'))} (~{int(med('before', scen, 'context_chars')) // 4}"
-                     f" -> ~{int(med('after', scen, 'context_chars')) // 4}) | "
-                     f"{med('before', scen, 'seconds'):.2f} -> {med('after', scen, 'seconds'):.2f} |")
+        lines.append(f"| {scen} | {pair(scen, 'steps')} | " + " | ".join(pair(scen, k) for k in keys) + " |")
     t = totals
-    lines.append(f"| **total** | | {int(t['tool_chars'][0])} -> {int(t['tool_chars'][1])} | "
-                 f"{int(t['context_chars'][0])} -> {int(t['context_chars'][1])} | "
-                 f"{t['seconds'][0]:.2f} -> {t['seconds'][1]:.2f} |")
+
+    def pct(k: str) -> str:
+        return f"{100 * (t[k][0] - t[k][1]) / t[k][0]:.0f}% less" if t[k][0] else "n/a"
+
+    lines.append("| **total** | | " + " | ".join(
+        (f"{t[k][0]:.2f} -> {t[k][1]:.2f} ({pct(k)})" if k == "seconds" else
+         f"{int(t[k][0])} -> {int(t[k][1])} ({pct(k)})") for k in keys) + " |")
     table = "\n".join(lines)
     report = {"runs": runs, "table": table}
     with capsys.disabled():
@@ -295,4 +335,5 @@ async def test_benchmark_before_and_after(mgr: BrowserManager, site: str, monkey
     _write_reports(table, report)
     # Characters are deterministic: the new way must never send more. Time is only reported.
     assert t["tool_chars"][1] <= t["tool_chars"][0]
+    assert t["with_after_chars"][1] <= t["with_after_chars"][0]
     assert t["context_chars"][1] <= t["context_chars"][0]
