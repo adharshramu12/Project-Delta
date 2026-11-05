@@ -82,9 +82,52 @@ def _domain_match(host: str, patterns: list[str]) -> bool:
     return any(host == p.lower() or host.endswith("." + p.lower()) for p in patterns)
 
 
-# Part of the hard floor: no setting can unlock these (OS files, stored credentials, SSH keys).
-ALWAYS_DENIED = ["%WINDIR%", "~/AppData/Roaming/Microsoft/Credentials", "~/AppData/Local/Microsoft/Credentials",
-                 "~/AppData/Roaming/Microsoft/Protect", "~/.ssh", "~/.aws", "~/.gnupg"]
+# Part of the hard floor: no setting can unlock these, for reading or writing. OS files, Windows
+# credential and DPAPI key stores, SSH/cloud/CLI credentials, browser profiles (cookies, saved passwords),
+# AI coding CLIs' sign-ins and messenger sessions: a prompt-injected task must never be able to read them.
+ALWAYS_DENIED = [
+    "%WINDIR%",
+    # Windows Credential Manager, DPAPI master keys, certificate private keys, Web Credentials vault
+    "~/AppData/Roaming/Microsoft/Credentials", "~/AppData/Local/Microsoft/Credentials",
+    "~/AppData/Roaming/Microsoft/Protect", "~/AppData/Roaming/Microsoft/Crypto",
+    "~/AppData/Local/Microsoft/Vault", "~/AppData/Roaming/Microsoft/Vault",
+    # keys and developer credentials
+    "~/.ssh", "~/.aws", "~/.gnupg", "~/.azure", "~/.kube", "~/.docker", "~/.config/gh",
+    "~/AppData/Roaming/GitHub CLI", "~/.git-credentials", "~/.netrc", "~/_netrc", "~/.pypirc", "~/.npmrc",
+    "~/.config/gcloud", "~/AppData/Roaming/gcloud",
+    # AI coding CLIs (sign-in tokens and API keys)
+    "~/.codex", "~/.claude", "~/.claude.json", "~/.gemini", "~/.config/claude",
+    # browser profiles: cookies, saved passwords, autofill
+    "~/AppData/Local/Google/Chrome/User Data", "~/AppData/Local/Microsoft/Edge/User Data",
+    "~/AppData/Local/BraveSoftware/Brave-Browser/User Data", "~/AppData/Local/Vivaldi/User Data",
+    "~/AppData/Roaming/Opera Software", "~/AppData/Roaming/Mozilla/Firefox/Profiles",
+    # messenger sessions
+    "~/AppData/Roaming/Telegram Desktop/tdata",
+]
+# Secret files wherever they are: env files, private keys, password-manager vaults and certificate
+# stores, browser cookie and password databases. Matched on the file name of declared paths, and on
+# path-like mentions (after a backslash) in argument text such as a shell command. URLs are left out:
+# a web page called /cookies is not a cookie store.
+_SECRET_NAME = (r"(\.env(\.(?!example\b|sample\b|template\b|dist\b|defaults?\b)[\w-]+)?"
+                r"|id_(rsa|dsa|ecdsa|ed25519)"
+                r"|[^\\/\s\"']+\.(kdbx|kdb|opvault|pfx|p12|ppk)"
+                r"|login data( for account)?|cookies|web data|key[34]\.db|logins\.json|cookies\.sqlite)")
+_SECRET_FILE = re.compile(_SECRET_NAME, re.I)
+# ...followed by the end of that path: a quote, separator, end of text, or a space then a flag/next path.
+_SECRET_MENTION = re.compile(r"\\" + _SECRET_NAME + r"(?=$|\\\"|[\"',;)|>]|\s+[-|>;]|\s+[a-z]:\\|\s+\\)", re.I)
+_URL = re.compile(r"[a-z][a-z0-9+.-]*:\\\\[^\s\"']*", re.I)
+
+
+def denied_file(path: str | Path) -> str | None:
+    """The secret file a path points at (by its file name), if any."""
+    name = os.path.basename(str(path).replace("\\", "/"))
+    return name if _SECRET_FILE.fullmatch(name) else None
+
+
+def denied_mention(text: str) -> str | None:
+    """A secret file named by path in free argument text (normalised by PolicyEngine._arg_text)."""
+    m = _SECRET_MENTION.search(_URL.sub(" ", text))
+    return m.group(1) if m else None
 
 
 class PolicyEngine:
@@ -136,6 +179,9 @@ class PolicyEngine:
         hit = next((p for p in paths if _under(p, self.protected)), None) or self._mentions(args, self.protected)
         if hit:
             return d(Verdict.DENY, f"{hit} is protected: Delta never touches it")
+        secret = next((f for p in paths if (f := denied_file(p))), None) or denied_mention(self._arg_text(args))
+        if secret:
+            return d(Verdict.DENY, f"'{secret}' is a secrets file (keys, passwords or cookies): Delta never touches it")
         if risk != Risk.READ:
             ro = next((p for p in paths if _under(p, self.read_only)), None) or self._mentions(args, self.read_only)
             if ro:

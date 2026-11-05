@@ -17,6 +17,7 @@ from delta.core.state import CURRENT_REQUEST
 from delta.learning.store import TRUSTABLE_RISKS, Learned, LearningStore, is_folder_scope, split_key
 from delta.safety.approvals import ApprovalBroker, ApprovalRequest
 from delta.safety.audit import AuditLog
+from delta.safety.exfil_guard import DESKTOP_INPUT, ExfilGuard
 from delta.safety.policy import PolicyEngine, Verdict, _under, norm_path
 from delta.safety.remote_guard import tool_refusal
 from delta.system.logging import log
@@ -126,6 +127,8 @@ IN_PAGE = {"browser_click", "browser_fill", "browser_press"}
 def needs_taint_check(tool_name: str, risk: str) -> bool:
     if tool_name in IN_PAGE:
         return False
+    if tool_name in DESKTOP_INPUT and risk == Risk.WRITE:  # Enter in a desktop app can submit or run things
+        return True
     return tool_name in ALWAYS_GUARDED or risk in GUARDED_RISKS
 
 
@@ -144,6 +147,7 @@ class ToolExecutor:
         # task_id -> the first tool that brought outside content into the task (see UNTRUSTED_SOURCES)
         self._tainted: dict[str, str] = {}
         self.guard: Any = None  # the Container's RemoteGuard, set at start-up (see _remote_refusal)
+        self.exfil = ExfilGuard()  # read-then-exfiltrate via URLs, input into terminals / Delta itself
 
     @staticmethod
     def action_key(tool: Tool, args: BaseModel, risk: str) -> str:
@@ -201,6 +205,7 @@ class ToolExecutor:
     def forget_task(self, task_id: str) -> None:
         self._refused.pop(task_id, None)
         self._tainted.pop(task_id, None)
+        self.exfil.forget(task_id)
 
     async def execute(self, name: str, raw_args: dict[str, Any], task_id: str = "") -> ToolResult:
         tool = self.registry.get(name)
@@ -225,6 +230,9 @@ class ToolExecutor:
             decision = replace(decision, verdict=Verdict.ASK,
                                reason=f"this task read outside content ({source}), which could be steering me; "
                                       "please confirm")
+        if decision.verdict != Verdict.DENY and (why := self.exfil.ask_reason(
+                tool, args, task_id, source, self.policy.b.allowed_domains)):
+            decision, tainted = replace(decision, verdict=Verdict.ASK, reason=why), True  # never learned trust
         summary = tool.summary(args)
         self.audit.record("policy", task=task_id, tool=name, summary=summary,
                           verdict=decision.verdict, risk=decision.risk, reason=decision.reason)
@@ -291,6 +299,7 @@ class ToolExecutor:
             log.exception("tool.crashed", tool=name)
             result = ToolResult(False, f"{type(e).__name__}: {e}")
         self.audit.record("tool", task=task_id, tool=name, ok=result.ok, evidence=result.evidence)
+        self.exfil.observe(task_id, name, args, result)
         if task_id and result.ok and name in UNTRUSTED_SOURCES and task_id not in self._tainted:
             self._tainted[task_id] = name
             self.audit.record("taint", task=task_id, source=name)

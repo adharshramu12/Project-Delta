@@ -72,6 +72,10 @@ class DesktopController:
     async def call(self, fn: Callable[..., T], *args: Any) -> T:
         return await asyncio.get_running_loop().run_in_executor(self._pool, fn, *args)
 
+    def call_now(self, fn: Callable[..., T], *args: Any, timeout: float = 2.0) -> T:
+        """Run on the UIA thread and wait, from outside it (policy checks are synchronous)."""
+        return self._pool.submit(fn, *args).result(timeout=timeout)
+
     @staticmethod
     def _real_position() -> tuple[int, int]:
         p = _pg().position()
@@ -352,11 +356,101 @@ def click_risk(name: str) -> Risk:
     return Risk.ACT
 
 
+# --- what an input lands on (for the policy, before anything moves) -----------------------------
+# A target is (top-level window title, window class, process name). None means "could not tell", and
+# the executor then asks the human instead of guessing (see delta.safety.exfil_guard).
+
+Target = tuple[str, str, str]
+_RISK_ORDER = [Risk.READ, Risk.ACT, Risk.WRITE, Risk.EXTERNAL, Risk.DESTRUCTIVE]
+# Control types whose own name says what a click does. Containers (Document, Pane, Window) are named
+# after the whole page or app, so a click on a page titled "Delete account" is not a Delete click.
+CLICKABLE = {"Button", "SplitButton", "MenuItem", "Hyperlink", "ListItem", "TabItem", "CheckBox",
+             "RadioButton", "Image", "Text", "Group", "Custom"}
+MAX_LABEL = 40  # longer names are sentences or labels, not what a button says
+
+
+def _window_info(hwnd: int) -> Target:
+    import psutil
+    import win32gui
+    import win32process
+
+    top = win32gui.GetAncestor(hwnd, 2) or hwnd  # GA_ROOT
+    _, pid = win32process.GetWindowThreadProcessId(top)
+    try:
+        process = psutil.Process(pid).name()
+    except Exception:
+        process = ""
+    return str(win32gui.GetWindowText(top)), str(win32gui.GetClassName(top)), process
+
+
+def target_at(x: int, y: int) -> Target | None:
+    try:
+        import win32gui
+
+        return _window_info(win32gui.WindowFromPoint((x, y)))
+    except Exception:
+        return None
+
+
+def target_of(window: str | None) -> Target | None:
+    """The window keystrokes will go to: the named one, or the one in front."""
+    try:
+        import win32gui
+
+        if window:
+            from delta.tools.screen import find_window_handle
+
+            h = find_window_handle(window)
+            return _window_info(h) if h else None
+        return _window_info(win32gui.GetForegroundWindow())
+    except Exception:
+        return None
+
+
+def _labels_at(x: int, y: int) -> list[str]:
+    """Names of the clickable element under (x, y) and of the button or link it sits in (UIA thread)."""
+    from pywinauto.uia_element_info import UIAElementInfo
+
+    el = UIAElementInfo.from_point(x, y)
+    names: list[str] = []
+    for _ in range(2):  # the element, then its parent (the Text inside a Button)
+        if el is None or el.control_type not in CLICKABLE:
+            break
+        if (name := (el.name or "").strip()) and len(name) <= MAX_LABEL:
+            names.append(name)
+        if el.control_type not in ("Text", "Image"):
+            break
+        el = el.parent
+    return names
+
+
+def riskiest(*risks: Risk) -> Risk:
+    return max(risks, key=_RISK_ORDER.index)
+
+
 # --- tools -------------------------------------------------------------------------------------
 
 class _DesktopTool[A: BaseModel](Tool[A]):
     def __init__(self, ctl: DesktopController) -> None:
         self.ctl = ctl
+
+    def labels_at(self, x: int, y: int) -> list[str] | None:
+        """What the element under a point is called, or None if it could not be read. Cached for a
+        moment: the policy asks for the risk and for the target of the same call."""
+        cache: dict[tuple[int, int], tuple[float, list[str] | None]] = self.__dict__.setdefault("_labels", {})
+        hit = cache.get((x, y))
+        if hit and time.monotonic() - hit[0] < 2:
+            return hit[1]
+        try:
+            names: list[str] | None = self.ctl.call_now(_labels_at, x, y)
+        except Exception:
+            names = None
+        cache.clear()
+        cache[(x, y)] = (time.monotonic(), names)
+        return names
+
+    def click_risk_at(self, x: int, y: int) -> Risk:
+        return riskiest(Risk.ACT, *(click_risk(n) for n in self.labels_at(x, y) or []))
 
     async def _act(self, fn: Callable[[], str], evidence: Callable[[], dict[str, Any]] | None = None,
                    settle: float = 0.4) -> ToolResult:
@@ -476,6 +570,10 @@ class ClickElement(_DesktopTool[ClickElementArgs]):
     def summary(self, args: ClickElementArgs) -> str:
         return f"click '{args.name}'" + (f" in {args.window}" if args.window else "")
 
+    def input_targets(self, args: ClickElementArgs) -> list[Target] | None:
+        t = target_of(args.window)
+        return [t] if t else None
+
     async def run(self, args: ClickElementArgs) -> ToolResult:
         def go() -> str:
             w = _find_window(args.window)
@@ -511,6 +609,19 @@ class ClickAt(_DesktopTool[ClickAtArgs]):
     risk = Risk.ACT
     Args = ClickAtArgs
 
+    def risk_for(self, args: ClickAtArgs) -> Risk:
+        # A coordinate click on a Send/Pay/Delete button is that action, exactly like click_element.
+        return self.click_risk_at(args.x, args.y)
+
+    def summary(self, args: ClickAtArgs) -> str:
+        names = self.labels_at(args.x, args.y)
+        on = f" on '{names[-1]}'" if names else ""
+        return f"{'double-' if args.double else ''}{args.button}-click at ({args.x},{args.y}){on}"
+
+    def input_targets(self, args: ClickAtArgs) -> list[Target] | None:
+        t = target_at(args.x, args.y)
+        return [t] if t and self.labels_at(args.x, args.y) is not None else None
+
     async def run(self, args: ClickAtArgs) -> ToolResult:
         def go() -> str:
             pyautogui = _pg()
@@ -544,6 +655,10 @@ class TypeText(_DesktopTool[TypeArgs]):
             return f"SEND a message in {app}: \u201c{args.text.strip()}\u201d"
         return f"type {len(args.text)} chars{' and press Enter' if enter else ''}" + (
             f" into {args.window}" if args.window else "")
+
+    def input_targets(self, args: TypeArgs) -> list[Target] | None:
+        t = target_of(args.window)
+        return [t] if t else None
 
     async def run(self, args: TypeArgs) -> ToolResult:
         def go() -> str:
@@ -602,6 +717,10 @@ class PressKeys(_DesktopTool[KeysArgs]):
             return f"press Enter in {app} (this SENDS whatever is typed in the chat)"
         return "press " + "+".join(args.keys)
 
+    def input_targets(self, args: KeysArgs) -> list[Target] | None:
+        t = target_of(args.window)
+        return [t] if t else None
+
     async def run(self, args: KeysArgs) -> ToolResult:
         def go() -> str:
             _ensure_foreground(args.window)
@@ -627,6 +746,10 @@ class SetField(_DesktopTool[SetFieldArgs]):
 
     def summary(self, args: SetFieldArgs) -> str:
         return f"set field '{args.name}'" + (f" in {args.window}" if args.window else "")
+
+    def input_targets(self, args: SetFieldArgs) -> list[Target] | None:
+        t = target_of(args.window)
+        return [t] if t else None
 
     async def run(self, args: SetFieldArgs) -> ToolResult:
         state: dict[str, Any] = {}
@@ -726,6 +849,7 @@ def _scroll(amount: int, x: int | None, y: int | None, horizontal: bool) -> None
 
 ACTION_KINDS = ("click", "double_click", "right_click", "middle_click", "move", "drag", "scroll", "type",
                 "keys", "wait")
+CLICKS = ("click", "double_click", "right_click", "middle_click")
 
 
 class Step(BaseModel):
@@ -770,10 +894,31 @@ class DoActions(_DesktopTool[ActionsArgs]):
                 r = Risk.WRITE
             elif s.action == "keys" and s.keys:
                 r = PressKeys.risk_for(None, KeysArgs(keys=s.keys))  # type: ignore[arg-type]
+            elif s.action in CLICKS and s.x is not None and s.y is not None:
+                # Read before any step runs: a point inside a menu the batch opens is judged by what is
+                # there now. The first click, and every click on something already on screen, is exact.
+                r = self.click_risk_at(s.x, s.y)
             else:
                 r = Risk.ACT
             worst = max(worst, r, key=order.index)
         return worst
+
+    def input_targets(self, args: ActionsArgs) -> list[Target] | None:
+        found: list[Target] = []
+        focus: Target | None = None  # where keys go: the last window clicked, else the one in front
+        for s in args.steps:
+            if s.action in (*CLICKS, "drag") and s.x is not None and s.y is not None:
+                t = focus = target_at(s.x, s.y)
+                if s.action in CLICKS and self.labels_at(s.x, s.y) is None:
+                    return None
+            elif s.action in ("type", "keys"):
+                t = focus or target_of(None)
+            else:
+                continue
+            if t is None:
+                return None
+            found.append(t)
+        return found
 
     @staticmethod
     def _sends_in(args: ActionsArgs) -> str | None:

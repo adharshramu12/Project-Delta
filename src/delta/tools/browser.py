@@ -19,11 +19,13 @@ import os
 import re
 import subprocess
 import time
+import weakref
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import psutil
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from delta.system.logging import log
 from delta.tools.base import Risk, Tool, ToolResult
@@ -42,16 +44,120 @@ SEARCH_URL = "https://duckduckgo.com/?q={q}"  # no account, no consent wall
 # Field labels that mean "search box": submitting one only runs a search, so it needs no approval.
 SEARCHY = re.compile(r"\b(search|query|find|look ?up|q)\b", re.I)
 
-ELEMENTS_JS = """() => {
+# Accessible-name approximation shared by the page listing and the live re-check before acting.
+_NAME_JS = """(el) => {
+  const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+  const by = el.getAttribute('aria-labelledby');
+  if (by) {
+    const parts = by.split(/\\s+/).map((id) => document.getElementById(id));
+    const t = clean(parts.map((n) => (n ? n.innerText : '')).join(' '));
+    if (t) return t;
+  }
+  const aria = clean(el.getAttribute('aria-label'));
+  if (aria) return aria;
+  const tag = el.tagName.toLowerCase();
+  const type = (el.getAttribute('type') || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+    if (tag === 'input' && ['submit', 'button', 'reset'].includes(type)) return clean(el.value);
+    const lab = el.labels && el.labels.length ? clean(el.labels[0].innerText) : '';
+    return lab || clean(el.placeholder) || clean(el.title) || clean(el.name);
+  }
+  const img = el.querySelector && el.querySelector('img[alt]');
+  return clean(el.innerText) || clean(el.title) || (img ? clean(img.alt) : '');
+}"""
+
+# Numbers every visible interactive element with a data-delta-ref attribute. Numbers are kept for an
+# element across reads of the same document (only new elements get new numbers), so a ref the agent
+# saw stays valid until the page navigates. Returns one record per numbered element.
+REFS_JS = """() => {
+  const name = """ + _NAME_JS + """;
+  const SEL = 'a[href],button,input:not([type=hidden]),textarea,select,summary,[contenteditable=true],'
+    + '[role=button],[role=link],[role=textbox],[role=searchbox],[role=combobox],[role=checkbox],'
+    + '[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option]';
+  const ROLE = {a: 'link', button: 'button', textarea: 'textbox', select: 'combobox', summary: 'button'};
+  const INPUT = {submit: 'button', button: 'button', reset: 'button', image: 'button', checkbox: 'checkbox',
+                 radio: 'radio', search: 'searchbox', range: 'slider', file: 'file'};
+  if (typeof window.__deltaRefNext !== 'number') window.__deltaRefNext = 1;
   const out = [];
-  for (const el of document.querySelectorAll('a,button,input,textarea,select,[role=button],[role=link]')) {
+  const vh = window.innerHeight, vw = window.innerWidth;
+  for (const el of document.querySelectorAll(SEL)) {
+    if (out.length >= %(limit)d) break;
     const r = el.getBoundingClientRect();
-    if (!r.width || !r.height || out.length >= 80) continue;
-    const label = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || el.name || '').trim();
-    out.push(`[${el.tagName.toLowerCase()}${el.type ? ':' + el.type : ''}] ${label.slice(0, 70)}`);
+    if (!r.width || !r.height) continue;
+    const st = getComputedStyle(el);
+    if (st.visibility === 'hidden' || st.display === 'none' || el.disabled) continue;
+    let ref = Number(el.getAttribute('data-delta-ref'));
+    if (!ref) { ref = window.__deltaRefNext++; el.setAttribute('data-delta-ref', String(ref)); }
+    const tag = el.tagName.toLowerCase();
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    const role = el.getAttribute('role') || ROLE[tag] || (tag === 'input' ? (INPUT[type] || 'textbox') : tag);
+    const attr = (a) => (el.getAttribute(a) || '').slice(0, 80);
+    out.push({ref, role, tag, type, name: name(el).slice(0, 80), attrs: [attr('name'), attr('aria-label'),
+      attr('placeholder'), attr('autocomplete')].join(' ').trim(),
+      inView: r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw});
   }
   return out;
 }"""
+REF_LIMIT = 200  # elements numbered per read; the listing itself is cut by the read budget
+SNAPSHOT_CHARS = 1200  # page summary returned with every action: enough to pick the next step
+SNAPSHOT_ELEMENTS = 30
+SETTLE_IDLE_MS = 1500  # the most an action waits for the network to go quiet
+QUIET_S = 0.25  # no request in flight for this long counts as quiet
+ELEMENTS_JS = REFS_JS % {"limit": REF_LIMIT}  # kept name: older callers evaluate ELEMENTS_JS
+
+
+@dataclass(frozen=True)
+class ElementRef:
+    """One numbered element as the agent was shown it. The name is what risk checks use."""
+
+    ref: int
+    role: str
+    name: str
+    tag: str = ""
+    type: str = ""
+    attrs: str = ""  # name/aria-label/placeholder/autocomplete, for search-box and password checks
+    in_view: bool = True
+
+    def line(self) -> str:
+        kind = f" ({self.type})" if self.type and self.role == "textbox" and self.type != "text" else ""
+        return f'[{self.ref}] {self.role} "{self.name}"{kind}'
+
+    def field_text(self) -> str:
+        """What a fill's search-box check reads: the same signals _is_search_box looks at."""
+        return " ".join(x for x in (self.name, self.type, self.role, self.attrs) if x)
+
+
+def parse_refs(raw: Any) -> list[ElementRef]:
+    """Page records from REFS_JS -> ElementRefs, skipping anything malformed."""
+    out: list[ElementRef] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            ref = int(item.get("ref", 0))
+        except (TypeError, ValueError):
+            continue
+        if ref <= 0:
+            continue
+        out.append(ElementRef(ref=ref, role=str(item.get("role") or ""), name=str(item.get("name") or ""),
+                              tag=str(item.get("tag") or ""), type=str(item.get("type") or ""),
+                              attrs=str(item.get("attrs") or ""), in_view=bool(item.get("inView", True))))
+    return out
+
+
+_RISK_RANK = {Risk.READ: 0, Risk.ACT: 1, Risk.WRITE: 2, Risk.EXTERNAL: 3, Risk.DESTRUCTIVE: 4, Risk.SYSTEM: 5}
+
+
+def riskier(a: Risk, b: Risk) -> bool:
+    return _RISK_RANK[a] > _RISK_RANK[b]
+
+
+class StaleRef(LookupError):
+    pass
+
+
+def stale_message(ref: int) -> str:
+    return f"element [{ref}] is no longer on the page (it changed or navigated); call browser_read to get fresh refs"
 
 
 def find_browser() -> tuple[str, str] | None:
@@ -86,6 +192,18 @@ class BrowserManager:
         self._last_used = 0.0
         self._reaper: asyncio.Task[None] | None = None
         self.current_url = ""
+        self.refs: dict[int, ElementRef] = {}  # numbered elements from the latest listing of the page
+        self.refs_url = ""
+
+    def remember_refs(self, elements: list[ElementRef], url: str) -> None:
+        """The latest listing replaces the old one: only refs the agent was just shown are valid."""
+        self.refs = {e.ref: e for e in elements}
+        self.refs_url = url
+
+    def ref(self, ref: int) -> ElementRef:
+        if ref not in self.refs:
+            raise StaleRef(stale_message(ref))
+        return self.refs[ref]
 
     async def page(self) -> Any:
         async with self._lock:
@@ -93,7 +211,9 @@ class BrowserManager:
                 await self._launch()
             self._last_used = time.monotonic()
             ctx = self._browser.contexts[0]
-            return ctx.pages[-1] if ctx.pages else await ctx.new_page()
+            page = ctx.pages[-1] if ctx.pages else await ctx.new_page()
+            track_requests(page)
+            return page
 
     async def _launch(self) -> None:
         from playwright.async_api import async_playwright
@@ -107,7 +227,7 @@ class BrowserManager:
             self.profile = self.data_dir / f"{self.browser_name}-profile"
             self.profile.mkdir(parents=True, exist_ok=True)
             # Popen only starts the process (non-blocking); the browser must outlive any asyncio transport
-            self._proc = subprocess.Popen([exe, *chrome_args(self.profile)], close_fds=True)  # noqa: ASYNC220
+            self._proc = subprocess.Popen([exe, *chrome_args(self.profile, PORT)], close_fds=True)  # noqa: ASYNC220
             for _ in range(60):
                 if await self._alive(endpoint):
                     break
@@ -160,6 +280,106 @@ async def _evidence(page: Any, mgr: BrowserManager) -> dict[str, Any]:
     return {"url": page.url, "title": await page.title()}
 
 
+# Requests in flight per page, so settle() also waits for the API calls an action starts
+# (a click that fetches data, a SPA route change). Playwright's "networkidle" load state cannot
+# do that: once a page has reached it, waiting for it again returns at once.
+_INFLIGHT: weakref.WeakKeyDictionary[Any, set[Any]] = weakref.WeakKeyDictionary()
+
+
+def track_requests(page: Any) -> None:
+    """Count the page's requests from now on (once per page)."""
+    if page in _INFLIGHT:
+        return
+    pending: set[Any] = set()
+    _INFLIGHT[page] = pending
+
+    # Plain functions, not bound builtins: Playwright tags each handler with an attribute.
+    def started(req: Any) -> None:
+        pending.add(req)
+
+    def ended(req: Any) -> None:
+        pending.discard(req)
+
+    page.on("request", started)
+    page.on("requestfinished", ended)
+    page.on("requestfailed", ended)
+
+
+async def _network_quiet(pending: set[Any], deadline: float) -> None:
+    """Until no request has been in flight for QUIET_S, or the deadline passes."""
+    quiet_since: float | None = None
+    while (now := time.monotonic()) < deadline:
+        if pending:
+            quiet_since = None
+        elif quiet_since is None:
+            quiet_since = now
+        elif now - quiet_since >= QUIET_S:
+            return
+        await asyncio.sleep(0.05)
+
+
+async def settle(page: Any, idle_ms: int = SETTLE_IDLE_MS) -> None:
+    """Wait for the page to be ready after an action, bounded: the document parsed, then up to
+    idle_ms for the network to go quiet (including requests the action itself started), then two
+    animation frames so scripts have rendered. Every step gives up quietly: a busy page (live
+    feeds, ads) must not stall the agent."""
+    with contextlib.suppress(Exception):
+        await page.wait_for_load_state("domcontentloaded", timeout=10000)
+    deadline = time.monotonic() + idle_ms / 1000
+    with contextlib.suppress(Exception):
+        await page.wait_for_load_state("networkidle", timeout=idle_ms)
+    pending = _INFLIGHT.get(page)
+    if pending is not None:
+        await _network_quiet(pending, deadline)
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(page.evaluate(
+            "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))"), 1.0)
+
+
+async def list_refs(page: Any, mgr: BrowserManager) -> list[ElementRef]:
+    """Number the page's interactive elements and make them the agent's current refs."""
+    elements = parse_refs(await page.evaluate(ELEMENTS_JS))
+    mgr.remember_refs(elements, page.url)
+    return elements
+
+
+def snapshot_text(title: str, url: str, elements: list[ElementRef], budget: int = SNAPSHOT_CHARS,
+                  max_elements: int = SNAPSHOT_ELEMENTS) -> str:
+    """Compact page summary for action results: title, URL and the first numbered elements,
+    on-screen ones first. Bounded so every action costs at most ~budget characters."""
+    from delta.tools.user_browser import select_lines
+
+    ordered = [e for e in elements if e.in_view] + [e for e in elements if not e.in_view]
+    lines = [e.line() for e in ordered[:max_elements]]
+    more = len(ordered) - len(lines)
+    body = select_lines(lines, None, budget) if lines else "(no clickable elements found)"
+    tail = f"\n…[{more} more elements; browser_read lists them]" if more > 0 else ""
+    return f"Page: {title} — {url}\n{body}{tail}"
+
+
+async def _observed(page: Any, mgr: BrowserManager, message: str) -> ToolResult:
+    """Act-and-observe: the action's result carries a short snapshot of the page it left behind,
+    with fresh refs, so the next step usually needs no separate browser_read."""
+    ev = await _evidence(page, mgr)
+    try:
+        elements = await list_refs(page, mgr)
+    except Exception:  # snapshot is a bonus; the action itself succeeded
+        mgr.remember_refs([], page.url)
+        return ToolResult(True, message, ev)
+    return ToolResult(True, f"{message}\n\n{snapshot_text(ev['title'], ev['url'], elements)}", ev)
+
+
+async def _ref_target(page: Any, mgr: BrowserManager, ref: int) -> tuple[Any, ElementRef, str]:
+    """The live element for a ref, the record the agent saw, and the element's name right now."""
+    seen = mgr.ref(ref)
+    loc = page.locator(f'[data-delta-ref="{ref}"]')
+    if await loc.count() == 0:
+        raise StaleRef(stale_message(ref))
+    loc = loc.first
+    live = str(await loc.evaluate(_NAME_JS) or "")
+    return loc, seen, live
+
+
 class _BrowserTool[A: BaseModel](Tool[A]):
     def __init__(self, mgr: BrowserManager) -> None:
         self.mgr = mgr
@@ -180,7 +400,8 @@ class OpenArgs(BaseModel):
 
 class BrowserOpen(_BrowserTool[OpenArgs]):
     name = "browser_open"
-    description = "Open a URL in Delta's Chrome (signed in to the user's sites)."
+    description = ("Open a URL in Delta's Chrome (signed in to the user's sites). Returns the page title, URL "
+                   "and numbered elements ([12] button \"Sign in\") to use as ref in browser_click/browser_fill.")
     risk = Risk.ACT
     Args = OpenArgs
 
@@ -192,8 +413,8 @@ class BrowserOpen(_BrowserTool[OpenArgs]):
             page = await self.mgr.page()
             url = args.url if "://" in args.url else f"https://{args.url}"
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            ev = await _evidence(page, self.mgr)
-            return ToolResult(True, f"opened {ev['title']} ({ev['url']})", ev)
+            await settle(page)
+            return await _observed(page, self.mgr, f"opened {await page.title()} ({page.url})")
 
         return await self._guarded(go)
 
@@ -208,7 +429,8 @@ class ReadArgs(BaseModel):
 
 class BrowserRead(_BrowserTool[ReadArgs]):
     name = "browser_read"
-    description = ("Read the current browser page: title, URL, visible text and clickable elements. "
+    description = ("Read the current browser page: title, URL, visible text and numbered clickable elements "
+                   "([12] button \"Sign in\"); pass the number as ref to browser_click / browser_fill. "
                    "Pass focus (e.g. 'born', 'price') to get only the relevant parts of long pages.")
     risk = Risk.READ
     Args = ReadArgs
@@ -219,9 +441,9 @@ class BrowserRead(_BrowserTool[ReadArgs]):
         async def go() -> ToolResult:
             page = await self.mgr.page()
             text = await page.inner_text("body")
-            elements = await page.evaluate(ELEMENTS_JS)
+            elements = await list_refs(page, self.mgr)
             ev = await _evidence(page, self.mgr)
-            lines = [ln.strip() for ln in text.splitlines() if ln.strip()] + elements
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()] + [e.line() for e in elements]
             body = f"{ev['title']} — {ev['url']}\n\n" + select_lines(lines, args.focus, MAX_READ_CHARS)
             return ToolResult(True, body, ev)
 
@@ -232,35 +454,73 @@ class ClickArgs(BaseModel):
     text: str = Field(description="Visible text or accessible name of the link/button")
 
 
-class BrowserClick(_BrowserTool[ClickArgs]):
+class RefClickArgs(ClickArgs):
+    """Delta browser's click: by ref number from the latest page listing, or by visible text."""
+
+    text: str = Field(default="", description="Visible text or accessible name of the link/button")
+    ref: int | None = Field(default=None, description="Element number from the latest page listing, e.g. 12 for [12]")
+
+    @model_validator(mode="after")
+    def _one_target(self) -> RefClickArgs:
+        if self.ref is None and not self.text.strip():
+            raise ValueError("give ref (the [number] from the page listing) or text")
+        return self
+
+
+def _click_label(mgr: BrowserManager, args: ClickArgs) -> str:
+    """The name risk checks read: the element's real name for a ref, else the text asked for.
+    An unknown ref has no name; its run refuses before touching the page."""
+    ref = getattr(args, "ref", None)
+    if ref is None:
+        return args.text
+    seen = mgr.refs.get(ref)
+    return seen.name if seen else ""
+
+
+class BrowserClick(_BrowserTool[RefClickArgs]):
     name = "browser_click"
-    description = "Click a link or button on the current page by its visible text."
+    description = ("Click a link or button on the current page: by ref (the [number] from browser_read or the "
+                   "last action's page listing; fastest and exact) or by its visible text.")
     risk = Risk.ACT
-    Args = ClickArgs
+    Args = RefClickArgs
 
     def risk_for(self, args: ClickArgs) -> Risk:
-        return click_risk(args.text)
+        return click_risk(_click_label(self.mgr, args))
 
     def summary(self, args: ClickArgs) -> str:
-        return f"click '{args.text}' on {self.mgr.current_url or 'the page'}"
+        ref = getattr(args, "ref", None)
+        what = f"[{ref}] '{_click_label(self.mgr, args)}'" if ref is not None else f"'{args.text}'"
+        return f"click {what} on {self.mgr.current_url or 'the page'}"
 
     async def run(self, args: ClickArgs) -> ToolResult:
         async def go() -> ToolResult:
             page = await self.mgr.page()
-            matches = (page.get_by_role("button", name=args.text).or_(page.get_by_role("link", name=args.text))
-                       .or_(page.get_by_text(args.text)))
-            target = None
-            for i in range(min(await matches.count(), 10)):
-                with contextlib.suppress(Exception):
-                    if await matches.nth(i).is_visible():
-                        target = matches.nth(i)
-                        break
-            if target is None:
-                return ToolResult(False, f"nothing visible called '{args.text}'; use browser_read to see the page")
+            ref = getattr(args, "ref", None)
+            if ref is not None:
+                try:
+                    target, seen, live = await _ref_target(page, self.mgr, ref)
+                except StaleRef as e:
+                    return ToolResult(False, str(e))
+                # The approval was decided on the name the agent saw; never click something riskier.
+                if riskier(click_risk(live), click_risk(seen.name)):
+                    return ToolResult(False, f"element [{ref}] now reads '{live}', not '{seen.name}'; "
+                                             "call browser_read to get fresh refs")
+                label = live or seen.name
+            else:
+                matches = (page.get_by_role("button", name=args.text).or_(page.get_by_role("link", name=args.text))
+                           .or_(page.get_by_text(args.text)))
+                target = None
+                for i in range(min(await matches.count(), 10)):
+                    with contextlib.suppress(Exception):
+                        if await matches.nth(i).is_visible():
+                            target = matches.nth(i)
+                            break
+                if target is None:
+                    return ToolResult(False, f"nothing visible called '{args.text}'; use browser_read to see the page")
+                label = args.text
             await target.click(timeout=8000)
-            await page.wait_for_load_state("domcontentloaded")
-            ev = await _evidence(page, self.mgr)
-            return ToolResult(True, f"clicked '{args.text}', now at {ev['url']}", ev)
+            await settle(page)
+            return await _observed(page, self.mgr, f"clicked '{label}', now at {page.url}")
 
         return await self._guarded(go)
 
@@ -269,6 +529,28 @@ class FillArgs(BaseModel):
     field: str = Field(description="Label or placeholder of the input")
     value: str
     submit: bool = Field(default=False, description="Press Enter afterwards (free for search boxes)")
+
+
+class RefFillArgs(FillArgs):
+    """Delta browser's fill: by ref number from the latest page listing, or by label/placeholder."""
+
+    field: str = Field(default="", description="Label or placeholder of the input")
+    ref: int | None = Field(default=None, description="Field number from the latest page listing, e.g. 7 for [7]")
+
+    @model_validator(mode="after")
+    def _one_target(self) -> RefFillArgs:
+        if self.ref is None and not self.field.strip():
+            raise ValueError("give ref (the [number] from the page listing) or field")
+        return self
+
+
+def _fill_label(mgr: BrowserManager, args: FillArgs) -> str:
+    """What the search-box check reads: for a ref, the field's real name and attributes."""
+    ref = getattr(args, "ref", None)
+    if ref is None:
+        return args.field
+    seen = mgr.refs.get(ref)
+    return seen.field_text() if seen else ""
 
 
 async def _first_visible(locator: Any, limit: int = 10) -> Any | None:
@@ -286,46 +568,64 @@ async def _is_search_box(box: Any) -> bool:
     return attrs[0].lower() == "search" or attrs[1].lower() == "searchbox" or bool(SEARCHY.search(" ".join(attrs)))
 
 
-class BrowserFill(_BrowserTool[FillArgs]):
+class BrowserFill(_BrowserTool[RefFillArgs]):
     name = "browser_fill"
-    description = ("Type into a field found by its label or placeholder; submit=true presses Enter. "
-                   "Never for passwords or card numbers.")
+    description = ("Type into a field: by ref (the [number] from the page listing) or by its label or "
+                   "placeholder; submit=true presses Enter. Never for passwords or card numbers.")
     risk = Risk.ACT
-    Args = FillArgs
+    Args = RefFillArgs
 
     def risk_for(self, args: FillArgs) -> Risk:
         # Submitting a search box only runs a search; submitting any other form may send something.
-        if args.submit and not SEARCHY.search(args.field):
+        if args.submit and not SEARCHY.search(_fill_label(self.mgr, args)):
             return Risk.EXTERNAL
         return Risk.ACT
 
     def summary(self, args: FillArgs) -> str:
         what = "fill and submit" if args.submit else "fill"
-        return f"{what} '{args.field}' on {self.mgr.current_url or 'the page'}"
+        ref = getattr(args, "ref", None)
+        seen = self.mgr.refs.get(ref) if ref is not None else None
+        field = f"[{ref}] '{seen.name if seen else ''}'" if ref is not None else f"'{args.field}'"
+        return f"{what} {field} on {self.mgr.current_url or 'the page'}"
 
     async def run(self, args: FillArgs) -> ToolResult:
         async def go() -> ToolResult:
             page = await self.mgr.page()
-            candidates = (page.get_by_label(args.field).or_(page.get_by_placeholder(args.field))
-                          .or_(page.get_by_role("searchbox", name=args.field))
-                          .or_(page.get_by_role("textbox", name=args.field)))
-            box = await _first_visible(candidates)
-            if box is None and SEARCHY.search(args.field):  # "search" asked for: any visible search box
-                box = await _first_visible(page.get_by_role("searchbox").or_(page.locator("input[type=search]")))
-            if box is None:
-                return ToolResult(False, f"no visible field called '{args.field}'; use browser_read to see the page")
+            ref = getattr(args, "ref", None)
+            if ref is not None:
+                try:
+                    box, seen, live = await _ref_target(page, self.mgr, ref)
+                except StaleRef as e:
+                    return ToolResult(False, str(e))
+                if not (await box.is_visible() and await box.is_editable()):
+                    return ToolResult(False, f"element [{ref}] ('{live or seen.name}') is not a field you can type in")
+                label = live or seen.name
+            else:
+                candidates = (page.get_by_label(args.field).or_(page.get_by_placeholder(args.field))
+                              .or_(page.get_by_role("searchbox", name=args.field))
+                              .or_(page.get_by_role("textbox", name=args.field)))
+                box = await _first_visible(candidates)
+                if box is None and SEARCHY.search(args.field):  # "search" asked for: any visible search box
+                    box = await _first_visible(page.get_by_role("searchbox").or_(page.locator("input[type=search]")))
+                if box is None:
+                    return ToolResult(False,
+                                      f"no visible field called '{args.field}'; use browser_read to see the page")
+                label = args.field
             kind = ((await box.get_attribute("type")) or "").lower()
             auto = ((await box.get_attribute("autocomplete")) or "").lower()
             if kind == "password" or "cc-" in auto or "password" in auto:
                 return ToolResult(False, "REFUSED: password/payment field. Ask the user to fill it in.")
+            is_search = await _is_search_box(box)
+            if ref is not None and args.submit and not is_search and self.risk_for(args) == Risk.ACT:
+                # Approved as a search box; the live field is not one, so Enter could send a form.
+                return ToolResult(False, f"element [{ref}] is no longer a search box; call browser_read again")
             await box.fill(args.value, timeout=8000)
-            self.mgr.last_fill_was_search = await _is_search_box(box)
+            self.mgr.last_fill_was_search = is_search
             if args.submit:
                 await box.press("Enter")
-                with contextlib.suppress(Exception):
-                    await page.wait_for_load_state("domcontentloaded", timeout=10000)
+                await settle(page)
             done = "filled and submitted" if args.submit else "filled"
-            return ToolResult(True, f"{done} '{args.field}'", await _evidence(page, self.mgr))
+            return await _observed(page, self.mgr, f"{done} '{label}'")
 
         return await self._guarded(go)
 
@@ -336,8 +636,8 @@ class SearchArgs(BaseModel):
 
 class BrowserSearch(_BrowserTool[SearchArgs]):
     name = "browser_search"
-    description = ("Search the web in the browser and show the results page (then browser_read / "
-                   "browser_click to open a result). Use web_search instead when you only need text.")
+    description = ("Search the web in the browser and show the results page with numbered links (then "
+                   "browser_click ref=N to open a result). Use web_search instead when you only need text.")
     risk = Risk.ACT
     Args = SearchArgs
 
@@ -352,8 +652,8 @@ class BrowserSearch(_BrowserTool[SearchArgs]):
             await page.goto(SEARCH_URL.format(q=quote_plus(args.query)), wait_until="domcontentloaded", timeout=30000)
             with contextlib.suppress(Exception):
                 await page.wait_for_selector("a[data-testid=result-title-a], article h2 a", timeout=8000)
-            ev = await _evidence(page, self.mgr)
-            return ToolResult(True, f"searched '{args.query}' ({ev['url']}); use browser_read to see results", ev)
+            await settle(page)
+            return await _observed(page, self.mgr, f"searched '{args.query}' ({page.url})")
 
         return await self._guarded(go)
 
@@ -374,8 +674,8 @@ class BrowserScroll(_BrowserTool[ScrollArgs]):
             page = await self.mgr.page()
             height = await page.evaluate("window.innerHeight")
             await page.mouse.wheel(0, height * args.pages * (1 if args.direction == "down" else -1))
-            await asyncio.sleep(0.3)
-            return ToolResult(True, f"scrolled {args.direction}", await _evidence(page, self.mgr))
+            await settle(page, idle_ms=800)
+            return await _observed(page, self.mgr, f"scrolled {args.direction}")
 
         return await self._guarded(go)
 
@@ -390,7 +690,8 @@ class BrowserBack(_BrowserTool[NoArgs]):
         async def go() -> ToolResult:
             page = await self.mgr.page()
             await page.go_back(wait_until="domcontentloaded", timeout=15000)
-            return ToolResult(True, "went back", await _evidence(page, self.mgr))
+            await settle(page)
+            return await _observed(page, self.mgr, "went back")
 
         return await self._guarded(go)
 
@@ -417,7 +718,8 @@ class BrowserPress(_BrowserTool[PressArgs]):
             await page.keyboard.press(args.key)
             if args.key.lower() in {"enter", "return"}:
                 self.mgr.last_fill_was_search = False  # one search per typed query
-            return ToolResult(True, f"pressed {args.key}", await _evidence(page, self.mgr))
+            await settle(page)
+            return await _observed(page, self.mgr, f"pressed {args.key}")
 
         return await self._guarded(go)
 
