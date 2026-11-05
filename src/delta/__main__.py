@@ -4,6 +4,7 @@
   delta doctor       check models, keys, GPU, audit log
   delta secrets set|delete|list [name]
   delta audit verify
+  delta captcha allow|remove|list [host]
 """
 
 from __future__ import annotations
@@ -169,6 +170,9 @@ def main() -> None:
     sp.add_argument("name", nargs="?")
     ap = sub.add_parser("audit", help="audit log tools")
     ap.add_argument("action", choices=["verify"])
+    cp = sub.add_parser("captcha", help="sites where Delta may read simple captchas for you")
+    cp.add_argument("action", choices=["allow", "remove", "list"])
+    cp.add_argument("host", nargs="?")
     sub.add_parser("update", help="update Delta to the newest version (keeps your data)")
     args = parser.parse_args()
 
@@ -178,6 +182,10 @@ def main() -> None:
         sys.exit(_update())
     if args.cmd == "secrets":
         sys.exit(_secrets(args.action, args.name))
+    if args.cmd == "captcha":
+        from delta.tools.captcha import manage_allowlist
+
+        sys.exit(manage_allowlist(load_settings(), args.action, args.host))
     if args.cmd == "audit":
         from delta.safety.audit import AuditLog
 

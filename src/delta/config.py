@@ -160,6 +160,12 @@ class BrowserConfig(BaseModel):
     orange_cursor: bool = True  # orange mouse pointer while Delta controls the mouse/keyboard
 
 
+class CaptchaConfig(BaseModel):
+    # Hosts where Delta may read simple image captchas with the vision model (your own accounts only).
+    # Empty = off: every captcha goes to you. Changed only by you (`delta captcha allow <host>`).
+    allowed_sites: list[str] = Field(default_factory=list)
+
+
 class ApiConfig(BaseModel):
     host: str = "127.0.0.1"  # never 0.0.0.0: remote access goes through Tailscale/Cloudflare Tunnel
     port: int = 7878
@@ -202,6 +208,7 @@ class Settings(BaseModel):
     files: FilesConfig = Field(default_factory=FilesConfig)
     addons: AddonsConfig = Field(default_factory=AddonsConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
+    captcha: CaptchaConfig = Field(default_factory=CaptchaConfig)
     boundaries: Boundaries = Field(default_factory=Boundaries)
     apps: dict[str, AppEntry] = Field(default_factory=dict)
     config_dir: Path = REPO_ROOT / "config"
