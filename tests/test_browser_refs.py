@@ -298,6 +298,7 @@ class _NetPage:
         self.handlers: dict[str, list[Any]] = {}
 
     def on(self, event: str, fn: Any) -> None:
+        fn._pw_impl_instance_ = None  # Playwright sets this on every handler; builtins would fail
         self.handlers.setdefault(event, []).append(fn)
 
     def emit(self, event: str, req: object) -> None:

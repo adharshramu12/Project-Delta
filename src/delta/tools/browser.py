@@ -292,9 +292,17 @@ def track_requests(page: Any) -> None:
         return
     pending: set[Any] = set()
     _INFLIGHT[page] = pending
-    page.on("request", pending.add)
-    page.on("requestfinished", pending.discard)
-    page.on("requestfailed", pending.discard)
+
+    # Plain functions, not bound builtins: Playwright tags each handler with an attribute.
+    def started(req: Any) -> None:
+        pending.add(req)
+
+    def ended(req: Any) -> None:
+        pending.discard(req)
+
+    page.on("request", started)
+    page.on("requestfinished", ended)
+    page.on("requestfailed", ended)
 
 
 async def _network_quiet(pending: set[Any], deadline: float) -> None:
