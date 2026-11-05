@@ -27,6 +27,32 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 - **Your data stays on your PC** (`%LOCALAPPDATA%\Delta`): memory, chats, skills, audit log. Shutdown stops
   every Delta process; nothing keeps listening.
 
+## Captchas (opt-in, your own accounts only)
+
+Delta can help with **simple image/text captchas** on sites where you log in to **your own account**
+(for example a university ERP portal). Use it only within the site's terms.
+
+- **Off by default.** With an empty allowlist every captcha is handed to you.
+- **You turn it on per site**, from a terminal on the PC: `delta captcha allow erp.example.edu`
+  (`delta captcha remove <host>`, `delta captcha list`). The list lives in your settings file in Delta's data
+  folder, which Delta's own tools can never write, so Delta cannot add sites for itself. A removal applies
+  to the very next attempt.
+- **Exact host match.** `erp.example.edu` matches only that host; `*.example.edu` matches its subdomains
+  (not `example.edu` itself). Look-alikes such as `erp.example.edu.evil.com` never match.
+- **On an allowed site** the captcha image (just that element) is sent to your configured vision model,
+  which may be a cloud AI, and the characters are typed into the field. At most **2 automatic tries** per
+  site in 15 minutes; then you are asked. The form is never submitted by this step.
+- **Everywhere else, or after 2 tries: you type it.** Delta saves the captcha image with the run's proof and
+  sends an approval to the dashboard, Telegram and the terminal: type the characters into the page in Delta's
+  browser **on the PC**, then Approve. Deny or no answer stops the step. The answer never passes through
+  Delta.
+- **Always refused:** Google reCAPTCHA, hCaptcha and Cloudflare Turnstile (including when their scripts are
+  merely present on the page), password and payment fields. No bypass tricks and no third-party solving
+  services, ever.
+- **Audited:** every attempt is in the audit log with the site, mode (auto / human / refused) and whether it
+  worked. The captcha answer is never logged or shown to the model.
+- Works in the **delta-profile** browser mode (it needs to see the captcha element), not in your-browser mode.
+
 ## Remote control (Telegram): threat model
 
 | Threat | Defence |

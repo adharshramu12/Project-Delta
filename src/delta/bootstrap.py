@@ -238,6 +238,9 @@ def build(settings: Settings) -> Container:
         browser = BrowserManager(data)
         for t in browser_tools(browser):
             registry.register(t)
+        from delta.tools.captcha import captcha_tool
+
+        registry.register(captcha_tool(browser, settings, router, approvals, audit, proof))
         closers.append(("browser", browser.close))
     learning = LearningStore(data / "learning.db")
 
