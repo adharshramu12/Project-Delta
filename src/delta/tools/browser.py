@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import time
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -101,6 +102,7 @@ REF_LIMIT = 200  # elements numbered per read; the listing itself is cut by the 
 SNAPSHOT_CHARS = 1200  # page summary returned with every action: enough to pick the next step
 SNAPSHOT_ELEMENTS = 30
 SETTLE_IDLE_MS = 1500  # the most an action waits for the network to go quiet
+QUIET_S = 0.25  # no request in flight for this long counts as quiet
 ELEMENTS_JS = REFS_JS % {"limit": REF_LIMIT}  # kept name: older callers evaluate ELEMENTS_JS
 
 
@@ -209,7 +211,9 @@ class BrowserManager:
                 await self._launch()
             self._last_used = time.monotonic()
             ctx = self._browser.contexts[0]
-            return ctx.pages[-1] if ctx.pages else await ctx.new_page()
+            page = ctx.pages[-1] if ctx.pages else await ctx.new_page()
+            track_requests(page)
+            return page
 
     async def _launch(self) -> None:
         from playwright.async_api import async_playwright
@@ -276,14 +280,49 @@ async def _evidence(page: Any, mgr: BrowserManager) -> dict[str, Any]:
     return {"url": page.url, "title": await page.title()}
 
 
+# Requests in flight per page, so settle() also waits for the API calls an action starts
+# (a click that fetches data, a SPA route change). Playwright's "networkidle" load state cannot
+# do that: once a page has reached it, waiting for it again returns at once.
+_INFLIGHT: weakref.WeakKeyDictionary[Any, set[Any]] = weakref.WeakKeyDictionary()
+
+
+def track_requests(page: Any) -> None:
+    """Count the page's requests from now on (once per page)."""
+    if page in _INFLIGHT:
+        return
+    pending: set[Any] = set()
+    _INFLIGHT[page] = pending
+    page.on("request", pending.add)
+    page.on("requestfinished", pending.discard)
+    page.on("requestfailed", pending.discard)
+
+
+async def _network_quiet(pending: set[Any], deadline: float) -> None:
+    """Until no request has been in flight for QUIET_S, or the deadline passes."""
+    quiet_since: float | None = None
+    while (now := time.monotonic()) < deadline:
+        if pending:
+            quiet_since = None
+        elif quiet_since is None:
+            quiet_since = now
+        elif now - quiet_since >= QUIET_S:
+            return
+        await asyncio.sleep(0.05)
+
+
 async def settle(page: Any, idle_ms: int = SETTLE_IDLE_MS) -> None:
     """Wait for the page to be ready after an action, bounded: the document parsed, then up to
-    idle_ms for the network to go quiet, then two animation frames so scripts have rendered.
-    Every step gives up quietly: a busy page (live feeds, ads) must not stall the agent."""
+    idle_ms for the network to go quiet (including requests the action itself started), then two
+    animation frames so scripts have rendered. Every step gives up quietly: a busy page (live
+    feeds, ads) must not stall the agent."""
     with contextlib.suppress(Exception):
         await page.wait_for_load_state("domcontentloaded", timeout=10000)
+    deadline = time.monotonic() + idle_ms / 1000
     with contextlib.suppress(Exception):
         await page.wait_for_load_state("networkidle", timeout=idle_ms)
+    pending = _INFLIGHT.get(page)
+    if pending is not None:
+        await _network_quiet(pending, deadline)
     with contextlib.suppress(Exception):
         await asyncio.wait_for(page.evaluate(
             "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))"), 1.0)

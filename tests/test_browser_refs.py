@@ -289,3 +289,57 @@ async def test_press_and_scroll_return_snapshots(tmp_path):
     assert not mgr.last_fill_was_search
     scrolled = await BrowserScroll(mgr).run(ScrollArgs())
     assert scrolled.ok and "Page: Example" in scrolled.output and 3 in mgr.refs
+
+
+class _NetPage:
+    """Just enough of a page for settle(): load states return at once, requests are events."""
+
+    def __init__(self) -> None:
+        self.handlers: dict[str, list[Any]] = {}
+
+    def on(self, event: str, fn: Any) -> None:
+        self.handlers.setdefault(event, []).append(fn)
+
+    def emit(self, event: str, req: object) -> None:
+        for fn in self.handlers.get(event, []):
+            fn(req)
+
+    async def wait_for_load_state(self, state: str, **kw: Any) -> None:
+        return None  # "networkidle" already reached: returns at once, as in Playwright
+
+    async def evaluate(self, js: str) -> bool:
+        return True
+
+
+async def test_settle_waits_for_requests_the_action_started():
+    import asyncio
+    import time
+
+    page = _NetPage()
+    browser.track_requests(page)
+    browser.track_requests(page)  # once per page
+    assert len(page.handlers["request"]) == 1
+    req = object()
+    page.emit("request", req)  # e.g. a click that fetches data
+
+    async def finish() -> None:
+        await asyncio.sleep(0.4)
+        page.emit("requestfinished", req)
+
+    task = asyncio.create_task(finish())
+    start = time.monotonic()
+    await settle(page)
+    took = time.monotonic() - start
+    await task
+    assert 0.4 + browser.QUIET_S - 0.05 <= took < browser.SETTLE_IDLE_MS / 1000
+
+
+async def test_settle_gives_up_on_requests_that_never_finish():
+    import time
+
+    page = _NetPage()
+    browser.track_requests(page)
+    page.emit("request", object())  # a live feed that never ends
+    start = time.monotonic()
+    await settle(page, idle_ms=300)
+    assert time.monotonic() - start < 1.0
