@@ -64,6 +64,9 @@ packages = ["src/delta"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = [
+    "e2e: real-browser end-to-end tests; skipped unless DELTA_E2E=1 (run: DELTA_E2E=1 pytest -m e2e)",
+]
 
 [tool.ruff]
 line-length = 120

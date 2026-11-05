@@ -223,7 +223,7 @@ class BrowserManager:
             self.profile = self.data_dir / f"{self.browser_name}-profile"
             self.profile.mkdir(parents=True, exist_ok=True)
             # Popen only starts the process (non-blocking); the browser must outlive any asyncio transport
-            self._proc = subprocess.Popen([exe, *chrome_args(self.profile)], close_fds=True)  # noqa: ASYNC220
+            self._proc = subprocess.Popen([exe, *chrome_args(self.profile, PORT)], close_fds=True)  # noqa: ASYNC220
             for _ in range(60):
                 if await self._alive(endpoint):
                     break

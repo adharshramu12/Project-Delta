@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Compose</title></head>
+<body>
+  <h1>New message</h1>
+  <label for="to">To</label><input id="to" name="to">
+  <label for="body">Message</label><textarea id="body" name="body"></textarea>
+  <button type="button" id="preview" onclick="mark('previewed')">Preview</button>
+  <button type="button" id="send" onclick="mark('SENT')">Send</button>
+  <button type="button" id="trash" onclick="mark('DELETED')">Delete draft</button>
+  <p id="status">draft</p>
+  <script>
+    function mark(s) { document.getElementById('status').textContent = s; }
+  </script>
+</body></html>
