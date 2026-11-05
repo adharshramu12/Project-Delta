@@ -277,7 +277,8 @@ async def test_benchmark_before_and_after(mgr: BrowserManager, site: str, monkey
         for k in totals:
             totals[k][0] += med("before", scen, k)
             totals[k][1] += med("after", scen, k)
-        lines.append(f"| {scen} | {int(med('before', scen, 'steps'))} -> {int(med('after', scen, 'steps'))} | {int(med('before', scen, 'tool_chars'))} -> "
+        steps = f"{int(med('before', scen, 'steps'))} -> {int(med('after', scen, 'steps'))}"
+        lines.append(f"| {scen} | {steps} | {int(med('before', scen, 'tool_chars'))} -> "
                      f"{int(med('after', scen, 'tool_chars'))} | {int(med('before', scen, 'context_chars'))} -> "
                      f"{int(med('after', scen, 'context_chars'))} (~{int(med('before', scen, 'context_chars')) // 4}"
                      f" -> ~{int(med('after', scen, 'context_chars')) // 4}) | "
