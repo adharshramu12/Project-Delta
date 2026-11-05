@@ -14,9 +14,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from delta.llm import usage
 from delta.llm.providers import Provider
 from delta.llm.schemas import AllProvidersFailedError, LLMError, LLMResponse, Message
 from delta.system.logging import log
+
+
+def _is_cli(p: object) -> bool:
+    """Claude Code / Codex / Cline: a CLI that builds its own prompt, so Delta cannot estimate it."""
+    try:
+        from delta.llm.cli_providers import CLIProvider
+    except Exception:
+        return False
+    return isinstance(p, CLIProvider)
 
 
 @dataclass
@@ -164,9 +174,7 @@ class ModelRouter:
                 log.warning("router.fallback", provider=p.name, task=task, error=str(e))
                 continue
             self.breakers[p.name].record_success()
-            self.meter["calls"] = self.meter.get("calls", 0) + 1
-            for k, v in resp.usage.items():
-                self.meter[k] = self.meter.get(k, 0) + v
+            self._count(p, resp, messages, tools)
             if self.last_provider != p.name:
                 log.info("router.provider", provider=p.name, model=resp.model, task=task)
             self.last_provider = p.name
@@ -177,6 +185,28 @@ class ModelRouter:
             f"'{task}'. Errors: {'; '.join(errors) or 'none configured (add API keys or start Ollama)'}",
             kinds,
         )
+
+    def _count(self, p: Provider, resp: LLMResponse, messages: list[Message], tools: list[dict] | None) -> None:
+        """Add one call to the task's meter: the provider's own usage when it gave one, else an
+        estimate for API providers, or "not reported" for CLI providers (usage.py)."""
+        usage.add(self.meter, "calls", 1)
+        if resp.usage:
+            usage.add(self.meter, "reported_calls", 1)
+            for k, v in resp.usage.items():
+                usage.add(self.meter, k, v)
+            return
+        try:
+            est_in = usage.estimate_tokens(messages, tools)
+            est_out = usage.estimate_output(resp.content or "", resp.tool_calls or [])
+        except Exception:  # metering must never fail a call
+            est_in = est_out = 0
+        if _is_cli(p):
+            usage.add(self.meter, "unreported_calls", 1)
+            usage.add(self.meter, "unreported_est", est_in + est_out)
+        else:
+            usage.add(self.meter, "estimated_calls", 1)
+            usage.add(self.meter, "est_input", est_in)
+            usage.add(self.meter, "est_output", est_out)
 
     def reset_meter(self) -> None:
         self.meter = {}

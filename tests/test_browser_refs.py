@@ -203,7 +203,8 @@ async def test_click_by_ref_acts_and_returns_a_snapshot(tmp_path):
     assert "clicked 'Sign in'" in result.output
     assert "Page: Example — https://example.com/" in result.output
     assert '[1] link "Next page"' in result.output  # next step can use refs without browser_read
-    assert ("networkidle", browser.SETTLE_IDLE_MS) in page.waits
+    assert page.waits and page.waits[0][0] == "domcontentloaded"
+    assert not any(w[0] == "networkidle" for w in page.waits)  # no fixed 500 ms idle floor
 
 
 async def test_stale_or_unknown_ref_refuses_without_acting(tmp_path):
@@ -278,7 +279,7 @@ async def test_settle_gives_up_quietly_on_busy_pages(tmp_path):
     page = FakePage([])
     page.idle_raises = True
     await settle(page)  # must not raise
-    assert [w[0] for w in page.waits] == ["domcontentloaded", "networkidle"]
+    assert [w[0] for w in page.waits] == ["domcontentloaded", "domcontentloaded"]
 
 
 async def test_press_and_scroll_return_snapshots(tmp_path):
@@ -288,7 +289,9 @@ async def test_press_and_scroll_return_snapshots(tmp_path):
     assert pressed.ok and page.keyboard.keys == ["Enter"] and "[1] link" in pressed.output
     assert not mgr.last_fill_was_search
     scrolled = await BrowserScroll(mgr).run(ScrollArgs())
-    assert scrolled.ok and "Page: Example" in scrolled.output and 3 in mgr.refs
+    # Same page, nothing changed: only a short "no changes" note, and every ref still works.
+    assert scrolled.ok and "Page changes: Example" in scrolled.output and 3 in mgr.refs
+    assert "no element changes" in scrolled.output and '[1] link' not in scrolled.output
 
 
 class _NetPage:

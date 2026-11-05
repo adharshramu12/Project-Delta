@@ -7,6 +7,7 @@ import contextlib
 import json
 import platform
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ from delta.core.state import (
 from delta.core.verifier import verify
 from delta.learning.corrections import learn_corrections, standing_instructions
 from delta.learning.store import LearningStore
+from delta.llm import usage
 from delta.llm.capabilities import abilities_text, brain_for
 from delta.llm.router import ModelRouter
 from delta.llm.schemas import AllProvidersFailedError, LLMError, Message
@@ -45,6 +47,7 @@ from delta.safety.audit import AuditLog
 from delta.system.governor import Governor
 from delta.system.hardware_guard import Health
 from delta.system.logging import log
+from delta.tools import snapshot
 from delta.tools.registry import ToolExecutor
 
 ACTOR_PROMPT = """You are {name}, {owner}'s personal AI agent with access to their Windows PC
@@ -81,6 +84,7 @@ Rules:
   When the page listing numbers its elements ([12] button "Sign in"), act by number:
   browser_click ref=12, browser_fill ref=7 value="…". Use the numbers from the LATEST listing; if a
   ref is reported stale, the page changed: read it again. Without numbers, click/fill by name.
+  {diff_help}
   When search results already show the page that answers (an /about or /contact page, a product
   page), open THAT page directly, not the home page. Answer from text read on the page, never from
   a search snippet alone.
@@ -147,18 +151,58 @@ CONTEXT_BUDGET_CHARS = 18000
 OLD_RESULT_CHARS = 500
 
 
+def _split_listing(content: str) -> tuple[str, str, str, str] | None:
+    """(before, listing, after, kind) of a tool result holding a browser page listing."""
+    found = snapshot.find_listing(content)
+    if found is None:
+        return None
+    a, b, kind = found
+    return content[:a], content[a:b], content[b:], kind
+
+
+def _head(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit] + "\n…[older result trimmed to save space]"
+
+
 def compact_history(messages: list[Message], budget: int, keep_last: int = 2) -> None:
     """Keep long multi-step tasks within the model's request limit.
 
     The newest tool results stay in full (the model is acting on them); older ones are cut to a
-    short head, since their key facts are already in the model's own later messages. If still over
-    budget, the newest results are trimmed too. Edits `messages` in place; never drops a message,
-    so tool-call ids stay paired."""
+    short head, since their key facts are already in the model's own later messages. Browser page
+    listings are handled apart: a listing superseded by a newer full one becomes a one-line stub
+    (its refs are out of date), while the latest full listing and the diffs after it are kept whole,
+    since together they are the model's current view of the page. If still over budget, those go
+    to stubs too (oldest first), then the newest results are trimmed. Edits `messages` in place;
+    never drops a message, so tool-call ids stay paired (and CLI sessions, which count messages,
+    keep working)."""
     shots = [i for i, m in enumerate(messages) if isinstance(m.get("content"), list)]
     for i in shots[:-1]:  # only the newest screenshot is worth its ~1k tokens
         messages[i]["content"] = "[earlier screenshot removed to save tokens]"
     tool_idx = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
-    for i in tool_idx[:-keep_last] if keep_last else tool_idx:
+    parts = {i: sp for i in tool_idx if messages[i].get("name") in BROWSER_ACTIONS
+             and (sp := _split_listing(str(messages[i].get("content", ""))))}
+    base = max((i for i, sp in parts.items() if sp[3] == "full"), default=-1)
+    protected = {i for i in parts if i >= base} if base >= 0 else set(parts)
+
+    def stub(i: int) -> None:
+        before, listing, after, kind = parts.pop(i)
+        what = "page listing" if kind == "full" else "page changes"
+        messages[i]["content"] = (f"{before}[older {what} for {snapshot.page_line(listing)} superseded; "
+                                  f"use the latest listing]{after}")
+
+    for i in [i for i in parts if i not in protected]:
+        stub(i)
+    recent = set(tool_idx[-keep_last:]) if keep_last else set()
+    for i in tool_idx:
+        if i in recent:
+            continue
+        if i in parts:  # keep the current listing whole; cut only the text around it
+            before, listing, after, _ = parts[i]
+            room = max(0, OLD_RESULT_CHARS - len(before))
+            if len(before) + len(after) > OLD_RESULT_CHARS:
+                messages[i]["content"] = before[:OLD_RESULT_CHARS] + listing + _head(after, room)
+                parts[i] = (before[:OLD_RESULT_CHARS], listing, _head(after, room), parts[i][3])
+            continue
         content = str(messages[i].get("content", ""))
         if len(content) > OLD_RESULT_CHARS:
             messages[i]["content"] = content[:OLD_RESULT_CHARS] + "\n…[older result trimmed to save space]"
@@ -166,6 +210,13 @@ def compact_history(messages: list[Message], budget: int, keep_last: int = 2) ->
     def size() -> int:
         return sum(len(str(m.get("content") or "")) + len(json.dumps(m.get("tool_calls") or "")) for m in messages)
 
+    for i in sorted(i for i in parts if i not in recent):  # still too big: older listings go too
+        if size() <= budget:
+            break
+        stub(i)
+        content = str(messages[i].get("content", ""))
+        if len(content) > OLD_RESULT_CHARS:
+            messages[i]["content"] = content[:OLD_RESULT_CHARS] + "\n…[older result trimmed to save space]"
     over = size() - budget
     for i in reversed(tool_idx[-keep_last:] if keep_last else []):
         if over <= 0:
@@ -175,6 +226,36 @@ def compact_history(messages: list[Message], budget: int, keep_last: int = 2) ->
         if keep < len(content):
             messages[i]["content"] = content[:keep] + "\n…[trimmed to fit the model's limit]"
             over = size() - budget
+
+
+_ELEMENT_LINE = re.compile(r"^(?:[+~] )?(\[\d+\] .*)$")
+
+
+def held_element_lines(messages: list[Message]) -> set[str]:
+    """Element lines ([12] button "Sign in") of the page listing the model currently holds: the
+    latest full listing plus the diffs after it."""
+    held: set[str] = set()
+    for m in messages:
+        if m.get("role") != "tool" or m.get("name") not in BROWSER_ACTIONS:
+            continue
+        found = snapshot.find_listing(str(m.get("content", "")))
+        if found is None:
+            continue
+        a, b, kind = found
+        if kind == "full":
+            held = set()
+        for line in str(m["content"])[a:b].splitlines():
+            if (mm := _ELEMENT_LINE.match(line)) and not line.startswith("- "):
+                held.add(mm.group(1))
+    return held
+
+
+def drop_held_lines(text: str, held: set[str]) -> str:
+    """An observation without the element lines the model already holds in its page listing."""
+    if not held:
+        return text
+    kept = [ln for ln in text.splitlines() if ln.strip() not in held]
+    return "\n".join(kept)
 
 
 # Said when the request comes from a phone: the user cannot see this PC, so opening a picture or file on
@@ -310,6 +391,7 @@ class Orchestrator:
         broken tool) becomes a failed task with a safe message, the run record is closed and the UI told.
         A cancel (the user pressed Stop) is cleaned up the same way and then re-raised."""
         self.audit.record("task.start", task=req.id, channel=req.channel, text=req.text)
+        started = time.monotonic()
         current = CURRENT_REQUEST.set(req)
         try:
             await self.events.publish("task.started", task_id=req.id, text=req.text)
@@ -339,6 +421,8 @@ class Orchestrator:
             except Exception:
                 log.exception("router.release_failed", task=req.id)
         result.tokens = dict(self.router.meter)
+        result.usage = usage.summary(result.tokens)
+        result.wall_s = round(time.monotonic() - started, 2)
         result.fallback = self.router.fallback_note()
         self._finish_proof(result)
         self.audit.record("task.end", task=req.id, status=result.status, attempts=result.attempts)
@@ -522,7 +606,7 @@ class Orchestrator:
             name=self.s.agent.name, credit=CREDIT, owner=self.s.agent.owner_name or "the user",
             os=f"{platform.system()} {platform.release()}", now=datetime.now().strftime("%A %d %B %Y %H:%M"),
             home=Path.home(), desktop=known_folder("Desktop"), documents=known_folder("Personal"),
-            save_dir=save_dir(self.s.files),
+            save_dir=save_dir(self.s.files), diff_help=snapshot.DIFF_HELP,
             goal=plan.goal,
             steps="\n".join(f"{i + 1}. {s}" for i, s in enumerate(plan.steps)) or "(decide as you go)",
             criteria="\n".join(f"- {c}" for c in plan.success_criteria), memory=memory_ctx or "(nothing yet)",
@@ -671,6 +755,8 @@ class Orchestrator:
             if self.governor and self.governor.health == Health.CRITICAL:
                 reasons = ", ".join(self.governor.assessment.reasons)
                 return "", f"Paused to protect your laptop ({reasons}). Ask me again once it cools down."
+            if question := self._over_budget():
+                return question, ""
             compact_history(messages, CONTEXT_BUDGET_CHARS)
             resp = await self._complete_with_recovery(messages, tools)
             if not resp.tool_calls:
@@ -714,6 +800,9 @@ class Orchestrator:
                     if shot:
                         latest_shot = (shot, obs_args.get("window", ""))
                     steps.append(StepRecord(observer, obs_args, True, text[:2000], {"auto_observe": True}))
+                    if observer == "browser_read":  # elements already in the page listing: not twice
+                        text = drop_held_lines(text, held_element_lines(
+                            [*messages, {"role": "tool", "name": call.name, "content": content}]))
                     await self.events.publish("task.step", task_id=req.id, tool=observer, args={"auto": True})
                     content += f"\n\nAFTER ({observer}):\n{text}"
                 if stuck_in_loop(steps):
@@ -728,6 +817,18 @@ class Orchestrator:
                     {"type": "text", "text": f"AFTER screenshot of {latest_shot[1] or 'the screen'}:"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{latest_shot[0]}"}}]})
         return "I ran out of steps for this attempt.", ""
+
+    def _over_budget(self) -> str:
+        """NEED_USER question once the task's tokens pass the user's per-task budget (off when 0)."""
+        budget = self.s.agent.token_budget
+        if budget <= 0:
+            return ""
+        used = usage.used_for_budget(self.router.meter)
+        if used < budget:
+            return ""
+        log.info("orchestrator.token_budget", used=used, budget=budget)
+        return (f"{NEED_USER} This task has used about {used:,} tokens, which passes your limit of "
+                f"{budget:,} tokens per task.\nShould I keep going?\n- Keep going\n- Stop here")
 
     async def _learn(self, req: TaskRequest, result: TaskResult) -> None:
         """Self-improvement after a task: memory facts + skills. Never raises."""
