@@ -758,7 +758,9 @@ class BrowserBack(_BrowserTool[NoArgs]):
     async def run(self, args: NoArgs) -> ToolResult:
         async def go() -> ToolResult:
             page = await self.mgr.page()
-            await page.go_back(wait_until="domcontentloaded", timeout=15000)
+            # "commit", not "domcontentloaded": a page restored from the back-forward cache fires no
+            # load events, so waiting for one hung for the full 15 s. settle() then waits for the page.
+            await page.go_back(wait_until="commit", timeout=15000)
             await settle(page)
             return await _observed(page, self.mgr, "went back", force_full=True)
 

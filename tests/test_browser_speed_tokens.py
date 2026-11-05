@@ -179,6 +179,22 @@ async def test_settle_waits_for_the_dom_to_go_quiet_but_never_past_the_cap():
     assert time.monotonic() - start < 1.5
 
 
+async def test_back_waits_for_commit_not_load_events(tmp_path):
+    """A page restored from the back-forward cache fires no load events: waiting for
+    domcontentloaded made browser_back hang for its full 15 s."""
+    from delta.tools.browser import BrowserBack
+
+    mgr, page = setup(tmp_path, big_page())
+    seen: list[str] = []
+
+    async def go_back(wait_until: str = "load", timeout: int = 0) -> None:  # noqa: ASYNC109
+        seen.append(wait_until)
+
+    page.go_back = go_back  # type: ignore[attr-defined]
+    out = await BrowserBack(mgr).run(BrowserBack.Args())
+    assert out.ok and seen == ["commit"] and out.evidence["snapshot"] == "full"
+
+
 # --- 3. leaner history -----------------------------------------------------------------------------
 
 
