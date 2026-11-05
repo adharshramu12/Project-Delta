@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Search results</title></head>
+<body>
+  <h1>Search results</h1>
+  <p id="out"></p>
+  <a href="search.html">New search</a>
+  <script>
+    const q = new URLSearchParams(location.search).get('q') || '';
+    document.getElementById('out').textContent = 'Results for: ' + q;
+  </script>
+</body></html>

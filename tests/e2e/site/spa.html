@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Tiny SPA</title></head>
+<body>
+  <h1>Inbox</h1>
+  <button type="button" id="load">Load items</button>
+  <button type="button" id="clear">Clear list</button>
+  <ul id="list"></ul>
+  <p id="picked">nothing picked</p>
+  <script>
+    const list = document.getElementById('list');
+    // The data comes from a slow API call, like a real single-page app.
+    document.getElementById('load').addEventListener('click', async () => {
+      const items = await (await fetch('/slow/items.json')).json();
+      for (const name of items) {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = name;
+        b.addEventListener('click', () => { document.getElementById('picked').textContent = 'picked ' + name; });
+        li.appendChild(b);
+        list.appendChild(li);
+      }
+    });
+    document.getElementById('clear').addEventListener('click', () => { list.replaceChildren(); });
+  </script>
+</body></html>

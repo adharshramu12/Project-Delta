@@ -70,6 +70,9 @@ Rules:
   browser_fill with submit=true for search boxes, browser_scroll, browser_back).
   Every browser action already returns the page text that matters for this task (AFTER browser_read):
   read that first. Call browser_read only for a different part, with a new focus (focus="born").
+  When the page listing numbers its elements ([12] button "Sign in"), act by number:
+  browser_click ref=12, browser_fill ref=7 value="…". Use the numbers from the LATEST listing; if a
+  ref is reported stale, the page changed: read it again. Without numbers, click/fill by name.
   When search results already show the page that answers (an /about or /contact page, a product
   page), open THAT page directly, not the home page. Answer from text read on the page, never from
   a search snippet alone.

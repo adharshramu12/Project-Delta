@@ -66,7 +66,8 @@ a reply appearing); the finished report is never a checkpoint, it takes up to 30
 
 WEBSITES and web apps (NotebookLM, Gmail, YouTube, any URL), even when the user says "open Chrome":
 plan browser_open/browser_read/browser_click/browser_fill, which read the page as text and click by
-name. Never run_shell "start chrome", and no screenshots or pixel clicks unless the page cannot be read.
+name or by element number. Never run_shell "start chrome", and no screenshots or pixel clicks unless
+the page cannot be read.
 
 Skills the agent learned from earlier verified successes on this PC (reuse one when it fits;
 adapt its steps to this request):
