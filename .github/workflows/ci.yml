@@ -22,3 +22,17 @@ jobs:
       - run: uv sync --python 3.12
       - run: uv run pytest -q
       - run: uv run delta --version
+
+  # Delta's browser tools in a real Chrome/Edge on a clean Windows PC, against a local static site.
+  e2e-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    env:
+      DELTA_E2E: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --python 3.12
+      - run: uv run pytest -m e2e -v -rs tests/e2e

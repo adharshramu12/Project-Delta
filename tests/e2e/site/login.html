@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Sign in</title></head>
+<body>
+  <h1>Welcome back</h1>
+  <form onsubmit="return false">
+    <label for="user">Username</label>
+    <input id="user" name="username" autocomplete="username">
+    <label for="pass">Password</label>
+    <input id="pass" name="password" type="password" autocomplete="current-password" value="Hunter2-Prefilled!">
+    <!-- Hidden duplicates come first in the DOM, like a collapsed mobile header. -->
+    <button type="button" style="display:none" onclick="mark('WRONG: display-none button')">Sign in</button>
+    <span style="visibility:hidden"><button type="button" onclick="mark('WRONG: invisible button')">Sign in</button></span>
+    <button type="button" id="real" onclick="mark('RIGHT: visible Sign in clicked')">Sign in</button>
+  </form>
+  <p id="status">not signed in</p>
+  <script>
+    function mark(s) { document.getElementById('status').textContent = s; }
+  </script>
+</body></html>
