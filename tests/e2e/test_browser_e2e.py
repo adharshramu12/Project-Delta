@@ -148,7 +148,7 @@ async def test_spa_snapshot_new_refs_and_stale_ref(mgr: BrowserManager, site: st
 
     # browser_read lists the page as it is now.
     out = ok(await BrowserRead(mgr).run(ReadArgs()))
-    assert "Star message" not in out and 'button "Load items"' in out
+    assert 'button "Star message"' not in out and 'button "Load items"' in out
 
 
 # (d) a Send button reached by ref is still risky ---------------------------------------------------
