@@ -108,6 +108,10 @@ memory stay unless you add `-RemoveData`).
   Windows account.
 - **Emergency alerts:** contacts are stored encrypted; during a help request Delta reaches nobody
   without your yes (even in autopilot) unless your own message clearly says to.
+- **Captchas, only if you opt in:** off by default. For your own accounts (e.g. a university portal) you can
+  allow a site with `delta captcha allow <host>`; Delta then reads its simple image captcha (2 tries, then
+  asks you). Otherwise you type it on the PC and approve. reCAPTCHA, hCaptcha and Cloudflare checks are
+  always refused. Details: [SECURITY.md](SECURITY.md#captchas-opt-in-your-own-accounts-only).
 - **Your rules:** `config/boundaries.yaml` sets allowed folders, apps, sites, quiet hours and autonomy.
 - **Tamper-evident audit log** of every decision and tool call.
 - Full threat model and known limits: [SECURITY.md](SECURITY.md).

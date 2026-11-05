@@ -125,6 +125,13 @@ browser:
   prefer: auto         # auto (your Windows default browser) | chrome | edge
   orange_cursor: true  # the mouse pointer turns orange while Delta controls the mouse/keyboard
 
+# Simple image captchas on YOUR OWN accounts (e.g. your university portal). Off by default: every
+# captcha is handed to you. Listed hosts are read by the vision model (2 tries, then you are asked).
+# Exact host match; "*.example.in" also covers its subdomains. Add with `delta captcha allow <host>`.
+# reCAPTCHA, hCaptcha and Cloudflare Turnstile are always refused. See SECURITY.md.
+captcha:
+  allowed_sites: []
+
 addons:
   # Add-ons only run when listed here. Built-in: mcp. Community add-ons: pip packages
   # (entry point group "delta.addons") or folders in %LOCALAPPDATA%\Delta\addons\<name>\addon.py
