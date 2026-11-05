@@ -2,6 +2,9 @@
 
 Known read-only commands run automatically; anything else asks; commands that touch the OS,
 security, disks, users or credentials are blocked outright.
+
+Classification fails closed: only one plain allow-listed command is read-only. Anything that can chain,
+nest, redirect or hide another command is never auto-run as read-only.
 """
 
 from __future__ import annotations
@@ -36,18 +39,36 @@ READ_ONLY = re.compile(
     r"git\s+(status|log|diff|branch|remote\s+-v|show))\b",
     re.I,
 )
+# Syntax that chains, nests, groups or redirects commands (`;`, `|`, `&`, `&&`, `||`, `<`, `>`, `(...)`,
+# `{...}`, `$(...)`, `@(...)`). A command containing any of it is never read-only.
+COMPOUND = re.compile(r"[;|&<>(){}]")
+# Syntax that can hide a command from a reader or from the patterns above: line breaks and other control
+# characters (a new statement in PowerShell), the backtick escape (``Re`move-Item``), subexpressions,
+# base64 decoding and encoded commands. Always needs a human yes, whatever the autonomy level.
+HIDDEN = re.compile(
+    r"[\x00-\x08\x0a-\x1f\x7f\x85\u2028\u2029`]|[$@]\(|frombase64string"
+    r"|\b(powershell|pwsh)(\.exe)?\b.*\s[-/\u2013\u2014\u2015](e|ec|en[a-z]*)(\s|:|$)",
+    re.I | re.S,
+)
+DASHES = str.maketrans({"\u2013": "-", "\u2014": "-", "\u2015": "-", "`": None})
+
+
+def _normalise(command: str) -> str:
+    """What PowerShell sees: backtick escapes dropped and Unicode dashes as `-`, so the patterns still match."""
+    return command.translate(DASHES).lower()
 
 
 def classify(command: str) -> Risk:
-    c = command.lower()
+    c = _normalise(command)
     if any(re.search(p, c) for p in SYSTEM_PATTERNS):
         return Risk.SYSTEM
     if any(re.search(p, c) for p in DESTRUCTIVE_PATTERNS):
         return Risk.DESTRUCTIVE
     if any(re.search(p, c) for p in EXTERNAL_PATTERNS):
         return Risk.EXTERNAL
-    parts = [s for s in re.split(r"[;|]|&&", command) if s.strip()]
-    if parts and all(READ_ONLY.match(s) for s in parts):
+    if HIDDEN.search(command):
+        return Risk.DESTRUCTIVE  # cannot be read reliably: never auto-allowed, not even in autopilot
+    if command.strip() and not COMPOUND.search(command) and READ_ONLY.match(command):
         return Risk.READ
     return Risk.WRITE  # unknown commands are treated as modifying -> approval
 
@@ -71,6 +92,9 @@ class RunShell(Tool[ShellArgs]):
         return [args.cwd] if args.cwd else []
 
     def scope(self, args: ShellArgs) -> str:
+        if COMPOUND.search(args.command) or HIDDEN.search(args.command):
+            # trust learned for "npm ..." must not cover "npm install; <anything>"
+            return args.command.strip().lower()
         words = args.command.strip().split()
         return words[0].lower() if words else ""
 

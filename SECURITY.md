@@ -57,7 +57,7 @@ Delta can help with **simple image/text captchas** on sites where you log in to 
 
 | Threat | Defence |
 |---|---|
-| A stranger finds or guesses the bot | Only paired Telegram accounts are served. Pairing needs a single-use 6-digit code shown only on the PC's screen (10 minutes). |
+| A stranger finds or guesses the bot | Only paired Telegram accounts are served. Pairing needs a single-use 8-character code shown only on the PC's screen (10 minutes). The message must be exactly the code, and 5 wrong tries drop it until a new one is made on the PC. |
 | **The owner's Telegram account or phone is stolen** | **Remote Guard**: camera, screenshot, sending files, closing apps, changing keys and Autopilot need the owner's **Delta PIN** (once per 15 minutes). |
 | PIN guessing | **5 wrong PINs lock all remote control.** Only someone at the PC can unlock it; the phone never can. |
 | PIN or key left in chat history | Delta deletes the message holding a PIN or API key right after reading it. |
