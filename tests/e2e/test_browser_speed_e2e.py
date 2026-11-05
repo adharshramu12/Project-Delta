@@ -31,10 +31,12 @@ from delta.tools.browser import (
     BrowserManager,
     BrowserOpen,
     BrowserPress,
+    BrowserRead,
     BrowserScroll,
     ElementRef,
     OpenArgs,
     PressArgs,
+    ReadArgs,
     RefClickArgs,
     RefFillArgs,
     ScrollArgs,
@@ -144,15 +146,27 @@ def legacy_compact(messages: list[dict[str, Any]], budget: int, keep_last: int =
             over = size() - budget
 
 
+async def _arrive(mgr: BrowserManager, pattern: str) -> None:
+    """Make sure a navigation landed before the next step (timed): a form submit can commit after
+    the action returned, and the agent would then need an extra step to see it."""
+    page = await mgr.page()
+    await page.wait_for_url(pattern, timeout=10000)
+
+
 async def _search(mgr: BrowserManager, site: str) -> list[tuple[str, ToolResult]]:
     out = [("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/search.html")))]
     box = ref_of(mgr, "searchbox", "Search docs")
     out.append(("browser_fill", await BrowserFill(mgr).run(RefFillArgs(ref=box.ref, value="element refs",
                                                                         submit=True))))
+    await _arrive(mgr, "**/results.html?q=element+refs")
     out.append(("browser_back", await BrowserBack(mgr).run(BrowserBack.Args())))
+    await _arrive(mgr, "**/search.html")
+    if not any(e.role == "searchbox" for e in mgr.refs.values()):  # listed before the page came back
+        out.append(("browser_read", await BrowserRead(mgr).run(ReadArgs())))
     box = ref_of(mgr, "searchbox", "Search docs")
     out.append(("browser_fill", await BrowserFill(mgr).run(RefFillArgs(ref=box.ref, value="pressed enter"))))
     out.append(("browser_press", await BrowserPress(mgr).run(PressArgs(key="Enter"))))
+    await _arrive(mgr, "**/results.html?q=pressed+enter")
     out.append(("browser_open", await BrowserOpen(mgr).run(OpenArgs(url=f"{site}/search.html"))))
     out.append(("browser_scroll", await BrowserScroll(mgr).run(ScrollArgs(direction="down", pages=2))))
     return out
@@ -263,7 +277,7 @@ async def test_benchmark_before_and_after(mgr: BrowserManager, site: str, monkey
         for k in totals:
             totals[k][0] += med("before", scen, k)
             totals[k][1] += med("after", scen, k)
-        lines.append(f"| {scen} | {int(med('after', scen, 'steps'))} | {int(med('before', scen, 'tool_chars'))} -> "
+        lines.append(f"| {scen} | {int(med('before', scen, 'steps'))} -> {int(med('after', scen, 'steps'))} | {int(med('before', scen, 'tool_chars'))} -> "
                      f"{int(med('after', scen, 'tool_chars'))} | {int(med('before', scen, 'context_chars'))} -> "
                      f"{int(med('after', scen, 'context_chars'))} (~{int(med('before', scen, 'context_chars')) // 4}"
                      f" -> ~{int(med('after', scen, 'context_chars')) // 4}) | "
