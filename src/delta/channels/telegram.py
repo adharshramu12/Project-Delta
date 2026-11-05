@@ -4,13 +4,15 @@ Approvals arrive as messages with Approve/Deny buttons in each allowed user's pr
 
 Pairing: instead of finding their numeric user id, the user sends the bot a one-time code shown in
 Delta's dashboard (valid 10 minutes). Whoever sends it is added to the allow-list. The code only ever
-appears on this PC's dashboard, so a bot token alone still controls nothing.
+appears on this PC's dashboard, so a bot token alone still controls nothing. The message must be exactly
+the code, and after a few wrong tries the code is dropped until a new one is made on the PC.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import secrets
 import time
 from collections.abc import Callable
@@ -47,6 +49,11 @@ HELP = (
     "🎙 You can also just <b>send a voice note</b>: Telugu, Hindi or English."
 )
 
+# Pairing codes: no look-alike characters (0/O, 1/I/L), so they are easy to read off the screen and type.
+PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+PAIR_LENGTH = 8  # 31^8, about 8.5e11 codes
+PAIR_MAX_FAILS = 5  # wrong tries before the code is dropped (a new one must be made on the PC)
+
 
 class TelegramChannel(PCMenu):
     name = "telegram"
@@ -58,6 +65,7 @@ class TelegramChannel(PCMenu):
         self.allowed = list(allowed)
         self.on_pair: Callable[[list[str]], None] | None = None  # persists the allow-list
         self._code: tuple[str, float] | None = None  # (pairing code, expires at)
+        self._pair_fails = 0  # wrong tries against the current code
         self.bot_name = ""
         self._choices: dict[str, list[str]] = {}  # the choices last offered to each user (tap buttons)
         self._forms: dict[str, dict[str, Any]] = {}  # user -> open question form (delta.core.questions)
@@ -127,16 +135,22 @@ class TelegramChannel(PCMenu):
             await update.message.reply_text(text, **kw)
 
     def new_pairing_code(self) -> str:
-        code = f"{secrets.randbelow(900000) + 100000}"
+        """A fresh single-use code; only the PC's dashboard can ask for one, which also lifts a lockout."""
+        code = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(PAIR_LENGTH))
         self._code = (code, time.monotonic() + 600)
+        self._pair_fails = 0
         return code
 
     async def _try_pair(self, update: Any, text: str) -> None:
-        """A not-yet-allowed user wrote: pair them if they sent the current code, else explain how."""
+        """A not-yet-allowed user wrote: pair them if they sent exactly the current code, else explain how."""
         uid = str(update.effective_user.id)
         code = self._code
-        if code and time.monotonic() < code[1] and code[0] in (text or ""):
+        if code and time.monotonic() >= code[1]:
+            self._code = code = None
+        sent = (text or "").strip().upper().encode()
+        if code and hmac.compare_digest(sent, code[0].encode()):
             self._code = None
+            self._pair_fails = 0
             if uid not in self.allowed:
                 self.allowed.append(uid)
             if self.on_pair:
@@ -149,9 +163,19 @@ class TelegramChannel(PCMenu):
                 "Two-Step Verification (Settings → Privacy and Security → Two-Step Verification), and set a "
                 "Delta PIN on the PC (Settings → Remote security) for the camera, screen, files and keys.")
             return
+        if code:  # a live code and a wrong guess: count it, and drop the code after too many
+            self._pair_fails += 1
+            locked = self._pair_fails >= PAIR_MAX_FAILS
+            if locked:
+                self._code = None
+            log.warning("telegram.pair_failed", user=uid, fails=self._pair_fails, locked=locked)
+            self.c.audit.record("telegram.pair_failed", user=uid, fails=self._pair_fails, locked=locked)
+            if locked and callable(warn := getattr(self.c, "warn", None)):
+                warn(f"Telegram pairing stopped after {PAIR_MAX_FAILS} wrong codes. "
+                     "Make a new code from Settings → Telegram → Connect my phone.")
         await update.message.reply_text(
             "🔒 Not connected yet. On your PC open Delta → Settings → Telegram → Connect my phone, "
-            "then send me the 6-digit code shown there.")
+            f"then send me the {PAIR_LENGTH}-character code shown there (just the code).")
 
     async def stop(self) -> None:
         if self.app.updater and self.app.updater.running:
