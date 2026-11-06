@@ -55,15 +55,15 @@ async def _find(page: Any, mgr: BrowserManager, args: _Target, roles: tuple[str,
         loc, seen, live = await _ref_target(page, mgr, args.ref)
         return loc, live or seen.name
     want = args.label.strip()
-    cands = page.get_by_label(want)
-    for role in roles:
-        cands = cands.or_(page.get_by_role(role, name=want))
-    cands = cands.or_(page.get_by_text(want, exact=False))
-    for i in range(min(await cands.count(), 10)):
-        item = cands.nth(i)
-        with contextlib.suppress(Exception):
-            if await item.is_visible():
-                return item, want
+    # In order of how sure the match is: the field a label names, an element with that role and name, any text.
+    tries = [page.get_by_label(want), *(page.get_by_role(role, name=want) for role in roles),
+             page.get_by_text(want, exact=False)]
+    for cands in tries:
+        for i in range(min(await cands.count(), 10)):
+            item = cands.nth(i)
+            with contextlib.suppress(Exception):
+                if await item.is_visible():
+                    return item, want
     raise LookupError(f"nothing visible called '{want}'; use browser_read to see the page")
 
 

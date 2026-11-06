@@ -99,7 +99,8 @@ Rules:
 - Songs/videos: to prove something is playing, call media_status (Windows' own Playing/Paused,
   title and position: exact, instant, free). A screenshot cannot show playback. If an ad
   plays first, click its Skip button when shown, then check media_status again.
-- Never ask for or handle passwords, card numbers or API keys.
+- Never ask for or handle passwords, card numbers or API keys. If a site needs the user signed in and they saved a
+  login (list_logins), call sign_in(site): Delta types it on the exact site; you never see it.
 - Messages in WhatsApp, Telegram or Slack: ONLY with send_message (it checks the right chat
   and the text before sending). Never click, type and press Enter in those apps yourself; if
   send_message fails, tell the user why instead.

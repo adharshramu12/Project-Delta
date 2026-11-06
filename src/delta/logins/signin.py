@@ -54,7 +54,8 @@ MASK_JS = """(css) => {
     const s = document.createElement('style'); s.id = 'delta-secret-mask'; s.textContent = css;
     (document.head || document.documentElement).appendChild(s);
   }
-  for (const el of document.querySelectorAll('input[type=password]')) el.setAttribute('data-delta-secret', '1');
+  const sel = 'input[type=password], input[autocomplete*=password], input[name*=pass i], input[id*=pass i]';
+  for (const el of document.querySelectorAll(sel)) el.setAttribute('data-delta-secret', '1');
   return true;
 }"""
 # The frame's own idea of where it is: checked right before typing, so a page that navigated a moment ago is caught.
@@ -286,7 +287,14 @@ class SignInEngine:
                 if not done:
                     return SignInResult("needs_user", f"NEEDS HUMAN: {saved.host} wants a one-time code; the user did "
                                                       "not complete it in time.", page.url)
-                await self._settle(page)
+                for _ in range(30):  # the code was entered: give the site time to move on
+                    await self._settle(page)
+                    if not await self._otp(page, saved):
+                        break
+                    await asyncio.sleep(0.5)
+                else:
+                    return SignInResult("needs_user", f"NEEDS HUMAN: {saved.host} still asks for the one-time code.",
+                                        page.url)
                 continue
             break
         if kind := await _challenge(page):

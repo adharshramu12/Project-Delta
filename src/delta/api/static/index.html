@@ -168,7 +168,7 @@
     <!-- Settings -->
     <section class="view view-settings" data-view="settings" aria-label="Settings" hidden>
     <nav class="settings-nav" aria-label="Settings sections">
-    <a href="#set_perm">Permissions</a><a href="#set_browser">Browser</a><a href="#set_folders">Folders</a>
+    <a href="#set_perm">Permissions</a><a href="#set_browser">Browser</a><a href="#set_logins">Logins</a><a href="#set_folders">Folders</a>
     <a href="#set_sites">Apps and websites</a><a href="#set_files">Attachments</a><a href="#set_learning">Learning and memory</a><a href="#set_remote">Phone and PIN</a>
     <a href="#set_sos">Emergency contacts</a><a href="#set_notify">Notifications</a><a href="#set_look">Appearance</a>
     <a href="#set_addons">Add-ons</a><a href="#set_keys">Keys</a><a href="#set_about">Setup and shutdown</a>
@@ -197,6 +197,21 @@
     <div class="msg" id="s_bmsg" role="status"></div>
     </div>
     <label class="check"><input type="checkbox" id="s_orange"> Show an orange mouse pointer while Delta controls the mouse or keyboard</label>
+    </section>
+    <section class="group" id="set_logins"><h3>Logins and watchers</h3>
+    <p class="muted small">Sign-ins Delta may type for you, each only on its exact site, encrypted with Windows DPAPI. Delta never shows a password to the AI. Adding one is only possible here on the PC.</p>
+    <div id="lg_list"></div>
+    <div class="card"><b>Add a login</b>
+    <div class="inline-form"><input id="lg_name" placeholder="Name, for example College ERP" aria-label="Login name"><input id="lg_site" placeholder="Site, for example erp.college.edu" aria-label="Site address"></div>
+    <div class="inline-form"><input id="lg_user" placeholder="User name" autocomplete="off" aria-label="User name"><input id="lg_pass" type="password" placeholder="Password" autocomplete="new-password" aria-label="Password"></div>
+    <div class="inline-form"><input id="lg_url" placeholder="Sign-in page, if not the home page (optional)" aria-label="Sign-in page"><select id="lg_perm" aria-label="Permission"><option value="ask">Ask every time</option><option value="always">Always allow for this site</option></select></div>
+    <label class="check"><input type="checkbox" id="lg_http"> The site only has plain http (not safe)</label>
+    <button class="btn" id="lg_add">Save login</button><div class="msg" id="lg_msg" role="status"></div></div>
+    <div id="wt_list"></div>
+    <div class="card"><b>Watch a site</b><small class="muted">Delta signs in every few hours and tells you only what is new.</small>
+    <div class="inline-form"><select id="wt_login" aria-label="Login to use"></select><input id="wt_what" placeholder="What to check, for example timetable, exams, notifications" aria-label="What to check"></div>
+    <div class="inline-form"><label>Every <input id="wt_hours" class="time" value="6" aria-label="Hours between checks"> hours</label><label class="check"><input type="checkbox" id="wt_digest"> One daily digest instead</label></div>
+    <button class="btn" id="wt_add">Start watching</button><div class="msg" id="wt_msg" role="status"></div></div>
     </section>
     <section class="group" id="set_folders"><h3>Folders</h3>
     <label class="field">Allowed folders <small>One per line. In Trusted mode Delta edits files here without asking.</small><textarea id="s_allowed" rows="4"></textarea></label>
@@ -360,6 +375,7 @@
 <script src="/ui/documents.js"></script>
 <script src="/ui/memory.js"></script>
 <script src="/ui/settings.js"></script>
+<script src="/ui/logins.js"></script>
 <script src="/ui/setup.js"></script>
 <script src="/ui/main.js"></script>
 </body>

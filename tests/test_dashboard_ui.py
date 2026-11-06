@@ -156,9 +156,10 @@ def test_plain_copy_no_em_dashes_or_emoji():
 
 
 def test_the_payload_stays_small():
-    """Low-end laptops: the dashboard's own code and styles (icons excluded) stay small, with no framework."""
+    """Low-end laptops: the dashboard's own code and styles (icons excluded) stay small, with no framework.
+    Raised from 215 KB to 222 KB for Settings > Logins and watchers (logins.js and its card, about 6.6 KB)."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 215_000, total
+    assert total < 222_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 

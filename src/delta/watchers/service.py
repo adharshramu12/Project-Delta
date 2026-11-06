@@ -213,7 +213,8 @@ class WatchService:
                 report = await self._run(w, login, mgr)
         except Exception as e:
             log.warning("watch.failed", watcher=w.id, error=type(e).__name__)
-            report = RunReport("failed", "", f"failed: {type(e).__name__}")
+            why = plain(str(e).splitlines()[0], 160) if str(e) else ""
+            report = RunReport("failed", "", f"failed: {type(e).__name__}: {why}")
         finally:
             if token is not None:
                 CURRENT_REQUEST.reset(token)
@@ -221,7 +222,11 @@ class WatchService:
 
     async def _run(self, w: Watcher, login: Any, mgr: Any) -> RunReport:
         was_running, prev = mgr.running, mgr.active
-        base = await mgr.page()
+        try:
+            base = await mgr.page()
+        except Exception:  # a browser closed a moment ago may still hold its profile: one more try
+            await asyncio.sleep(2)
+            base = await mgr.page()
         page = await base.context.new_page()
         mgr.active = page
         try:
