@@ -40,6 +40,14 @@ class SlackChannel:
     async def stop(self) -> None:
         await self.handler.close_async()
 
+    async def send_text(self, user: str, text: str) -> None:
+        """A message Delta starts itself (a scheduled task's result, a reminder) in an allowed user's DM."""
+        if not is_allowed(user, self.allowed):
+            raise ValueError("not an allowed Slack user")
+        dm = await self.app.client.conversations_open(users=user)
+        for part in chunks(text):
+            await self.app.client.chat_postMessage(channel=dm["channel"]["id"], text=part)
+
     async def _on_message(self, event: dict[str, Any], say: Any) -> None:
         if event.get("bot_id") or event.get("subtype") or event.get("channel_type") != "im":
             return
