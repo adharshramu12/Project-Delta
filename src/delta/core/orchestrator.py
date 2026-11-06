@@ -379,7 +379,8 @@ def proof_target(steps: list[StepRecord]) -> str | None:
 # Read-only helpers every task may need for checking its own work.
 ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "search_files", "web_search", "recall",
                 "list_windows", "read_window", "focus_window", "look_at_screen", "browser_read",
-                "media_status", "do_actions", "scroll"}
+                "media_status", "do_actions", "scroll",
+                "find_app_tool", "use_app_tool"}  # connected apps: only offered while an app is connected
 BROWSER_TOOLS = BROWSER_ACTIONS | {"browser_read"}
 SCREEN_TOOLS = {"click_element", "click_at", "type_text", "press_keys", "set_field"}
 # Set-of-marks and OCR (delta.perception): sent with the screen tools, and only when they are usable here.
@@ -397,6 +398,7 @@ class Orchestrator:
     helpers: Any = None  # HelperSupervisor (delta.helpers): parallel read-only helpers. None or disabled = off
     gate: Any = None  # PromotionGate (delta.learning.gate): lessons and repaired recipes. None = no candidates
     lessons: Any = None  # LessonBook (delta.learning.lessons): self-heal recoveries -> lesson candidates. None = off
+    connectors: Any = None  # AppTools (delta.connectors.tools): connected apps' one-line index for the planner
 
     def __init__(self, settings: Settings, router: ModelRouter, executor: ToolExecutor,
                  memory: MemoryStore | None, governor: Governor | None, events: EventBus,
@@ -540,7 +542,9 @@ class Orchestrator:
                        f"Documents: {known_folder('Personal')}. Home: {Path.home()}.")
         # Boot the acting model (Claude Code: ~6 s) while the plan is being made, not after.
         warm = asyncio.create_task(self.router.prewarm("chat"))
-        plan = await make_plan(self.router, req.with_context, self.executor.registry.names(), memory_ctx,
+        if self.connectors is not None and (apps_hint := self.connectors.planner_hint()):
+            environment += " " + apps_hint
+        plan = await make_plan(self.router, req.with_context, self.executor.registry.planner_names(), memory_ctx,
                                self.s.agent.name, known, environment, helpers=self._helper_slots())
         with contextlib.suppress(Exception):
             await warm

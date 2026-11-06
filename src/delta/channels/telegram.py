@@ -40,9 +40,11 @@ HELP = (
     "/volume - mute, louder, quieter (or /volume 30)\n"
     "/brightness - screen brightness (laptop screens)\n"
     "/theme - Windows light or dark mode\n"
-    "/apps - what is open, tap to close it\n"
+    "/windows - what is open on the PC, tap to close it\n"
     "/screen - a screenshot of the PC now\n"
     "/camera - a photo from the webcam of whoever is at the PC\n\n"
+    "<b>Connected apps</b>: /apps to see them, /connect notion to add one (needs your PIN; you finish the sign-in "
+    "on the PC), /disconnect notion. Then just ask: \"search my Notion for the launch plan\".\n\n"
     "<b>Schedules</b>: \"every day at 9 am check my attendance\", \"remind me at 6 pm to call Ravi\", "
     "\"what's scheduled?\" (making or turning on a schedule from here needs your PIN)\n\n"
     "/stop - stop what I'm doing now\n"
@@ -95,7 +97,7 @@ class TelegramChannel(PCMenu):
         self.app.add_handler(CommandHandler("unlock", self._unlock_cmd))
         for name, handler in (("volume", self._volume_cmd), ("brightness", self._brightness_cmd),
                               ("theme", self._theme_cmd),
-                              ("apps", self._apps_cmd), ("screen", self._screen_cmd),
+                              ("windows", self._apps_cmd), ("screen", self._screen_cmd),
                               ("camera", self._camera_cmd)):
             self.app.add_handler(CommandHandler(name, handler))
         self.app.add_handler(CallbackQueryHandler(self._on_pc_button, pattern=r"^sys:"))
@@ -108,6 +110,9 @@ class TelegramChannel(PCMenu):
         from delta.channels.telegram_tasks import attach as attach_tasks
 
         attach_tasks(self)  # /tasks and Resume / Discard for interrupted tasks (delta.engine)
+        from delta.channels.telegram_apps import attach as attach_apps
+
+        attach_apps(self)  # /apps, /connect, /disconnect: connected apps (delta.connectors)
 
     async def start(self) -> None:
         self.c.approvals.add_presenter(self.name, self._present)
@@ -127,7 +132,8 @@ class TelegramChannel(PCMenu):
                 ("stop", "Stop the running task"),
                 ("lock", "Lock remote control now"), ("unlock", "Enter your PIN"),
                 ("volume", "PC volume"), ("brightness", "Screen brightness"), ("theme", "Windows light / dark mode"),
-                ("apps", "Open apps, tap to close"),
+                ("apps", "Connected apps (Notion, GitHub...)"), ("connect", "Connect an app"),
+                ("windows", "Open windows, tap to close"),
                 ("screen", "Screenshot of the PC"), ("camera", "Webcam photo"),
                 ("status", "PC health and AIs"), ("help", "What I can do")])
         log.info("telegram.started", bot=self.bot_name)

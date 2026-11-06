@@ -64,6 +64,7 @@ A rung that cannot prove its result hands over to the next one **with what it al
 | `messaging/*` | WhatsApp / Telegram / Slack drivers, human texting style, delegated chats |
 | `integrations/google.py` | OAuth 2.0 (PKCE, loopback) and the Google Calendar API |
 | `addons/writer/*` | Writer and Documents: `write_post` (writing rules checked in code, one rewrite), `prepare_post` (clipboard + compose page, never publishes), `make_document` (layout from content; PDF via headless Edge/Chrome with JS and network off, DOCX written with the standard library, Markdown, optional LaTeX without shell escape) |
+| `connectors/*` | Connected apps (MCP): `catalog` (config/mcp_catalog.yaml), `client` (JSON-RPC over stdio, Streamable HTTP, HTTP+SSE), `oauth` (OAuth 2.1 + PKCE, discovery, dynamic registration, loopback redirect, refresh, revoke), `secrets` (DPAPI-sealed tokens), `manager` (sessions, time limits, read-only retries, circuit breaker), `tools` (`find_app_tool` / `use_app_tool` lazy loading; one hidden, gated tool per app tool). See docs/APPS.md |
 | `api/documents_routes.py` | list, preview and download documents in the dashboard (token-protected, listed files only) |
 | `safety/*` | policy matrix, approvals broker, hash-chained audit log, **Remote Guard** (PIN, unlock window, lockout) |
 | `channels/telegram.py`, `channels/pc_menu.py` | one-time-code pairing, commands, voice notes, question forms, PC controls, Remote Guard checks |

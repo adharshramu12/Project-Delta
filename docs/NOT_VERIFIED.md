@@ -29,6 +29,21 @@ saying what you found (it worked, or how it failed) is very welcome.
 - Delta's private browser on a free remote-control port: covered by the CI end-to-end test on a clean runner,
   not yet on a PC where an older Delta browser is still open from before 0.2.0.
 
+## Connected apps (MCP)
+
+- **No real account was used in CI.** Notion, GitHub, Atlassian, Linear, Slack, Sentry, Stripe, Gmail, Google
+  Drive and Calendar, Asana, Vercel, Supabase, Hugging Face and Figma were checked against their own documentation
+  and, for the remote sign-ins, by reading their live 401 answer and OAuth metadata (on 2026-11-06). The full
+  connect, call, refresh and revoke cycle is tested only against Delta's fake notes app with its fake OAuth server
+  (unit tests, scripted evals and the Windows end-to-end test).
+- The browser sign-in pages of each vendor, their consent screens, and whether each one accepts Delta's
+  `resource` parameter and loopback redirect (Google requires a "Web application" client with the exact redirect
+  URL; Slack and Asana need your own app) have not been tried by hand.
+- Real tool lists: only Google's tool names are verified from its docs; other apps' tools default to "asks first"
+  until you change them on the Apps page.
+- The local reference servers (`npx` and `uvx`) at their pinned versions on a real PC, and Node.js / uv being
+  missing on a stranger's laptop (the message is tested, the install is not).
+
 ## Phone and remote control
 
 - Telegram pairing, the PIN unlock, `/lock`, Remote Guard approvals from a phone, and Windows notifications.

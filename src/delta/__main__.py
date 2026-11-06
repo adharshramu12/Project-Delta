@@ -244,6 +244,9 @@ def main() -> None:
     add_eval_parser(sub)
     add_memory_parser(sub)
     add_learn_parser(sub)
+    from delta.connectors.cli import add_parser as add_apps_parser
+
+    add_apps_parser(sub)
     args = parser.parse_args()
 
     if args.cmd == "doctor":
@@ -272,6 +275,10 @@ def main() -> None:
         from delta.learning.cli import run_cli as run_learn_cli
 
         sys.exit(run_learn_cli(load_settings(), args))
+    if args.cmd == "apps":
+        from delta.connectors.cli import run_cli as run_apps_cli
+
+        sys.exit(run_apps_cli(load_settings(), args))
     if args.cmd == "eval":
         from delta.evals.cli import run_cli as run_eval_cli
 

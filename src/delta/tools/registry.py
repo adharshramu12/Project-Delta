@@ -107,6 +107,10 @@ class ToolRegistry:
             raise ValueError(f"duplicate tool {tool.name}")
         self._tools[tool.name] = tool
 
+    def unregister(self, name: str) -> bool:
+        """Remove a tool (a connected app was disconnected or its tool list changed)."""
+        return self._tools.pop(name, None) is not None
+
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 
@@ -123,6 +127,11 @@ class ToolRegistry:
 
     def names(self) -> list[str]:
         return list(self._tools)
+
+    def planner_names(self) -> list[str]:
+        """Names the planner is shown: hidden tools (each connected app's own tools, reached through
+        find_app_tool / use_app_tool) are left out, so a big app does not cost planner tokens."""
+        return [n for n, t in self._tools.items() if getattr(t, "hidden", False) is not True]
 
 
 # Prompt-injection containment, enforced in code rather than by asking the model nicely. Once a task

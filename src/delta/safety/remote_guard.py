@@ -47,6 +47,7 @@ SENSITIVE = {
     "schedule": "create, change or turn on a scheduled task",
     "browser": "change which browser Delta uses",
     "signin": "open Delta's private browser on the PC for signing in",
+    "apps": "connect or disconnect an app",
 }
 
 

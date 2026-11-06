@@ -149,6 +149,24 @@ its own window. `scripts\uninstall.ps1` removes Delta (your chats and memory sta
   `%LOCALAPPDATA%\Delta`. To use another config folder, set `DELTA_CONFIG_DIR`. (Before 0.2.0, a
   `config\delta.yaml` in whatever folder you started `delta` from was picked up silently; it no longer is.)
 
+## Connected apps (Notion, GitHub, Slack, Gmail...)
+
+Delta works inside the apps you use, through their official MCP servers: Notion, GitHub, Jira and Confluence,
+Linear, Slack, Sentry, Stripe, Gmail, Google Drive and Calendar, Asana, Vercel, Supabase, Hugging Face, Figma
+(desktop) and any other MCP server you add.
+
+1. **Open Apps**: the plug button at the top of the dashboard (or `delta apps list` on the PC).
+2. **Connect**: press Connect and sign in in the browser window that opens (some apps ask for a token or the
+   client id of an OAuth app you create; the card says exactly what). From Telegram: `/connect notion` (PIN).
+3. **Ask**: "find my Notion notes about the launch", "open a GitHub issue for the login bug", "what is on my
+   calendar tomorrow?" in the dashboard chat or on Telegram.
+
+Sign-ins are sealed with Windows DPAPI on your PC. Reading runs at once only for tools known to be read-only;
+anything that changes or sends something asks first, an app's results are treated as outside content (never as
+instructions), destructive tools are off until you switch them on, and from a phone every app call needs your PIN.
+The model gets a one-line index of your apps plus `find_app_tool` and `use_app_tool`, not every tool's schema on
+every step. Details: [docs/APPS.md](docs/APPS.md).
+
 ## Scheduled tasks and reminders
 
 Tell Delta when, in plain words, from the app, Telegram or a terminal:
@@ -344,7 +362,9 @@ grounding: {mode: report, max_checks: 1}   # report | strict | off
 | `/signin` | Open Delta's private browser on the PC so you can sign in to your sites (PIN protected) |
 | `/screen` `/camera` | Screenshot or webcam photo (PIN protected) |
 | `/volume` `/brightness` `/theme` | Sound, screen brightness, Windows light/dark |
-| `/apps` | Open apps; tap to close one |
+| `/apps` | Your connected apps (Notion, GitHub...) and their state |
+| `/connect` `/disconnect` | Connect or disconnect an app (PIN protected; you finish a sign-in on the PC) |
+| `/windows` | What is open on the PC; tap to close one (this was `/apps` before 0.3) |
 | `/lock` `/unlock` | Lock remote control now / enter your PIN |
 | *"every day at 9 am check my attendance"* | A scheduled task; the result comes back here (making one needs your PIN) |
 | *"I'm not well, message Ravi now"* | 🆘 Emergency alert to your saved contacts (WhatsApp message or call) |

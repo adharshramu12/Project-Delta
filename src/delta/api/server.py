@@ -428,6 +428,9 @@ def create_app(c: Container, token: str) -> FastAPI:
     register_documents(app, c, auth)
 
     register_schedules(app, c, auth)
+    from delta.api.connectors_routes import register as register_connectors
+
+    register_connectors(app, c, auth)  # connected apps (delta.connectors): the Apps page
     from delta.api.tasks_routes import register as register_tasks
 
     register_tasks(app, c, auth, launch)  # task history, run timeline, resume / discard (delta.engine)
