@@ -47,7 +47,13 @@ def overlay():
     o.close()
 
 
-def test_windows_are_click_through_never_focused_on_top_and_out_of_captures(overlay):
+def report(capsys, line: str) -> None:
+    """Facts about this Windows, in the job log even when the test passes."""
+    with capsys.disabled():
+        print(f"\n[overlay] {line}")
+
+
+def test_windows_are_click_through_never_focused_on_top_and_out_of_captures(overlay, capsys):
     from delta.system import control_overlay as co
 
     ctypes.windll.user32.SetCursorPos(300, 300)
@@ -61,7 +67,7 @@ def test_windows_are_click_through_never_focused_on_top_and_out_of_captures(over
         assert aff.value == (co.WDA_EXCLUDEFROMCAPTURE if overlay.capture_excluded else co.WDA_NONE)
     assert overlay._strips, "no border on the screen with the pointer"
     assert ctypes.windll.user32.GetForegroundWindow() not in overlay._all_windows()  # never takes focus
-    print(f"\ncapture exclusion on this Windows: {overlay.capture_excluded}")
+    report(capsys, f"capture exclusion (WDA_EXCLUDEFROMCAPTURE) on this Windows: {overlay.capture_excluded}")
     overlay.hide()
     assert wait(lambda: not any(visible(h) for h in overlay._all_windows()), 1.0)
 
@@ -116,7 +122,7 @@ def test_heartbeat_loss_hides_it_by_itself():
     assert not o.alive
 
 
-def test_stop_hotkey_and_esc_messages_reach_the_stop_callback(overlay):
+def test_stop_hotkey_and_esc_messages_reach_the_stop_callback(overlay, capsys):
     from delta.system import control_overlay as co
 
     user32 = ctypes.WinDLL("user32")
@@ -124,10 +130,10 @@ def test_stop_hotkey_and_esc_messages_reach_the_stop_callback(overlay):
     user32.PostMessageW(overlay._hwnd, co.WM_HOTKEY, co.HOTKEY_ID, 0)
     user32.PostMessageW(overlay._hwnd, co.WM_STOPKEY, 0, 0)
     assert wait(lambda: overlay.hits == ["hotkey", "esc"])
-    print(f"\nCtrl+Alt+Shift+S registered: {overlay.hotkey_registered}")
+    report(capsys, f"Ctrl+Alt+Shift+S registered: {overlay.hotkey_registered}")
 
 
-def test_on_and_off_are_immediate(tmp_path):
+def test_on_and_off_are_immediate(tmp_path, capsys):
     from delta.system.agent_cursor import AgentCursor
 
     signal = AgentCursor(tmp_path)
@@ -142,7 +148,7 @@ def test_on_and_off_are_immediate(tmp_path):
         signal.stop()
         assert wait(lambda: not visible(o._hwnd), 1.0)
         off = time.perf_counter() - t0
-        print(f"\nring on in {on * 1000:.0f} ms, off in {off * 1000:.0f} ms")
+        report(capsys, f"ring on in {on * 1000:.0f} ms, off in {off * 1000:.0f} ms")
         assert off < 0.5
     finally:
         signal.close()
