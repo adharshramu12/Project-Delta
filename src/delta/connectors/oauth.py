@@ -26,12 +26,13 @@ import html
 import re
 import secrets
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 
+from delta.connectors.base import OAuthError, TokenSet
 from delta.connectors.catalog import AuthSpec, check_url
 from delta.system.logging import log
 
@@ -39,10 +40,6 @@ CALLBACK_PATH = "/callback"
 DEFAULT_USER_CLIENT_PORT = 8765  # vendors that need an exact redirect URL registered (Google, Slack, Asana)
 SIGN_IN_TIMEOUT_S = 300.0
 _PARAM = re.compile(r'(\w+)="([^"]*)"')
-
-
-class OAuthError(RuntimeError):
-    pass
 
 
 @dataclass
@@ -56,33 +53,6 @@ class AuthServer:
     scopes_supported: list[str] = field(default_factory=list)
     token_auth_methods: list[str] = field(default_factory=list)
     challenged_scope: str = ""  # the scope the server's 401 asked for, if any
-
-
-@dataclass
-class TokenSet:
-    access_token: str
-    token_type: str = "Bearer"
-    refresh_token: str = ""
-    expires_at: float = 0.0  # unix time; 0 = unknown
-    scope: str = ""
-    client_id: str = ""
-    client_secret: str = ""
-    auth_method: str = "none"
-    token_endpoint: str = ""
-    revocation_endpoint: str = ""
-    resource: str = ""
-    issuer: str = ""
-
-    def expired(self, skew_s: float = 60.0, now: float | None = None) -> bool:
-        return bool(self.expires_at) and (now or time.time()) >= self.expires_at - skew_s
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> TokenSet:
-        known = {k: d[k] for k in cls.__dataclass_fields__ if k in d}
-        return cls(**known)
 
 
 def parse_www_authenticate(header: str) -> dict[str, str]:

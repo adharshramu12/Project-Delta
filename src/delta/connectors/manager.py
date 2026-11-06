@@ -24,18 +24,21 @@ import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import httpx
-
+from delta.connectors.base import McpError, OAuthError, TokenSet
 from delta.connectors.catalog import AppSpec, Catalog, RuntimeMissingError, command_for, custom_spec, is_loopback
-from delta.connectors.client import McpClient, McpError, StdioTransport, open_remote
-from delta.connectors.oauth import OAuthError, OAuthFlow, TokenSet, refresh, revoke
 from delta.connectors.secrets import SecretBox, SecretsUnavailableError
 from delta.connectors.store import Connection, ConnectionStore, clean_tools
 from delta.llm.router import CircuitBreaker
 from delta.system.logging import log
 from delta.tools.base import Risk
+
+if TYPE_CHECKING:  # httpx and the transports load on the first connection, not at start-up
+    import httpx
+
+    from delta.connectors.client import McpClient
+    from delta.connectors.oauth import OAuthFlow
 
 TRANSIENT = {"timeout_s", "navigation_error", "rate_limit", "app_crashed", "app_not_responding"}
 
@@ -284,6 +287,8 @@ class AppManager:
 
     async def _start_oauth(self, spec: AppSpec, client_id: str, client_secret: str, by: str,
                            open_browser: bool) -> dict[str, Any]:
+        from delta.connectors.oauth import OAuthFlow
+
         http = self._http_factory(spec.url)
         flow = OAuthFlow(spec.url, spec.auth, spec.name, http, client_id, client_secret)
         try:
@@ -365,6 +370,8 @@ class AppManager:
         secret = self.secrets.load(app_id)
         revoked = False
         if secret.get("type") == "oauth":
+            from delta.connectors.oauth import revoke
+
             async with self._http_factory(str(secret.get("token_endpoint") or "")) as http:
                 with contextlib.suppress(Exception):
                     revoked = await revoke(TokenSet.from_dict(secret), http)
@@ -424,6 +431,8 @@ class AppManager:
         return {}
 
     async def _refresh(self, spec: AppSpec, tokens: TokenSet) -> TokenSet:
+        from delta.connectors.oauth import refresh
+
         async with self._http_factory(tokens.token_endpoint) as http:
             try:
                 fresh = await refresh(tokens, http)
@@ -449,6 +458,8 @@ class AppManager:
         return childenv.scrubbed_env(extra)
 
     async def _open(self, spec: AppSpec, conn: Connection) -> McpClient:
+        from delta.connectors.client import McpClient, StdioTransport, open_remote
+
         timeout_s = self.cfg.connect_timeout_s
         if spec.transport == "stdio":
             argv = command_for(spec, conn.inputs, self.which)
@@ -606,6 +617,8 @@ class AppManager:
 
 
 def _http_client(url: str) -> httpx.AsyncClient:
+    import httpx
+
     return httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=not is_loopback(url))
 
 

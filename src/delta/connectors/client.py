@@ -27,6 +27,7 @@ from urllib.parse import urljoin
 import httpx
 
 from delta import __version__
+from delta.connectors.base import McpError
 from delta.connectors.catalog import is_loopback
 from delta.system.logging import log
 
@@ -37,15 +38,6 @@ CONNECT_TIMEOUT_S = 15.0
 
 AuthHeaders = Callable[[], Awaitable[dict[str, str]]]
 
-
-class McpError(Exception):
-    def __init__(self, kind: str, message: str, *, www_authenticate: str = "", status: int = 0,
-                 retry_after_s: float | None = None) -> None:
-        super().__init__(message)
-        self.kind = kind
-        self.www_authenticate = www_authenticate
-        self.status = status
-        self.retry_after_s = retry_after_s
 
 
 async def _no_auth() -> dict[str, str]:
