@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from delta.core.intents import small_talk
-from delta.system.vault import PREFIX, scrub, seal, unseal
+from delta.system.vault import PREFIX, scrub, seal, seal_or_keep, unseal
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chats (
@@ -77,8 +77,8 @@ class ChatStore:
             chats = self._db.execute("SELECT id, title FROM chats WHERE title NOT LIKE ?", (PREFIX + "%",)).fetchall()
             msgs = self._db.execute("SELECT id, text FROM chat_messages WHERE text NOT LIKE ?",
                                     (PREFIX + "%",)).fetchall()
-            new_chats = [(seal(r["title"]), r["id"]) for r in chats]
-            new_msgs = [(seal(r["text"]), r["id"]) for r in msgs]
+            new_chats = [(seal_or_keep(r["title"]), r["id"]) for r in chats]
+            new_msgs = [(seal_or_keep(r["text"]), r["id"]) for r in msgs]
             if any(t.startswith(PREFIX) for t, _ in new_chats + new_msgs):
                 with self._db:
                     self._db.executemany("UPDATE chats SET title = ? WHERE id = ?", new_chats)

@@ -8,6 +8,8 @@ to the server or write to logs.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 import secrets
 from pathlib import Path
 from typing import Any
@@ -21,15 +23,51 @@ from delta.bootstrap import Container
 from delta.core.state import TASK_CRASHED, TaskRequest, TaskResult
 from delta.safety.approvals import ApprovalRequest
 from delta.system.logging import log
+from delta.system.vault import VaultUnavailableError
 
 STATIC = Path(__file__).parent / "static"
 
 
+SEND_TIMEOUT_S = 2.0  # one stalled dashboard (asleep laptop, full network buffer) must never hold up the rest
+
+
 def load_token(data_dir: Path) -> str:
+    """The API token, created once. Two starts racing (the daemon and `delta app`) agree on one token: the file
+    is created exclusively with owner-only permissions (where the OS has them), written in full, then moved
+    into place, so nobody ever reads an empty or half-written token."""
     path = data_dir / "api_token"
-    if not path.exists():
-        path.write_text(secrets.token_urlsafe(32))
-    return path.read_text().strip()
+    for _ in range(50):
+        with contextlib.suppress(FileNotFoundError):
+            token = path.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+            with contextlib.suppress(OSError):  # an empty token file (an old crash) is never a valid token
+                path.unlink()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        tmp = data_dir / f"api_token.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(secrets.token_urlsafe(32))
+                f.flush()
+                os.fsync(f.fileno())
+            try:
+                os.link(tmp, path)  # never replaces a token another start already put there
+            except FileExistsError:
+                continue  # someone else won the race: use theirs
+            except OSError:  # a file system without hard links
+                if path.exists():
+                    continue
+                os.replace(tmp, path)
+        finally:
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+    raise RuntimeError(f"could not create the API token in {data_dir}")
+
+
+def same_token(given: str | None, token: str) -> bool:
+    """Constant-time compare on bytes: a non-ASCII value is simply wrong (401), never a crash."""
+    return secrets.compare_digest((given or "").encode("utf-8"), token.encode("utf-8"))
 
 
 class TaskIn(BaseModel):
@@ -71,15 +109,24 @@ class Hub:
         self.clients: set[WebSocket] = set()
 
     async def broadcast(self, message: dict[str, Any]) -> None:
-        dead = []
-        # Loop over a snapshot: a client can connect or disconnect while we await a send (#8).
-        for ws in list(self.clients):
-            try:
-                await ws.send_json(message)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.clients.discard(ws)
+        # A snapshot: a client can connect or disconnect while we await a send (#8). Sends run side by side,
+        # each with a time limit, so one stalled client cannot block the event bus (and with it the task).
+        clients = list(self.clients)
+        if not clients:
+            return
+        results = await asyncio.gather(*(self._send(ws, message) for ws in clients))
+        for ws, ok in zip(clients, results, strict=True):
+            if not ok:
+                self.clients.discard(ws)
+
+    @staticmethod
+    async def _send(ws: WebSocket, message: dict[str, Any]) -> bool:
+        try:
+            await asyncio.wait_for(ws.send_json(message), SEND_TIMEOUT_S)
+            return True
+        except Exception:  # closed, broken or too slow (TimeoutError): drop it; the dashboard reconnects
+            log.info("ws.client_dropped")
+            return False
 
 
 def _approval_json(r: ApprovalRequest) -> dict[str, Any]:
@@ -105,7 +152,7 @@ def create_app(c: Container, token: str) -> FastAPI:
     bearer = HTTPBearer(auto_error=False)
 
     def auth(cred: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:  # noqa: B008
-        if not cred or not secrets.compare_digest(cred.credentials, token):
+        if not cred or not same_token(cred.credentials, token):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "bad token")
 
     async def on_event(event: str, data: dict[str, Any]) -> None:
@@ -139,10 +186,13 @@ def create_app(c: Container, token: str) -> FastAPI:
         chat_id = body.chat_id
         history = ""
         if chats is not None:
-            if not chat_id or chats.get(chat_id) is None:
-                chat_id = chats.create().id
-            history = chats.context_for(chat_id)  # before this message is added
-            chats.add(chat_id, "user", body.text)
+            try:
+                if not chat_id or chats.get(chat_id) is None:
+                    chat_id = chats.create().id
+                history = chats.context_for(chat_id)  # before this message is added
+                chats.add(chat_id, "user", body.text)
+            except VaultUnavailableError as e:  # never stored unencrypted: say why instead of a bare 500
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from e
         req = TaskRequest(body.text, channel="api", chat_id=chat_id, history=history)
         return launch(req, chat_id)
 
@@ -408,17 +458,20 @@ def create_app(c: Container, token: str) -> FastAPI:
 
     @app.websocket("/api/ws")
     async def ws(socket: WebSocket) -> None:
-        if not secrets.compare_digest(socket.query_params.get("token", ""), token):
+        if not same_token(socket.query_params.get("token", ""), token):
             await socket.close(code=4401)
             return
         await socket.accept()
         hub.clients.add(socket)
-        for r in c.approvals.pending():
-            await socket.send_json({"type": "approval", "approval": _approval_json(r)})
-        try:
+        try:  # whatever ends this socket (disconnect, error, shutdown), it leaves the hub
+            for r in c.approvals.pending():
+                await asyncio.wait_for(socket.send_json({"type": "approval", "approval": _approval_json(r)}),
+                                       SEND_TIMEOUT_S)
             while True:
                 await socket.receive_text()  # keepalive; clients act through the REST endpoints
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, TimeoutError):
+            pass
+        finally:
             hub.clients.discard(socket)
 
     return app

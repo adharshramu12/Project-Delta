@@ -34,7 +34,7 @@ from typing import Any
 from delta.memory.keywords import keywords, overlap
 from delta.memory.provenance import AGENT, AGENT_NOTE, LEGACY, ORIGIN_WORDS, TRUSTED, UNTRUSTED, USER_MESSAGE
 from delta.memory.redact import only_secret, redact_secrets
-from delta.system.vault import PREFIX, scrub, seal, unseal
+from delta.system.vault import PREFIX, scrub, seal, seal_or_keep, unseal
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories(
@@ -153,7 +153,7 @@ class MemoryStore:
         with self._lock:
             rows = self._db.execute("SELECT id, content FROM memories WHERE content NOT LIKE ?",
                                     (PREFIX + "%",)).fetchall()
-            sealed = [(seal(c), i) for i, c in rows]
+            sealed = [(seal_or_keep(c), i) for i, c in rows]
             if any(s != c for (s, _), (_, c) in zip(sealed, rows, strict=True)):
                 with self._db:
                     self._db.executemany("UPDATE memories SET content=? WHERE id=?", sealed)

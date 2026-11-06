@@ -1,6 +1,6 @@
 [project]
 name = "delta-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "Delta by Adharsh Kumar Bachu - a personal, local-first, OS-level AI agent with human approval and verified task execution."
 readme = "README.md"
 license = "Apache-2.0"
@@ -76,6 +76,13 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM", "RUF"]
 # ASYNC240: stat()/exists() on local paths is microseconds; offloading them would only add noise.
 ignore = ["RUF001", "ASYNC240"]
+
+[tool.bandit]
+# Checked in CI (job `security`, medium and high only). Reviewed and skipped project-wide:
+# B608: SQL text is built only from constant column lists and "?" placeholders; every value is a bound parameter.
+# B104: the only hit compares a server's reported address with "0.0.0.0"; Delta never binds to it (config.py
+#       forces the API onto loopback).
+skips = ["B608", "B104"]
 
 [tool.mypy]
 python_version = "3.12"

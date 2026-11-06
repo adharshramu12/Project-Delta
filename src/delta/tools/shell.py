@@ -15,6 +15,7 @@ import re
 from pydantic import BaseModel, Field
 
 from delta.system import proctree
+from delta.system.childenv import scrubbed_env
 from delta.tools.base import Risk, Tool, ToolResult
 
 SYSTEM_PATTERNS = [
@@ -106,6 +107,7 @@ class RunShell(Tool[ShellArgs]):
         proc = await asyncio.create_subprocess_exec(
             "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", args.command,
             cwd=args.cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env=scrubbed_env(),  # no API keys or tokens from Delta's own environment
         )
         proctree.track(getattr(proc, "pid", None))
         try:

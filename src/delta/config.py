@@ -1,6 +1,9 @@
 """Typed configuration loaded from `config/*.yaml`.
 
-Lookup order for the config directory: $DELTA_CONFIG_DIR, then ./config, then the repo's config/.
+Config directory: $DELTA_CONFIG_DIR when set, otherwise the config/ folder that ships with Delta (the
+install or the checkout this code runs from). The user's own choices always come on top of it from
+settings.yaml in the data folder. Before 0.2.0 a config/delta.yaml in the *current* folder was picked up
+silently; to use a folder like that now, say so with DELTA_CONFIG_DIR (e.g. `set DELTA_CONFIG_DIR=.\\config`).
 Runtime data (memory, audit log, logs) lives in $DELTA_DATA_DIR or %LOCALAPPDATA%/Delta.
 """
 
@@ -11,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,6 +54,10 @@ class AgentConfig(BaseModel):
     approval_timeout_s: float = 300
     # Tokens one task may use before Delta pauses and asks whether to keep going. 0 = no limit.
     token_budget: int = 0  # 0 or less = off
+    # Environment variables that look like secrets (API keys, tokens, passwords, DELTA_<NAME> overrides) are
+    # removed before run_shell / run_python start a program (delta.system.childenv). Names listed here are
+    # passed through anyway, e.g. ["NPM_TOKEN"] for a build that needs it.
+    child_env_allow: list[str] = Field(default_factory=list)
 
 
 class SearchConfig(BaseModel):
@@ -192,9 +199,37 @@ class WriterConfig(BaseModel):
     model_task: Literal["plan", "chat"] = "plan"  # which AI route writes (plan = the strongest models first)
 
 
+def is_loopback(host: str) -> bool:
+    """True only for this PC itself: localhost, 127.0.0.0/8 or ::1. Names other than localhost are never trusted
+    (a name can point anywhere)."""
+    import ipaddress
+
+    h = (host or "").strip().strip("[]").lower()
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
 class ApiConfig(BaseModel):
     host: str = "127.0.0.1"  # never 0.0.0.0: remote access goes through Tailscale/Cloudflare Tunnel
     port: int = 7878
+
+    @field_validator("host")
+    @classmethod
+    def _loopback_only(cls, v: str) -> str:
+        """The API holds the keys to the PC, so it only ever listens on this PC. Anything else (0.0.0.0, a LAN
+        address, a host name) is replaced by 127.0.0.1 and logged, instead of failing: an old settings file must
+        never stop Delta from starting, and it must never open the API to the network either."""
+        if is_loopback(v):
+            return v.strip()
+        import logging
+
+        logging.getLogger("delta.config").warning(
+            "api.host %r is not this PC (loopback); using 127.0.0.1. Use Tailscale or a tunnel for remote access.", v)
+        return "127.0.0.1"
 
 
 class QuietHours(BaseModel):
@@ -378,11 +413,12 @@ class Settings(BaseModel):
 
 
 def _config_dir() -> Path:
+    """Explicit override first ($DELTA_CONFIG_DIR), else Delta's own config/. Never the current folder:
+    running `delta` from a folder that happens to hold a config/delta.yaml must not change Delta's rules."""
     env = os.environ.get("DELTA_CONFIG_DIR")
     if env:
-        return Path(env)
-    cwd = Path.cwd() / "config"
-    return cwd if (cwd / "delta.yaml").exists() else REPO_ROOT / "config"
+        return Path(env).expanduser()
+    return REPO_ROOT / "config"
 
 
 def _data_dir() -> Path:
