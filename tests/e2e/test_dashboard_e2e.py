@@ -116,9 +116,12 @@ async def attach_and_send(page: Any, base: str, token: str, folder: Path) -> Non
         await page.wait_for_selector("#setup[open]", timeout=5000)
         await page.click("#wclose")
     await page.set_input_files("#attachinput", [str(picture), str(pdf)])
+    # The picture is read with Windows OCR at upload: the first read starts PowerShell and loads the WinRT OCR
+    # types, which took 10 to 15 seconds on a cold CI runner. Both files upload at once and the first read is
+    # also the probe (one PowerShell start, not two), so this is one cold start; 45 s leaves room for it.
     await page.wait_for_function(
         "() => document.querySelectorAll('#attachlist .achip').length === 2"
-        " && !document.querySelector('#attachlist .achip.loading')", timeout=20000)
+        " && !document.querySelector('#attachlist .achip.loading')", timeout=45000)
     chips = await page.locator("#attachlist .achip").all_inner_texts()
     assert any("chart.png" in t and "Picture, 640x400" in t for t in chips), chips
     assert any("report.pdf" in t and "2 pages" in t for t in chips), chips

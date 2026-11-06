@@ -7,7 +7,9 @@ box per line and per word, which Delta turns into text elements: a cheap model t
 can still act on them (click_text), and set-of-marks uses them as marks with no handle.
 
 On a PC without it (not Windows, no OCR language, PowerShell blocked) every call is a no-op that says so.
-The probe runs once, on first use, never at start-up.
+The probe runs once, on first use, never at start-up. The first read is its own probe: one PowerShell start
+both checks for the engine and reads the picture, because each cold start (PowerShell plus the WinRT types) can
+take 10 seconds or more on a slow PC, and a picture attached in the dashboard waits for it.
 """
 
 from __future__ import annotations
@@ -65,7 +67,8 @@ $lines = @(foreach ($l in $result.Lines) {
         [pscustomobject]@{ t = $w.Text; x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height } })
     [pscustomobject]@{ text = $l.Text; words = $words }
 })
-ConvertTo-Json -InputObject ([pscustomobject]@{ lines = $lines }) -Depth 5 -Compress
+ConvertTo-Json -InputObject ([pscustomobject]@{ lang = $engine.RecognizerLanguage.LanguageTag; lines = $lines }) `
+    -Depth 5 -Compress
 """
 
 
@@ -140,10 +143,26 @@ class WindowsOcr:
         log.info("ocr.probe", available=self._available, language=self.language)
         return self._available
 
+    def _settle(self, raw: str) -> None:
+        """The first read answers the probe too: the engine was there (and its language) or it was not."""
+        try:
+            data: Any = json.loads(raw or "{}")
+        except ValueError:
+            data = {}
+        if not isinstance(data, dict) or ("error" not in data and "lines" not in data):
+            return  # this picture failed for its own reason: the engine is still unknown, so ask again next time
+        self._available = "lines" in data
+        self.language = str(data.get("lang") or "").strip() if self._available else ""
+        log.info("ocr.probe", available=self._available, language=self.language)
+
     async def read(self, image: Any) -> list[OcrLine]:
         """Text lines (with boxes in `image` pixels) of a PIL picture. [] when OCR is not available."""
-        if not await self.probe():
+        if self._available is False:
             return []
+        if self._available is None and not self.platform_ok():
+            self._available = False
+            return []
+        first = self._available is None  # not probed yet: this read is the probe (one PowerShell start, not two)
         from PIL import Image
 
         scale = 1.0
@@ -157,9 +176,18 @@ class WindowsOcr:
         try:
             await asyncio.to_thread(img.save, path, "PNG")
             self.calls += 1
-            raw = await _powershell(READ_SCRIPT, {"DELTA_OCR_IMAGE": str(path.resolve())}, TIMEOUT_S)
+            try:
+                raw = await _powershell(READ_SCRIPT, {"DELTA_OCR_IMAGE": str(path.resolve())}, TIMEOUT_S)
+            except Exception as e:
+                if not first:
+                    raise
+                log.info("ocr.unavailable", error=str(e)[:200])  # as the probe: PowerShell blocked or timed out
+                self._available, self.language = False, ""
+                return []
         finally:
             path.unlink(missing_ok=True)  # the picture never stays on disk
+        if first:
+            self._settle(raw)
         if '"error"' in raw[:40]:
             return []
         lines = parse(raw)

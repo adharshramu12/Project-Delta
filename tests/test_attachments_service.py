@@ -324,3 +324,27 @@ async def test_a_message_with_files_is_never_small_talk(tmp_path, monkeypatch, w
     att, _ = await orch.attachments.ingest_bytes(F.simple_pptx(), "deck.pptx")
     res = await orch.run(TaskRequest(words, attachments=[att.id]))
     assert planned == ["plan"] and res.answer == "This is a three slide plan."
+
+
+async def test_a_picture_starts_ocr_once_and_no_text_still_counts_as_read(tmp_path):
+    """The read is the probe on a cold PC; a picture with no text is 'done' when OCR works, 'none' when it does not."""
+
+    class CountingOcr:
+        def __init__(self, works: bool) -> None:
+            self.works, self.reads, self.probes = works, 0, 0
+
+        async def probe(self) -> bool:
+            self.probes += 1
+            return self.works
+
+        async def read(self, img: Any) -> list[Any]:
+            self.reads += 1
+            return []
+
+    svc, _ = service(tmp_path)
+    svc.ocr = working = CountingOcr(True)
+    _, ex = await svc.ingest_bytes(F.png(64, 64, ""), "blank.png")
+    assert ex.ocr == "done" and working.reads == 1
+    svc.ocr = broken = CountingOcr(False)
+    _, ex = await svc.ingest_bytes(F.png(65, 64, ""), "other.png")
+    assert ex.ocr == "none" and broken.reads == 1
