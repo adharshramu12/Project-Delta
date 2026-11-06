@@ -123,6 +123,9 @@ def _show(engine: Any, task_id: str, as_json: bool) -> int:
             print(f"       {s['summary'][:160]}")
     for h in data.get("helpers") or []:
         print(f"  helper {'ok' if h['ok'] else 'failed'}: {h['summary']}  (child task {h.get('child', '?')})")
+    for key in ("memory", "grounding", "learning"):
+        for line in data.get(key) or []:
+            print(f"  {key}: {line['summary']}")
     for c in data["checks"]:
         print(f"  check {'passed' if c['ok'] else 'failed'}: {c['summary']}")
     if t["answer"]:

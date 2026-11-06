@@ -74,6 +74,12 @@ class MemoryConfig(BaseModel):
     auto_extract: bool = True
     learn_skills: bool = True  # learn reusable skills from verified tasks
     recall_k: int = 6
+    # Size and retention (Batch D). Added later: older settings files load with these defaults. Facts you told
+    # Delta yourself are never removed by these limits; past-task notes and notes from outside content are.
+    max_items: int = Field(default=2000, ge=50, le=100_000)       # all memories together
+    max_item_chars: int = Field(default=500, ge=80, le=4000)      # longer text is cut before it is stored
+    episode_retention_days: float = Field(default=90, ge=0)       # past-task notes older than this go (0 = keep)
+    untrusted_retention_days: float = Field(default=30, ge=0)     # notes from outside content go sooner (0 = keep)
 
 
 class ChannelConfig(BaseModel):
@@ -297,6 +303,32 @@ class HelpersConfig(BaseModel):
     read_page: bool = True  # helpers may read a page in a fresh headless browser context (no cookies)
 
 
+class LearningConfig(BaseModel):
+    """Promotion gate for what Delta learns on its own (delta.learning.gate): lessons from self-heal and repaired
+    recipe versions start as candidates and are used only after they prove themselves. Added later: older
+    settings files load with these defaults. Anything traced to outside content (web pages, files, messages) is
+    untrusted and is never promoted, whatever these numbers say."""
+    enabled: bool = True
+    promote_after_runs: int = Field(default=3, ge=1, le=50)   # successful real runs before a candidate is used
+    promote_on_eval: bool = True    # a passing scripted eval of the candidate also promotes it
+    demote_after_failures: int = Field(default=2, ge=1, le=20)  # failures in a row that retire an item
+    repair_recipes: bool = True     # a failed recipe step is repaired as a candidate (the working one stays)
+    lessons: bool = True            # self-heal recoveries that worked become lesson candidates
+
+
+class GroundingConfig(BaseModel):
+    """Answer grounding (delta.core.grounding): before Delta says a tool task is done, each concrete claim in
+    its answer (a file, a number, a link, a quoted text, "I sent / saved / deleted") is matched against what the
+    tools in this task really returned. No AI call: plain matching, plus at most `max_checks` extra read-only
+    checks. Added later: older settings files load with these defaults.
+      report  claims nothing in the task showed are listed to you as not confirmed (default)
+      strict  such claims fail the check, like a claim that is proven wrong
+      off     no grounding (the answer is sent as the model wrote it)
+    A claim a check proves wrong (the file is not there) always fails the attempt, except when mode is off."""
+    mode: Literal["report", "strict", "off"] = "report"
+    max_checks: int = Field(default=1, ge=0, le=3)
+
+
 Autonomy = Literal["ask-everything", "ask-risky", "trusted", "autopilot"]
 
 
@@ -337,6 +369,8 @@ class Settings(BaseModel):
     undo: UndoConfig = Field(default_factory=UndoConfig)
     perception: PerceptionConfig = Field(default_factory=PerceptionConfig)
     helpers: HelpersConfig = Field(default_factory=HelpersConfig)
+    learning: LearningConfig = Field(default_factory=LearningConfig)
+    grounding: GroundingConfig = Field(default_factory=GroundingConfig)
     boundaries: Boundaries = Field(default_factory=Boundaries)
     apps: dict[str, AppEntry] = Field(default_factory=dict)
     config_dir: Path = REPO_ROOT / "config"

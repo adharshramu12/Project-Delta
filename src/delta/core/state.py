@@ -80,6 +80,8 @@ class TaskResult:
     # needs_user: a form of up to 4 questions [{"q", "options", "multi"}] (delta.core.questions)
     questions: list[dict[str, Any]] = field(default_factory=list)
     asked_about: str = ""  # needs_user: the original request, so an answer can continue it
+    tainted_by: str = ""  # the first outside source the task read (kept after the task ends, for learning)
+    grounding: dict[str, Any] = field(default_factory=dict)  # answer grounding (delta.core.grounding)
 
 
 # What the user sees when a task fails for a reason that is not theirs (a bug, a full disk): no traceback.

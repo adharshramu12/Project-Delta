@@ -133,7 +133,14 @@ class CliChannel:
                             for x in learned) or "(nothing learned yet)")
         elif cmd in {"/keep", "/undo"} and arg.strip().isdigit():
             store = self.c.orchestrator.learning
-            changed = store.set_status(int(arg), "active" if cmd == "/keep" else "undone") if store else None
+            from delta.learning.store import UntrustedPromotionError
+
+            try:
+                changed = store.set_status(int(arg), "active" if cmd == "/keep" else "undone", by="you") \
+                    if store else None
+            except UntrustedPromotionError:
+                print("That came from outside content (a web page, file or message), so it can never become a rule.")
+                return
             print(f"{'kept' if cmd == '/keep' else 'undone'}: {changed.content}" if changed else "no such item")
         elif cmd == "/audit":
             for r in self.c.audit.tail(15):

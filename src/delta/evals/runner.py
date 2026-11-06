@@ -33,6 +33,8 @@ from delta.config import (
     AppEntry,
     Boundaries,
     EngineConfig,
+    GroundingConfig,
+    LearningConfig,
     MemoryConfig,
     SelfHealConfig,
     Settings,
@@ -205,8 +207,11 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         path.write_text(str(content), encoding="utf-8")
 
     apps = {"evalmarker": AppEntry(command=Path(sys.executable).name, aliases=["eval marker"])}
+    lcfg = {k: v for k, v in (task.learning or {}).items() if k in LearningConfig.model_fields}
+    gcfg = {k: v for k, v in (task.grounding or {}).items() if k in GroundingConfig.model_fields}
     settings = Settings(agent=AgentConfig(max_steps=12, max_attempts=2, approval_timeout_s=30),
-                        selfheal=SelfHealConfig(max_backoff_s=0.2),
+                        selfheal=SelfHealConfig(max_backoff_s=0.2), learning=LearningConfig(**lcfg),
+                        grounding=GroundingConfig(**gcfg),
                         memory=MemoryConfig(auto_extract=True, learn_skills=False), data_dir=data, apps=apps,
                         boundaries=Boundaries(allowed_paths=[str(sandbox)]),
                         writer=WriterConfig(output_dir=str(sandbox), latex="off"))
@@ -214,7 +219,12 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     events = EventBus()
     memory = MemoryStore(data / "memory.db")
     for fact in setup.get("memory") or []:
-        memory.add(str(fact), "profile", "user")
+        if isinstance(fact, dict):  # with provenance: {content, kind, origin, trust, task_id, detail}
+            memory.add(str(fact.get("content", "")), str(fact.get("kind", "profile")), str(fact.get("source", "user")),
+                       origin=str(fact.get("origin", "")), trust=str(fact.get("trust", "")),
+                       task_id=str(fact.get("task_id", "")), detail=str(fact.get("detail", "")))
+        else:
+            memory.add(str(fact), "profile", "user")
     audit = AuditLog(data / "audit.jsonl")
     approvals = ApprovalBroker(timeout_s=30)
     decision = task.approve == "approve"
@@ -249,7 +259,11 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         browser = browser_mod.BrowserManager(data)
         tools += browser_mod.browser_tools(browser)
     registry = ToolRegistry(tools)
+    learning_store, skill_store = _learning_stores(task, data, values)
     executor = ToolExecutor(registry, PolicyEngine(settings.boundaries, protected=[data]), approvals, audit)
+    from delta.memory.tools import wire_memory_tools
+
+    wire_memory_tools(tools, executor)
     for t in writer:
         if hasattr(t, "executor"):
             t.executor = executor
@@ -262,8 +276,16 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     executor.undo = engine.undo = undo
     if task.inject:
         executor.faults = FaultInjector(fill(task.inject, values))
-    orch = Orchestrator(settings, router, executor, memory, None, events, audit, None, None, proof)
+    orch = Orchestrator(settings, router, executor, memory, None, events, audit, skill_store, learning_store, proof)
     orch.engine = engine
+    gate = None
+    if learning_store is not None and settings.learning.enabled:  # the promotion gate, lessons, recipe repair
+        from delta.learning.gate import PromotionGate
+        from delta.learning.lessons import LessonBook
+
+        gate = PromotionGate(settings.learning, learning_store, skill_store, engine)
+        orch.gate = gate
+        orch.lessons = LessonBook(learning_store, gate) if settings.learning.lessons else None
     orch.perception = perception
     if task.helpers is not None:  # parallel read-only helpers, on for this eval
         from delta.config import HelpersConfig
@@ -282,6 +304,9 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     req = TaskRequest(fill(task.request, values), channel="api")
     started = time.monotonic()
     try:
+        for _ in range(task.runs - 1):  # earlier runs of a repeated task: same data folder, same script
+            await asyncio.wait_for(orch.run(TaskRequest(req.text, channel="api")), task.timeout_s)
+            await asyncio.wait_for(orch.drain(), 30)
         result = await asyncio.wait_for(orch.run(req), task.timeout_s)
         await asyncio.wait_for(orch.drain(), 30)
         out.status, out.answer, out.provider = result.status, result.answer, result.provider
@@ -301,15 +326,45 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     ctx = CheckContext(sandbox=sandbox, status=out.status, answer=out.answer, steps=steps, meter=meter,
                        page_state=site.snapshot(), memories=[m.content for m in memory.list()],
                        tasks_db=data / "tasks.db", timeline=engine.timeline(req.id), undo=undo,
-                       policy=executor.policy, task_id=req.id)
+                       policy=executor.policy, task_id=req.id, request=req.text, memory_store=memory,
+                       learning=learning_store, skills=skill_store, gate=gate)
     out.checks = await asyncio.to_thread(run_checks, ctx, fill(task.check, values))
     out.passed = bool(out.checks) and all(c["passed"] for c in out.checks)
+    if task.eval_gate and gate is not None:
+        # The promotion gate's eval path: a candidate this task created passed a scripted eval only when every
+        # check above passed; a failing eval counts against it.
+        for item in gate.items(status="candidate"):
+            gate.record_eval(item["ref"], out.passed, task.id)
+        if task.check_after_gate:
+            after = await asyncio.to_thread(run_checks, ctx, fill(task.check_after_gate, values))
+            out.checks += [{**c, "check": "after gate: " + c["check"]} for c in after]
+            out.passed = out.passed and all(c["passed"] for c in after)
     if browser is not None:
         with contextlib.suppress(Exception):
             await browser.close()
     memory.close()
     store.close()
+    for extra in (learning_store, skill_store):
+        if extra is not None:
+            extra.close()
     return out
+
+
+def _learning_stores(task: EvalTask, data: Path, values: dict[str, str]) -> tuple[Any, Any]:
+    """learning.db and skills.db for a task with `learning:` (with its seeded skills), else (None, None)."""
+    if task.learning is None:
+        return None, None
+    from delta.learning.store import LearningStore
+    from delta.memory.skills import SkillStore
+
+    learning = LearningStore(data / "learning.db")
+    skills = SkillStore(data / "skills.db")
+    for raw in fill(task.learning.get("skills") or [], values):
+        change = skills.learn(str(raw["name"]), str(raw["when_to_use"]), [str(p) for p in raw.get("procedure") or []],
+                              [str(t) for t in raw.get("tools") or []],
+                              recipe=json.dumps(raw["recipe"]) if raw.get("recipe") else None)
+        skills.set_status(change.skill.id, str(raw.get("status", "active")))
+    return learning, skills
 
 
 async def run_suite(tasks: list[EvalTask], model: str | None = None, keep: bool = False,

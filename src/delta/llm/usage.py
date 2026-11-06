@@ -19,6 +19,15 @@ Perception and helper counters (Batch C), added by the tools that cause them:
   perception_cache_hits  views not sent again because they had not changed
   helper_tokens    tokens used by parallel read-only helpers (already inside input/output above)
 
+Memory, grounding and learning counters (Batch D), added by the orchestrator:
+  memory_hits          memories recalled for the task (prompt context and the recall tool)
+  memory_untrusted_hits  of those, notes from outside content (shown as data only)
+  grounding_claims     concrete claims found in the final answer (files, numbers, links, quotes, actions)
+  grounding_checks     extra read-only checks run to confirm a claim
+  unverified_claims    claims nothing in the task backed (listed to the user)
+  contradicted_claims  claims a check proved wrong (the attempt failed and was retried)
+  learning_candidates  lesson or repaired-recipe candidates saved by the task
+
 summary() turns the counters into what the dashboard and the API show.
 """
 
@@ -65,6 +74,10 @@ PERCEPTION_KEYS = ("images_sent", "image_tokens_est", "marks_used", "ocr_calls",
                    "helper_tokens", "helpers")
 
 
+LEARNING_KEYS = ("memory_hits", "memory_untrusted_hits", "grounding_claims", "grounding_checks", "unverified_claims",
+                 "contradicted_claims", "learning_candidates")
+
+
 def add(meter: dict[str, int], key: str, value: int) -> None:
     meter[key] = meter.get(key, 0) + int(value)
 
@@ -80,6 +93,11 @@ def bump(router: Any, key: str, value: int = 1) -> None:
 def perception(meter: dict[str, int]) -> dict[str, int]:
     """The perception and helper counters that are not zero (empty for a task that used none)."""
     return {k: int(meter[k]) for k in PERCEPTION_KEYS if meter.get(k)}
+
+
+def learning(meter: dict[str, int]) -> dict[str, int]:
+    """The memory, grounding and learning counters that are not zero."""
+    return {k: int(meter[k]) for k in LEARNING_KEYS if meter.get(k)}
 
 
 def used_for_budget(meter: dict[str, int]) -> int:
@@ -128,4 +146,6 @@ def summary(meter: dict[str, int]) -> dict[str, Any]:
                                    "source": source, "label": label}
     if extra := perception(meter):
         out_summary["perception"] = extra
+    if learned := learning(meter):
+        out_summary["learning"] = learned
     return out_summary
