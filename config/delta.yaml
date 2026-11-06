@@ -144,7 +144,7 @@ browser:
   # delta-profile: a separate Delta profile, works in the background, but not signed in.
   mode: your-browser
   prefer: auto         # auto (your Windows default browser) | chrome | edge
-  orange_cursor: true  # the mouse pointer turns orange while Delta controls the mouse/keyboard
+  orange_cursor: true  # orange ring + screen border while Delta controls the mouse/keyboard/browser (pointer unchanged)
   snapshot_diffs: true      # delta-profile: on the same page, send the AI only what changed
   full_snapshot_every: 8    # ...with a full page listing at least this often
 

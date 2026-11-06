@@ -567,3 +567,70 @@ def test_undo_api_route_and_cli(tmp_path: Path, monkeypatch: Any, capsys: Any) -
     assert "abc2" in capsys.readouterr().out
     assert run_cli(settings, argparse.Namespace(id="abc2", json=False)) == 0
     assert f.read_text(encoding="utf-8") == "old"
+
+
+# --- relaunch: the browser window the task was using is gone -----------------------------------------
+class UrlArgs(BaseModel):
+    url: str = ""
+
+
+class ReopenBrowser(Tool[UrlArgs]):
+    name = "browser_open"
+    description = "test"
+    risk = Risk.ACT
+    Args = UrlArgs
+
+    def __init__(self) -> None:
+        self.opened: list[str] = []
+
+    async def run(self, args: UrlArgs) -> ToolResult:
+        self.opened.append(args.url)
+        return ToolResult(True, f"opened {args.url}", {"url": args.url})
+
+
+class TextArgs(BaseModel):
+    text: str = ""
+
+
+class WindowlessClick(Tool[TextArgs]):
+    name = "browser_click"
+    description = "test"
+    risk = Risk.ACT
+    Args = TextArgs
+
+    def __init__(self, browser: ReopenBrowser) -> None:
+        self.browser, self.calls = browser, 0
+
+    async def run(self, args: TextArgs) -> ToolResult:
+        self.calls += 1
+        if not self.browser.opened:
+            return ToolResult(False, "No browser window open yet.")
+        return ToolResult(True, f"clicked {args.text}")
+
+
+async def test_a_closed_browser_window_is_reopened_on_its_page_and_the_step_retried(tmp_path: Path) -> None:
+    opener = ReopenBrowser()
+    click = WindowlessClick(opener)
+    executor, healer, _ = make(tmp_path, [opener, click])
+    steps = [StepRecord("browser_read", {}, True, "page", {"url": "https://example.com/cart"})]
+    first = await executor.execute("browser_click", {"text": "Next"}, task_id="r1")
+    rec = await healer.recover("r1", "browser_click", {"text": "Next"}, first, steps)
+    assert rec.recovered and opener.opened == ["https://example.com/cart"] and click.calls == 2
+    assert "opened the page again" in rec.note()
+
+
+async def test_no_relaunch_without_a_page_to_go_back_to(tmp_path: Path) -> None:
+    opener = ReopenBrowser()
+    click = WindowlessClick(opener)
+    executor, healer, _ = make(tmp_path, [opener, click])
+    first = await executor.execute("browser_click", {"text": "Next"}, task_id="r2")
+    rec = await healer.recover("r2", "browser_click", {"text": "Next"}, first, [])
+    assert not rec.recovered and opener.opened == []  # it says what failed instead of guessing a page
+
+
+async def test_a_stopped_step_is_never_healed(tmp_path: Path) -> None:
+    tool = FlakyRead("STOPPED: you stopped this task, so I let go of the mouse and keyboard.", fails=5)
+    executor, healer, _ = make(tmp_path, [tool])
+    first = await executor.execute("flaky_read", {}, task_id="s1")
+    rec = await healer.recover("s1", "flaky_read", {}, first, [])
+    assert not rec.recovered and tool.calls == 1

@@ -25,6 +25,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, Field, field_validator
 from pydantic.json_schema import SkipJsonSchema
 
+from delta.system.input_stop import StopRequestedError
 from delta.tools.base import Risk, Tool, ToolResult
 
 T = TypeVar("T")
@@ -51,8 +52,11 @@ def _pg() -> Any:
     """pyautogui, imported on first use and configured for safety."""
     import pyautogui
 
+    from delta.system.input_stop import track_pyautogui
+
     pyautogui.FAILSAFE = True  # mouse in a screen corner aborts any action
     pyautogui.PAUSE = 0.05
+    track_pyautogui(pyautogui)  # Stop lets go of held keys/buttons and refuses the next press
     return pyautogui
 
 
@@ -299,8 +303,11 @@ def _send_unicode(text: str, soft_newlines: bool = False) -> None:
         _anonymous_ = ("u",)
         _fields_ = [("type", wintypes.DWORD), ("u", _U)]
 
+    from delta.system.input_stop import check
+
     send = ctypes.windll.user32.SendInput
     for vk, scan, flags in unicode_inputs(text, soft_newlines):
+        check()  # the user pressed Stop: not one more character
         inp = INPUT(type=1, ki=KEYBDINPUT(vk, scan, flags, 0, 0))
         send(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
         time.sleep(0.01)  # WinUI apps (new Notepad) drop keys that arrive faster than this
@@ -476,6 +483,8 @@ class _DesktopTool[A: BaseModel](Tool[A]):
                 return ToolResult(False, f"STOPPED: {e}, and you kept using the computer. Do not continue "
                                          "desktop actions; tell the user where you got to.")
             except LookupError as e:
+                return ToolResult(False, str(e))
+            except StopRequestedError as e:
                 return ToolResult(False, str(e))
 
 

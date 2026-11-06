@@ -197,7 +197,7 @@ class BrowserConfig(BaseModel):
     # Which installed browser runs Delta's private profile (delta-profile mode). auto = Chrome if
     # installed, else Edge (what Delta always did). Added later: older settings files load unchanged.
     private_engine: Literal["auto", "chrome", "edge"] = "auto"
-    orange_cursor: bool = True  # orange mouse pointer while Delta controls the mouse/keyboard
+    orange_cursor: bool = True  # orange ring + screen border while Delta drives input (Settings > Appearance)
     # Delta profile: after an action on the same page, send the AI only what changed on it.
     snapshot_diffs: bool = True
     full_snapshot_every: int = 8  # a full page listing at least this often (below 1 counts as 1)

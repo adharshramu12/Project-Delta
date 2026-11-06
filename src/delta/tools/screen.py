@@ -27,7 +27,9 @@ def capture_jpeg(max_width: int) -> tuple[str, tuple[int, int], tuple[int, int]]
     import mss
     from PIL import Image
 
-    with mss.mss() as sct:
+    from delta.system.agent_cursor import capture_guard
+
+    with capture_guard(), mss.mss() as sct:  # the in-control ring stays out of what Delta sees
         mon = sct.monitors[1]
         shot = sct.grab(mon)
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
@@ -101,7 +103,9 @@ def capture_screen_image() -> Any:
     import mss
     from PIL import Image
 
-    with mss.mss() as sct:
+    from delta.system.agent_cursor import capture_guard
+
+    with capture_guard(), mss.mss() as sct:  # the in-control ring stays out of what Delta sees
         mon = sct.monitors[1]
         shot = sct.grab(mon)
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")

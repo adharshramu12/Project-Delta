@@ -11,6 +11,7 @@ Actions:
   relocate        swap a stale element number for the element's name, so the retry finds it wherever it moved
   dismiss_popup   close a known harmless banner (cookie notice, "not now" prompt) that blocks the click
   reopen          after the watchdog restarted Delta's own browser, open the page the task was on again
+  relaunch        the browser window the task was using is gone (closed, crashed): open its page again
   backoff         wait before asking a busy AI service again
   captcha_policy  hand over to the existing captcha policy (solve_captcha decides; most go to the user)
   ask_user        stop and ask the user (sign-in walls: Delta never types passwords)
@@ -42,7 +43,7 @@ PLAYBOOKS: dict[Failure, Playbook] = {
                               "Button moved, found it again.",
                               "The page changed under me; read it again.",
                               "The page changed: use the element numbers from the newest listing."),
-    F.ELEMENT_NOT_FOUND: Playbook(F.ELEMENT_NOT_FOUND, ("settle", "resnapshot"), True,
+    F.ELEMENT_NOT_FOUND: Playbook(F.ELEMENT_NOT_FOUND, ("settle", "relaunch", "resnapshot"), True,
                                   "Could not see it at first; waited for the page and found it.",
                                   "Could not find it, even after the page settled.",
                                   "It is not on the screen right now: check the newest listing for its real name, "

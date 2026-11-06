@@ -48,6 +48,15 @@ saying what you found (it worked, or how it failed) is very welcome.
   fakes for these).
 - Delta's private browser on a free remote-control port: covered by the CI end-to-end test on a clean runner,
   not yet on a PC where an older Delta browser is still open from before 0.2.0.
+- The "Delta is in control" ring and border on real hardware: multiple monitors with different scaling, high
+  contrast themes, full-screen games or videos, and Windows 10 before 2004 (where screenshots hide it instead of
+  excluding it). The CI end-to-end test checks the windows, capture exclusion and the stop messages on one
+  runner monitor only.
+- Esc twice on a real keyboard (CI can only post the stop message: keys it injects are ignored on purpose), and
+  Ctrl+Alt+Shift+S when another app already owns that shortcut (Delta then logs it and the other stops still work).
+- Opening apps: reuse of an open window and the Start-menu / App Paths / Store-app paths on a PC with many apps
+  installed, OneDrive-redirected Start menus, and Smart App Control blocking one way of starting an app. CI opens
+  Notepad only.
 
 ## Connected apps (MCP)
 

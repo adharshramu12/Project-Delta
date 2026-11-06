@@ -55,6 +55,11 @@ class SlackChannel:
         if not is_allowed(user, self.allowed):
             log.warning("slack.rejected", user=user)
             return
+        from delta.control import stop_command
+
+        if (reply := stop_command(self.c, event.get("text", ""), by=f"slack:{user}")) is not None:
+            await say(reply)  # "stop" / "stop all": never queued behind the task it should stop
+            return
         res = await self.c.submit(TaskRequest(event.get("text", ""), channel=self.name, user=user))
         for part in chunks(result_text(res)):
             await say(part)

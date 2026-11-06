@@ -212,7 +212,9 @@ def screenshot() -> Path:
     import mss
     from PIL import Image
 
-    with mss.mss() as grab:
+    from delta.system.agent_cursor import capture_guard
+
+    with capture_guard(), mss.mss() as grab:  # the in-control ring stays out of the picture
         everything = grab.monitors[0]
         shot = grab.grab(everything)
     img = Image.frombytes("RGB", shot.size, shot.rgb)

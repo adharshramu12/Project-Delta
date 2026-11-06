@@ -7,6 +7,29 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **"Delta is in control" signal**: while Delta drives the mouse, the keyboard or a browser (your own browser or
+  Delta's private one), an orange ring follows the pointer, a thin orange border marks each screen it works on,
+  and a small label says "Delta is working. Press Esc twice or say stop". Click-through, never focused, always on
+  top, kept out of screenshots and screen recording (Windows 10 2004+; older Windows: hidden for Delta's own
+  screenshots), high contrast and per-monitor DPI aware. It disappears at once when the task ends, fails or is
+  stopped, and by itself within a few seconds if Delta hangs; it dies with Delta's process. Your real mouse
+  pointer is never recoloured any more (an older version's orange pointer is still restored after a crash). Turn
+  it off in Settings, Appearance (same setting as before, `browser.orange_cursor`).
+- **Stop anytime**: a Stop button on every running task in the Tasks view (Chat already had one) and Stop all;
+  `/stop`, `/stop all` and a plain "stop" or "stop all" message in Telegram and Slack (`delta.control.stop_command`,
+  ready for any chat channel); Esc twice within a second while Delta is driving, or Ctrl+Alt+Shift+S, on the PC.
+  A stop refuses any further key or mouse press, releases every key and mouse button Delta still holds, hides the
+  ring, closes nothing of yours, and marks the task stopped. Waiting tasks can be stopped by id too.
+- **Faster app opening**: an app that is already open is brought to the front instead of started again
+  (`new_window=true` starts another copy); installed apps are indexed (Start-menu shortcuts, App Paths, Store apps)
+  and cached in the data folder, rebuilt only when one of those changed, so PowerShell (Get-StartApps) no longer
+  runs on the first "open X" after every start; apps start through ShellExecute (App Paths names, shortcuts,
+  AppUserModelID) instead of a helper process; window detection polls faster at first and takes a single-copy
+  app's window as soon as it comes forward. Store app names in any language survive PowerShell 5.1 (UTF-8).
+- **Self-heal for app and browser steps**: `open_app` tries the next way of starting an app (exe, App Paths,
+  Start-menu shortcut, AppUserModelID; at most 3) when Windows refuses one or nothing runs, never starts an app
+  twice, logs each recovery and says plainly what failed. A browser step that finds its window gone reopens the
+  page the task was on once and retries. Stopped steps are never retried.
 - **Saved logins in your own browser**: `sign_in` now fills a saved login in the browser the task uses, including
   your own default browser (Chrome or Edge, through Windows UI Automation on Delta's one window there), instead of
   moving the task to the private browser. Every existing rule applies the same way (exact origin, no lookalike,

@@ -3,6 +3,8 @@ stopping the running task. One implementation, so every channel behaves the same
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 from delta.config import write_user_settings
@@ -93,14 +95,71 @@ async def replace_key(c: Container, name: str, value: str, by: str) -> tuple[boo
     return True, f"{KEY_INFO[name]}: new key works and is in use now ({mask(value.strip())})."
 
 
+def let_go(c: Container) -> None:
+    """Stop driving input now: refuse any further key or mouse press, hide the in-control ring, and release
+    every key and mouse button Delta still holds down. Nothing the user owns is closed."""
+    from delta.system import input_stop
+
+    input_stop.request()
+    signal = getattr(c, "signal", None)
+    if signal is not None:
+        signal.stop()
+    input_stop.release_held()
+    with contextlib.suppress(RuntimeError):  # an action on the UI thread may press one more key: let go again
+        asyncio.get_running_loop().call_later(0.3, input_stop.release_held)
+
+
 def stop_running(c: Container, by: str) -> bool:
     """Cancel the task Delta is working on now (from any channel). False if nothing is running."""
     task = c.running
     if task is None or task.done():
         return False
     c.audit.record("task.cancel_requested", by=by)
+    let_go(c)
     task.cancel()
     return True
+
+
+def stop_task(c: Container, task_id: str, by: str) -> bool:
+    """Cancel one task by its id, running or still waiting its turn. False if there is no such task."""
+    task = getattr(c, "active", {}).get(task_id)
+    if task is None or task.done():
+        return False
+    c.audit.record("task.cancel_requested", task=task_id, by=by)
+    current = c.running is task
+    if current:
+        let_go(c)
+    task.cancel()
+    return True
+
+
+def stop_all(c: Container, by: str) -> int:
+    """Cancel the running task and every task waiting its turn. Returns how many were stopped."""
+    tasks = {id(t): t for t in [c.running, *getattr(c, "active", {}).values()] if t is not None and not t.done()}
+    if not tasks:
+        return 0
+    c.audit.record("task.cancel_all_requested", by=by, count=len(tasks))
+    let_go(c)
+    for t in tasks.values():
+        t.cancel()
+    return len(tasks)
+
+
+STOP_WORDS = {"stop": "one", "/stop": "one", "stop all": "all", "/stop all": "all", "/stopall": "all",
+              "stop everything": "all"}
+
+
+def stop_command(c: Container, text: str, by: str) -> str | None:
+    """A chat message that means stop ("/stop", "stop", "/stop all", "stop all"), from any channel (Telegram,
+    WhatsApp, Slack): stop and return the reply. Anything else returns None and is handled as usual."""
+    words = " ".join(text.strip().lower().rstrip(".!").split())
+    kind = STOP_WORDS.get(words)
+    if kind is None:
+        return None
+    if kind == "all":
+        n = stop_all(c, by)
+        return f"⏹ Stopped {n} task{'s' if n != 1 else ''}." if n else "Nothing is running right now."
+    return "⏹ Stopped." if stop_running(c, by) else "Nothing is running right now."
 
 
 # --- which browser Delta uses (dashboard, Telegram /browser, chat set_browser) ------------------------------

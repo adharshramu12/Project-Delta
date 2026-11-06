@@ -204,10 +204,8 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
                 if ub is not None and "prefer" in changes["browser"]:
                     ub.use(s.browser.prefer)
             cursor = getattr(getattr(c.registry.get("click_at"), "ctl", None), "cursor", None)
-            if cursor is not None:
-                cursor.enabled = s.browser.orange_cursor
-                if not cursor.enabled:
-                    cursor.restore()
+            if cursor is not None:  # the "Delta is in control" ring and border (the stop hotkeys stay on)
+                cursor.set_enabled(s.browser.orange_cursor)
         if "attachments" in changes:
             for k, v in changes["attachments"].items():
                 setattr(s.attachments, k, v)
