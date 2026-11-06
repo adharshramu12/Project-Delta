@@ -1273,6 +1273,7 @@ class Orchestrator:
         """Self-improvement after a task: memory facts + skills. Never raises."""
         taint, outside = self._after.pop(req.id, (None, None))
         if result.status in ("cancelled", "needs_user") or result.fast:
+            self._planned.discard(req.id)  # nothing to learn: forget the task here too (the set must not grow)
             return
         try:
             if self.learning:

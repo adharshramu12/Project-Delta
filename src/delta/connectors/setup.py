@@ -22,7 +22,8 @@ def manager_settings(settings: Settings) -> ManagerSettings:
     c = settings.connectors
     return ManagerSettings(call_timeout_s=c.call_timeout_s, connect_timeout_s=c.connect_timeout_s,
                            read_retries=c.read_retries, breaker_failures=c.breaker_failures,
-                           breaker_cooldown_s=c.breaker_cooldown_s, sign_in_timeout_s=c.sign_in_timeout_s)
+                           breaker_cooldown_s=c.breaker_cooldown_s, sign_in_timeout_s=c.sign_in_timeout_s,
+                           idle_close_s=c.idle_close_s)
 
 
 def build_manager(settings: Settings, audit: Any = None, catalog: Catalog | None = None, **kw: Any) -> AppManager:

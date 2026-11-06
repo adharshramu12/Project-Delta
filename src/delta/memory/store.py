@@ -24,7 +24,6 @@ from __future__ import annotations
 import builtins
 import math
 import re
-import sqlite3
 import threading
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -34,6 +33,7 @@ from typing import Any
 from delta.memory.keywords import keywords, overlap
 from delta.memory.provenance import AGENT, AGENT_NOTE, LEGACY, ORIGIN_WORDS, TRUSTED, UNTRUSTED, USER_MESSAGE
 from delta.memory.redact import only_secret, redact_secrets
+from delta.system import sqlite_safe
 from delta.system.vault import PREFIX, scrub, seal, seal_or_keep, unseal
 
 SCHEMA = """
@@ -117,7 +117,7 @@ class MemoryStore:
     def __init__(self, path: Path, limits: Limits | None = None) -> None:
         self.path = path
         self.limits = limits or Limits()
-        self._db = sqlite3.connect(path, check_same_thread=False, timeout=5)
+        self._db = sqlite_safe.connect(path, check_same_thread=False, timeout=5)
         self._db.executescript(SCHEMA)
         self._lock = threading.Lock()
         self._migrate()

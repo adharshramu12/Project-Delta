@@ -20,6 +20,7 @@ from delta.bootstrap import Container
 from delta.config import write_user_settings
 from delta.llm.cli_providers import CLIProvider
 from delta.llm.schemas import LLMError
+from delta.system.logging import log
 from delta.system.secrets import get_secret, set_secret
 
 LABELS = {"claude_code": "Claude Code (your Claude plan)", "codex": "Codex (your ChatGPT plan)",
@@ -47,6 +48,13 @@ class ModelsIn(BaseModel):
 
 
 TEST_MESSAGES = [{"role": "user", "content": "Reply with only the word: ready"}]
+
+
+def _says(e: Exception) -> str:
+    """The message Delta itself wrote into one of its own errors (LLMError, GoogleError): plain words for the
+    dashboard, never a traceback or an exception's repr."""
+    first = e.args[0] if e.args else ""
+    return first[:500] if isinstance(first, str) and first else "That did not work. Details are in Delta's log."
 
 
 def find_lms() -> str | None:
@@ -141,7 +149,7 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
         try:
             account = await google.sign_in()
         except google.GoogleError as e:
-            return {"ok": False, "message": str(e)}
+            return {"ok": False, "message": _says(e)}
         c.audit.record("google.connected", account=account)
         return {"ok": True, "message": f"Connected to Google Calendar ({account}). Meetings now use the official API."}
 
@@ -160,8 +168,12 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
             raise HTTPException(400, "this app has no sign-in")
         try:
             await asyncio.to_thread(p.open_login)
-        except (LLMError, OSError) as e:
-            return {"ok": False, "message": str(e)}
+        except LLMError as e:
+            return {"ok": False, "message": _says(e)}
+        except OSError as e:  # the detail (paths, error codes) goes to the log, not to the page
+            log.warning("apps.login_failed", app=name, error=str(e))
+            return {"ok": False, "message": f"Could not open the {p.label} sign-in window. Check that {p.label} is "
+                                            "installed, then try again."}
         c.audit.record("apps.login_opened", app=name)
         return {"ok": True, "message": f"A {p.label} sign-in window opened. Finish signing in there "
                                        "(your browser opens), then press Check."}
@@ -206,6 +218,6 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
         try:
             r = await p.complete("chat", TEST_MESSAGES, None, False)
         except LLMError as e:
-            return {"ok": False, "message": str(e)}
+            return {"ok": False, "message": _says(e)}
         c.router.breakers[name].record_success()
         return {"ok": True, "message": f"Answered: {r.content.strip()[:80]!r} (model {r.model})"}

@@ -15,6 +15,7 @@ the file's real last line, never to a hash cached in this process."""
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import json
@@ -142,7 +143,10 @@ class AuditLog:
             os.close(fd)
 
     def _last(self) -> dict[str, Any]:
-        """The file's last record, read from the end so it stays cheap as the log grows."""
+        """The file's last record, read from the end so it stays cheap as the log grows.
+
+        A last line that is not a record (a write cut off by a power cut or a full disk) is skipped: the new record
+        chains to the last real one. Nothing is rewritten, so `verify` still reports the broken line."""
         if not self.path.exists():
             return {}
         with self.path.open("rb") as f:
@@ -153,9 +157,25 @@ class AuditLog:
                 start = max(0, end - chunk)
                 f.seek(start)
                 lines = [ln for ln in f.read(end - start).splitlines() if ln.strip()]
-                if len(lines) > 1 or start == 0:
-                    return dict(json.loads(lines[-1])) if lines else {}
+                whole = lines if start == 0 else lines[1:]  # the first line of a chunk may be cut
+                for line in reversed(whole):
+                    with contextlib.suppress(ValueError):
+                        rec = json.loads(line)
+                        if isinstance(rec, dict):
+                            return rec
+                if start == 0:
+                    return {}
                 chunk *= 4
+
+    def _ends_cut(self) -> bool:
+        """True when the file does not end with a newline (a write was cut off): the next record starts a new line."""
+        with contextlib.suppress(OSError), self.path.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            if f.tell() == 0:
+                return False
+            f.seek(-1, os.SEEK_END)
+            return f.read(1) != b"\n"
+        return False
 
     def _last_hash(self) -> str:
         return str(self._last().get("hash", GENESIS))
@@ -169,14 +189,21 @@ class AuditLog:
             key = self.key
             if key is not None:
                 rec["mac"] = _mac(key.key, str(last.get("mac", "")), rec["hash"])
+            cut = self._ends_cut()
             with self.path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(rec, default=str) + "\n")
+                f.write(("\n" if cut else "") + json.dumps(rec, default=str) + "\n")
 
     def tail(self, n: int = 20) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
-        lines = self.path.read_text(encoding="utf-8").splitlines()
-        return [json.loads(line) for line in lines[-n:] if line.strip()]
+        lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
+        out: list[dict[str, Any]] = []
+        for line in lines[-n:]:
+            with contextlib.suppress(ValueError):
+                rec = json.loads(line) if line.strip() else None
+                if isinstance(rec, dict):
+                    out.append(rec)
+        return out
 
     def verify(self) -> bool:
         return bool(self.verify_report())
@@ -187,7 +214,7 @@ class AuditLog:
         key = self.key
         if not self.path.exists():
             return VerifyReport(True, 0, 0)
-        with self.path.open(encoding="utf-8") as f:
+        with self.path.open(encoding="utf-8", errors="replace") as f:  # bad bytes: "not a valid record"
             for n, line in enumerate(f, 1):
                 if not line.strip():
                     continue

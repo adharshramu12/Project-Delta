@@ -124,13 +124,43 @@ Keys are stored in **Windows Credential Manager**, never in files.
 
 ## Install (Windows 10/11)
 
-```powershell
-irm https://raw.githubusercontent.com/adharshramu12/Project-Delta/main/scripts/install.ps1 | iex
-```
+**What you need**
 
-Or download the repo and **double-click `Install Delta.cmd`**. It installs the official signed
-Python if needed, adds a **Delta** icon to your Desktop and Start menu, and opens the setup wizard:
-pick your AI, set permissions, and pair your Telegram in 3 steps.
+| | Minimum | Better |
+|---|---|---|
+| Windows | Windows 10 (64-bit) or 11 | Windows 11 |
+| Memory (RAM) | 4 GB with a cloud AI (Groq, NIM, Codex, Claude Code) | 8 GB or more; 16 GB to run local models (LM Studio, Ollama) |
+| Processor | any 64-bit dual-core | quad-core |
+| Graphics card | not needed | only for fast local models |
+| Free disk space | about 2 GB for the install (Python, Delta's packages and their download cache) | plus room for local models if you use them (2 to 8 GB each) |
+| Internet | to install, and for cloud AIs, web search and connected apps | |
+| Browser | Microsoft Edge (every Windows PC has it) or Chrome | |
+| Administrator rights | not needed: everything installs for your Windows account only | |
+
+**Steps**
+
+1. **Download.** Either open PowerShell (Start menu, type PowerShell) and paste:
+
+   ```powershell
+   irm https://raw.githubusercontent.com/adharshramu12/Project-Delta/main/scripts/install.ps1 | iex
+   ```
+
+   or, on GitHub, press **Code > Download ZIP**, then right-click the zip and choose **Extract All...**.
+2. **Install.** In the extracted folder, double-click **`Install Delta.cmd`**. If Windows shows "Windows protected
+   your PC" or a security warning for a downloaded file, choose **More info > Run anyway** (or **Run**). The installer
+   reuses or installs the official, signed Python 3.12 (64-bit), copies Delta to
+   `%LOCALAPPDATA%\Programs\Delta`, installs its packages (a few minutes), and adds a **Delta** icon to your
+   Desktop and Start menu. A log is kept at `%TEMP%\delta-install.log`.
+3. **Set up.** Delta opens its setup wizard: pick your AI, set permissions, and pair your Telegram in 3 steps.
+   With no AI chosen yet, Delta still opens and says what to add.
+
+**Node.js and uv are not needed** for Delta itself or for most connected apps (Notion, GitHub, Slack, Gmail and the
+other remote apps sign in through your browser). Only an app whose server runs on your PC needs one: Node.js
+(`npx`) or uv (`uvx`). Delta tells you which, and the exact install command, when you connect such an app.
+
+**Offline after install.** Delta, its dashboard, your files, memory, schedules and PC control work without
+internet when you use a local model (LM Studio or Ollama). Cloud AIs, web search, Telegram and connected apps need
+the internet; Delta says so plainly when it cannot reach them.
 
 - **Close (X)** hides the window; Delta keeps listening for your Telegram messages.
 - **Double-click the icon** to open it again.
@@ -148,6 +178,25 @@ its own window. `scripts\uninstall.ps1` removes Delta (your chats and memory sta
 - **Settings:** Delta reads its shipped `config\` folder plus your own `settings.yaml` in
   `%LOCALAPPDATA%\Delta`. To use another config folder, set `DELTA_CONFIG_DIR`. (Before 0.2.0, a
   `config\delta.yaml` in whatever folder you started `delta` from was picked up silently; it no longer is.)
+
+### Troubleshooting
+
+| What you see | What to do |
+|---|---|
+| Double-clicking `Install Delta.cmd` says "Delta's files are not next to this file" | You opened it inside the zip. Right-click the zip, **Extract All...**, then double-click it in the extracted folder. |
+| "Could not create SSL/TLS secure channel" when pasting the `irm` line | Older Windows PowerShell. Run `[Net.ServicePointManager]::SecurityProtocol = 3072` first, then the `irm` line again, or use the zip. |
+| "running scripts is disabled on this system" | Use `Install Delta.cmd` (it allows the installer for that run only). If your company blocks it by policy, ask IT. |
+| "there is only ... GB free" | Free about 2 GB on the drive with your user folder (Settings > System > Storage), then run the installer again. |
+| "uv ... could not be downloaded" or "installing Delta's packages failed" | Check the internet. On a company network with a proxy: `setx HTTPS_PROXY http://your-proxy:port`, open a new window and run the installer again. Antivirus that quarantines files in `%LOCALAPPDATA%\Programs\Delta` can also cause this: allow the folder and run it again. |
+| "Python 3.12 (64-bit, x64) did not install" | Install Python 3.12 (Windows installer, 64-bit) from python.org, then run the installer again. Python 3.13 or the Microsoft Store Python is not used; the installer adds 3.12 next to it. |
+| Smart App Control blocks the Delta icon | Run the installer again: it rebuilds Delta on the official signed Python. |
+| Delta shows "could not be read (the file is damaged ...)" at start | A power cut or full disk damaged one of Delta's files. Delta kept the damaged copy (`*.damaged-<date>`) in `%LOCALAPPDATA%\Delta` and started a new one; nothing else changed. |
+| "Delta could not read its settings file ..." | Fix `%LOCALAPPDATA%\Delta\settings.yaml`, or rename it to go back to the default settings. Chats, memories and keys are kept. |
+| "Delta's save folder ... is not available" | The folder is on a drive that is not connected. Plug it in, or pick another folder in Settings. |
+| The icon does nothing, or "Delta is taking too long to start" | Open `%LOCALAPPDATA%\Delta\logs\service.log` (last lines), or run `delta doctor` in a terminal from `%LOCALAPPDATA%\Programs\Delta\.venv\Scripts`. |
+| "No AI model is available" | Add a free Groq key in Setup, sign in to Codex or Claude Code, or start LM Studio or Ollama. |
+| A connected app says Node.js or uv is not installed | Run the command it shows (`winget install OpenJS.NodeJS.LTS` or `winget install astral-sh.uv`), then connect again. |
+| Uninstall says it "could not remove" the folder | Restart the PC and run `scripts\uninstall.ps1` again. |
 
 ## Connected apps (Notion, GitHub, Slack, Gmail...)
 

@@ -26,6 +26,9 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is 10x slower with the progress bar
+# Windows PowerShell 5.1 can default to TLS 1.0, which GitHub and python.org refuse ("Could not create SSL/TLS
+# secure channel"). Allow TLS 1.2 as well (3072); nothing older is added.
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch { }
 $log = Join-Path $env:TEMP "delta-install.log"
 Start-Transcript -Path $log -Force | Out-Null
 
@@ -37,6 +40,18 @@ function Fail($text) {
     Stop-Transcript | Out-Null
     if ($Host.Name -eq "ConsoleHost") { Read-Host "Press Enter to close" }
     exit 1
+}
+
+function Test-FreeSpace($path, [double]$needGB) {
+    # Python, Delta's packages and uv's download cache take about 1.5 GB on a first install.
+    try {
+        $drive = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($path))
+        $free = (New-Object System.IO.DriveInfo($drive)).AvailableFreeSpace / 1GB
+    } catch { return }   # a drive Windows cannot measure (network share): carry on
+    if ($free -lt $needGB) {
+        Fail (("there is only {0:N1} GB free on {1}, and Delta needs about {2} GB. Free some space (Settings > " +
+               "System > Storage, or empty the Recycle Bin) and run this again.") -f $free, $drive, $needGB)
+    }
 }
 
 function Test-Arm64 {
@@ -96,6 +111,8 @@ try {
     foreach ($id in ($WaitForPid -split ",")) { if ($id.Trim() -match "^\d+$") { $waitIds += [int]$id.Trim() } }
     foreach ($id in $waitIds) { Wait-Process -Id $id -Timeout 60 -ErrorAction SilentlyContinue }
     $onArm = Test-Arm64
+    $fresh = -not (Test-Path (Join-Path $InstallDir ".venv\Scripts\python.exe"))
+    Test-FreeSpace $env:LOCALAPPDATA $(if ($fresh) { 2 } else { 0.5 })
 
     # 1. Signed Python 3.12 -----------------------------------------------------------------------
     Step 1 "Python 3.12 (official, signed)"
@@ -173,13 +190,24 @@ try {
     if ((Test-Path $venvPy) -and -not (Test-Python312x64 $venvPy)) {
         Remove-Item (Join-Path $InstallDir ".venv") -Recurse -Force   # built from another Python (e.g. ARM64): rebuild
     }
-    if (-not (Test-Path $venvPy)) { & $py -m venv (Join-Path $InstallDir ".venv") }
+    if (-not (Test-Path $venvPy)) {
+        & $py -m venv (Join-Path $InstallDir ".venv")
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $venvPy)) { Fail "Python could not create Delta's environment in $InstallDir (see the log)" }
+    }
     & $venvPy -m pip install --quiet --disable-pip-version-check --upgrade uv
+    if ($LASTEXITCODE -ne 0) {
+        Fail ("uv (the package installer Delta uses) could not be downloaded. Check the internet connection. Behind a " +
+              "company proxy, set HTTPS_PROXY (for example: setx HTTPS_PROXY http://proxy.example:8080), open a new " +
+              "window and run this again.")
+    }
     Push-Location $InstallDir
     try {
         $env:UV_PROJECT_ENVIRONMENT = Join-Path $InstallDir ".venv"
         & $venvPy -m uv sync --frozen --extra all --no-dev --python $venvPy
-        if ($LASTEXITCODE -ne 0) { Fail "installing Delta's packages failed (see the log)" }
+        if ($LASTEXITCODE -ne 0) {
+            Fail ("installing Delta's packages failed (see the log). Usual causes: no internet, a company proxy " +
+                  "(set HTTPS_PROXY and run this again), or antivirus blocking files in $InstallDir.")
+        }
     } finally { Pop-Location }
     Done "packages installed"
 

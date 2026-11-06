@@ -53,6 +53,7 @@ class Settings:
     breaker_cooldown_s: float = 60.0
     sign_in_timeout_s: float = 300.0
     backoff_s: float = 0.5
+    idle_close_s: float = 600.0  # a local server (a program on this PC) unused this long is stopped; 0 = never
 
 
 @dataclass
@@ -116,6 +117,8 @@ class AppManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._listeners: list[Callable[[], Any]] = []
         self._closing: set[asyncio.Task[None]] = set()
+        self._busy: dict[str, int] = {}  # calls in flight per app: an app is never stopped in the middle of one
+        self._idle: dict[str, asyncio.TimerHandle] = {}  # one timer per running local server, no polling loop
 
     # --- bookkeeping -------------------------------------------------------------------------------------------
     def on_change(self, fn: Callable[[], Any]) -> None:
@@ -483,6 +486,7 @@ class AppManager:
                 await self._refresh(spec, TokenSet.from_dict(secret))  # an access token the server ended early
                 client = await open_remote(spec.url, spec.sse_url, headers, timeout_s)
         self.sessions[spec.id] = client
+        self._arm_idle(spec.id)  # a local server opened for a check or a sign-in is not kept running for ever
         return client
 
     async def _session(self, spec: AppSpec) -> McpClient:
@@ -494,7 +498,30 @@ class AppManager:
                 raise AppAuthError(f"{spec.name} is not connected. Connect it in the dashboard (Apps) first.")
             return await self._open(spec, conn)
 
+    def _arm_idle(self, app_id: str) -> None:
+        """(Re)start the idle timer of a local server: unused for idle_close_s, it is stopped to free its memory
+        (npx/uvx servers are a Node or Python process each). Remote apps keep only a small HTTP client: left open."""
+        if (old := self._idle.pop(app_id, None)) is not None:
+            old.cancel()
+        client = self.sessions.get(app_id)
+        if self.cfg.idle_close_s <= 0 or client is None or getattr(client.transport, "name", "") != "stdio":
+            return
+        loop = asyncio.get_running_loop()
+        self._idle[app_id] = loop.call_later(self.cfg.idle_close_s, self._idle_expired, app_id, client)
+
+    def _idle_expired(self, app_id: str, client: McpClient) -> None:
+        self._idle.pop(app_id, None)
+        if self._busy.get(app_id) or self.sessions.get(app_id) is not client:
+            return  # in use again, or already replaced: its own timer decides
+        self.sessions.pop(app_id, None)
+        log.info("connectors.idle_stopped", app=app_id, idle_s=self.cfg.idle_close_s)
+        task = asyncio.get_running_loop().create_task(client.close())
+        self._closing.add(task)
+        task.add_done_callback(self._closing.discard)
+
     async def _drop(self, app_id: str) -> None:
+        if (timer := self._idle.pop(app_id, None)) is not None:
+            timer.cancel()
         if (client := self.sessions.pop(app_id, None)) is not None:
             with contextlib.suppress(Exception):
                 await client.close()
@@ -548,6 +575,7 @@ class AppManager:
         last = ""
         while True:
             n += 1
+            self._busy[app_id] = self._busy.get(app_id, 0) + 1
             try:
                 client = await self._session(spec)
                 res = await asyncio.wait_for(client.call_tool(tool, arguments, self.cfg.call_timeout_s),
@@ -568,6 +596,9 @@ class AppManager:
                 return CallOutcome(False, reconnect_message(spec) + f" ({e})", {"app": app_id, "reconnect": True})
             else:
                 err = None
+            finally:
+                self._busy[app_id] -= 1
+                self._arm_idle(app_id)
             if err is None:
                 text, extra = _result_text(res)
                 ok = not res.get("isError")
