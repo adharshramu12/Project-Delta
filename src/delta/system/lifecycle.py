@@ -20,6 +20,25 @@ class AlreadyRunningError(RuntimeError):
     pass
 
 
+def is_delta_process(pid: int) -> bool:
+    """A live process that is Delta (python or delta.exe running delta). Windows reuses process ids quickly, so after
+    a crash or a power cut the delta.pid left behind can name an unrelated program, which must not block start-up."""
+    try:
+        proc = psutil.Process(pid)
+        name = proc.name().lower()
+    except psutil.Error:
+        return False
+    if "delta" in name:
+        return True
+    if "python" not in name:
+        return False
+    try:
+        args = " ".join(proc.cmdline()[1:]).lower()  # not the interpreter's own path: Delta's venv holds "delta"
+    except psutil.Error:
+        return True  # cannot tell: treat it as Delta (never two copies at once)
+    return "delta" in args
+
+
 class Lifecycle:
     def __init__(self, data_dir: Path) -> None:
         self.pid_file = data_dir / "delta.pid"
@@ -30,7 +49,7 @@ class Lifecycle:
         if self.pid_file.exists():
             with contextlib.suppress(ValueError, OSError):
                 pid = int(self.pid_file.read_text())
-                if pid != os.getpid() and psutil.pid_exists(pid):
+                if pid != os.getpid() and psutil.pid_exists(pid) and is_delta_process(pid):
                     raise AlreadyRunningError(f"Delta is already running (pid {pid}).")
         self.pid_file.write_text(str(os.getpid()))
 

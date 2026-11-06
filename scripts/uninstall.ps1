@@ -17,11 +17,28 @@ if (Test-Path $tokenFile) {
     } catch {}
 }
 
+# Anything still running from Delta's folders (the service on another port, a hung copy, the dashboard window):
+# a running program keeps its files locked, so the folder could not be removed.
+$venv = (Join-Path $InstallDir ".venv").TrimEnd("\") + "\"
+$window = (Join-Path $data "app-window").ToLowerInvariant()
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($venv, [System.StringComparison]::OrdinalIgnoreCase)) -or
+    ($_.Name -eq "msedge.exe" -and $_.CommandLine -and $_.CommandLine.ToLowerInvariant().Contains($window))
+} | ForEach-Object { & taskkill.exe /PID $_.ProcessId /T /F 2>$null | Out-Null }
+Start-Sleep -Seconds 1
+
 foreach ($lnk in @((Join-Path ([Environment]::GetFolderPath("Desktop")) "Delta.lnk"),
                    (Join-Path ([Environment]::GetFolderPath("Programs")) "Delta.lnk"))) {
     if (Test-Path $lnk) { Remove-Item $lnk -Force; Write-Host "removed $lnk" }
 }
-if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force; Write-Host "removed $InstallDir" }
+if (Test-Path $InstallDir) {
+    try { Remove-Item $InstallDir -Recurse -Force -ErrorAction Stop; Write-Host "removed $InstallDir" }
+    catch {
+        Write-Host "Could not remove $InstallDir completely: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "Restart the PC and run this again, or delete that folder by hand."
+        exit 1
+    }
+}
 
 if ($RemoveData) {
     if (Test-Path $data) { Remove-Item $data -Recurse -Force; Write-Host "removed your Delta data ($data)" }

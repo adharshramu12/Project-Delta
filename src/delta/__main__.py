@@ -24,10 +24,8 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 
-import httpx
-
 from delta import __version__
-from delta.config import load_settings
+from delta.config import SettingsError, load_settings
 from delta.system.logging import setup_logging
 from delta.system.secrets import KNOWN_SECRETS, delete_secret, get_secret, mask, set_secret
 
@@ -118,6 +116,8 @@ def _update(stop: bool = False, root: Path | None = None) -> int:
 
 
 def _doctor() -> int:
+    import httpx  # only here: every other command (and the Desktop icon) starts without it
+
     from delta.system.governor import SystemSensor
 
     s = load_settings()
@@ -244,8 +244,22 @@ def main() -> None:
     add_eval_parser(sub)
     add_memory_parser(sub)
     add_learn_parser(sub)
-    args = parser.parse_args()
+    from delta.connectors.cli import add_parser as add_apps_parser
 
+    add_apps_parser(sub)
+    args = parser.parse_args()
+    try:
+        _dispatch(args, no_console)
+    except SettingsError as e:  # a settings file Delta cannot use: say which and how to fix it, no traceback
+        if no_console or args.cmd == "app":
+            from delta.daemon import alert
+
+            alert(str(e))
+        print(e, file=sys.stderr)
+        sys.exit(2)
+
+
+def _dispatch(args: argparse.Namespace, no_console: bool) -> None:
     if args.cmd == "doctor":
         sys.exit(_doctor())
     if args.cmd == "update":
@@ -272,6 +286,10 @@ def main() -> None:
         from delta.learning.cli import run_cli as run_learn_cli
 
         sys.exit(run_learn_cli(load_settings(), args))
+    if args.cmd == "apps":
+        from delta.connectors.cli import run_cli as run_apps_cli
+
+        sys.exit(run_apps_cli(load_settings(), args))
     if args.cmd == "eval":
         from delta.evals.cli import run_cli as run_eval_cli
 
@@ -292,6 +310,8 @@ def main() -> None:
             from delta.daemon import launch_app
 
             sys.exit(launch_app())
+        except SettingsError:
+            raise  # shown as it is, with how to fix it (main)
         except Exception:
             import traceback
 
@@ -307,11 +327,17 @@ def main() -> None:
             sys.exit(1)
     if args.cmd == "run":
         from delta.daemon import alert, run
+        from delta.system.lifecycle import AlreadyRunningError
 
         try:
             sys.exit(asyncio.run(run(open_ui=args.open)))
         except KeyboardInterrupt:
             sys.exit(0)
+        except AlreadyRunningError as e:  # a plain line, not a traceback (the launcher looks for this text)
+            print(e, flush=True)
+            sys.exit(1)
+        except SettingsError:
+            raise
         except Exception as e:
             if no_console:  # started from the shortcut (pythonw): no console to print to
                 alert(f"Delta could not start:\n\n{e}\n\nRun 'delta doctor' in a terminal for details.")

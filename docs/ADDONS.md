@@ -77,6 +77,11 @@ addons:
 | `on_shutdown(hook)` | close connections when Delta stops |
 
 ## MCP: connect existing servers without code
+**Most people want [Connected apps](APPS.md)** instead: Notion, GitHub, Slack, Gmail and others connect from the
+dashboard's Apps page, `delta apps connect <app>` or Telegram `/connect`, with sign-in, DPAPI-sealed tokens, per-tool
+switches and lazy tool loading, and no optional extra to install. The add-on below is the older, config-file way;
+it keeps working unchanged (it needs the optional `mcp` extra).
+
 Thousands of MCP servers already exist. Enable the built-in `mcp` add-on:
 
 ```yaml
@@ -89,5 +94,7 @@ addons:
         remote:  { url: "https://example.com/mcp", token_secret: remote_token, risk: write }
 ```
 
-MCP tool risk comes from per-tool overrides, then the server's `readOnlyHint`/`destructiveHint`
-annotations, then the server's `risk`. Unknown tools default to `write`, so they ask first.
+MCP tool risk comes from, in order: your per-tool overrides (`tools:`), the server's `destructiveHint` (it can
+only make a tool more careful), the server's `risk`, the server's `readOnlyHint` only when you set
+`trust_read_only_hints: true`, and otherwise `external` (asks first at every level except Autopilot). What an
+MCP tool returns is outside content: it marks the task as tainted, like a web page.

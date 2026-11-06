@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from delta.engine.states import FINAL, RUNNING, IllegalTransitionError, TaskState, can_transition
+from delta.system import sqlite_safe
 
 # Each entry upgrades the file by one version. Never edit a shipped entry; add a new one.
 MIGRATIONS: list[str] = [
@@ -90,10 +91,10 @@ class TaskStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self.max_events_per_task = max(10, max_events_per_task)
-        new = not path.exists()
-        self._db = sqlite3.connect(path, check_same_thread=False, timeout=5)
+        self._db = sqlite_safe.connect(path, check_same_thread=False, timeout=5)  # a damaged file is set aside
         self._db.row_factory = sqlite3.Row
         self._lock = threading.Lock()
+        new = self._db.execute("PRAGMA page_count").fetchone()[0] == 0  # no tables yet (also a set-aside file)
         with self._lock:
             if new:  # set before any table exists: lets prune() give space back without a full VACUUM
                 self._db.execute("PRAGMA auto_vacuum=INCREMENTAL")

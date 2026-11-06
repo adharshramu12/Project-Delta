@@ -119,7 +119,9 @@ def _clean_prompt(text: str) -> str:
     t = re.sub(r"\s+", " ", text).strip(" ,;:-–.")
     # leftovers of the schedule words, at either end only (never inside the task itself)
     lead = re.compile(r"^(?:and|then|to|at|on|every|each|from|starting|,|-|:)\b[\s,:]*", re.I)
-    trail = re.compile(r"[\s,]*\b(?:at|on|every|each|starting|from|and|,)$", re.I)
+    # The word only: the spaces and commas before it go with the strip() that follows. A leading [\s,]* here made
+    # every search quadratic on long runs of spaces or commas (CodeQL polynomial-redos).
+    trail = re.compile(r"\b(?:at|on|every|each|starting|from|and)$", re.I)
     for _ in range(4):
         t = lead.sub("", t).strip(" ,;:-–.")
         t = trail.sub("", t).strip(" ,;:-–.")

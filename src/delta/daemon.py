@@ -33,6 +33,7 @@ LEAN_WINDOW_FLAGS = ["--no-first-run", "--no-default-browser-check", "--disable-
                      "--disable-gpu", "--disable-extensions", "--disable-sync", "--disable-component-update",
                      "--renderer-process-limit=2", "--disable-features=Translate,msEdgeStartupBoost"]
 REAP_EVERY_S = 60  # how often the service looks for a closed window's leftover processes
+ALREADY_RUNNING = "Delta is already running"  # what `delta run` prints when another copy won the race
 
 
 def window_processes(data_dir: Path) -> list[object]:
@@ -500,7 +501,7 @@ def _wait_then_open(settings: Settings, token: str, proc: subprocess.Popen[bytes
             with open(console, "rb") as f:
                 f.seek(start)
                 ours = f.read().decode("utf-8", "replace")
-            if "AlreadyRunningError" not in ours:
+            if "AlreadyRunningError" not in ours and ALREADY_RUNNING not in ours:
                 tail = ours.strip().splitlines()[-8:]
                 alert("Delta could not start.\n\n" + "\n".join(tail) + f"\n\nFull log: {console}")
                 return False

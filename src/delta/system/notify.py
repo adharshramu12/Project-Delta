@@ -7,6 +7,7 @@ run of remote commands shows one toast, not twenty."""
 from __future__ import annotations
 
 import contextlib
+import os
 import subprocess
 import threading
 import time
@@ -17,18 +18,23 @@ _last: dict[str, float] = {}
 MIN_GAP_S = 8.0  # same title within this gap: skipped (the audit log still has every action)
 
 
-def _toast_script(title: str, text: str) -> str:
-    xml = (f"<toast><visual><binding template='ToastGeneric'><text>{escape(title)}</text>"
-           f"<text>{escape(text)}</text></binding></visual></toast>")
-    return (
-        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
-        "ContentType=WindowsRuntime] > $null;"
-        "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] > $null;"
-        "$x = New-Object Windows.Data.Xml.Dom.XmlDocument;"
-        f"$x.LoadXml(\"{xml.replace(chr(34), '&quot;')}\");"
-        "$t = [Windows.UI.Notifications.ToastNotification]::new($x);"
-        f"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{APP_ID}').Show($t)"
-    )
+def _toast_xml(title: str, text: str) -> str:
+    return (f"<toast><visual><binding template='ToastGeneric'><text>{escape(title)}</text>"
+            f"<text>{escape(text)}</text></binding></visual></toast>")
+
+
+# The words shown come from outside (a Telegram message, for one), so they never become part of the PowerShell
+# command: the script is fixed and reads the toast's XML from an environment variable. Inside a PowerShell
+# "string", text like $(...) would otherwise run as a command.
+TOAST_SCRIPT = (
+    "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
+    "ContentType=WindowsRuntime] > $null;"
+    "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] > $null;"
+    "$x = New-Object Windows.Data.Xml.Dom.XmlDocument;"
+    "$x.LoadXml($env:DELTA_TOAST_XML);"
+    "$t = [Windows.UI.Notifications.ToastNotification]::new($x);"
+    f"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{APP_ID}').Show($t)"
+)
 
 
 def notify(title: str, text: str) -> None:
@@ -39,8 +45,9 @@ def notify(title: str, text: str) -> None:
 
     def show() -> None:
         with contextlib.suppress(OSError, subprocess.SubprocessError):  # no toast beats a broken action
-            subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _toast_script(title, text)],
-                           capture_output=True, timeout=15,
+            env = {**os.environ, "DELTA_TOAST_XML": _toast_xml(title, text)}
+            subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", TOAST_SCRIPT],
+                           capture_output=True, timeout=15, env=env,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
     threading.Thread(target=show, name="delta-toast", daemon=True).start()

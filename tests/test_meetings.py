@@ -34,7 +34,7 @@ def test_calendar_event_is_prefilled_with_time_guests_and_link():
 
 def test_invite_draft_carries_the_link():
     q = parse_qs(urlparse(gmail_draft_url(["a@x.com"], "Meeting", "Join: https://meet.google.com/x")).query)
-    assert q["to"] == ["a@x.com"] and "meet.google.com" in q["body"][0]
+    assert q["to"] == ["a@x.com"] and q["body"] == ["Join: https://meet.google.com/x"]
 
 
 def test_scheduling_emails_guests_so_it_always_asks_first():
