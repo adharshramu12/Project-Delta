@@ -4,6 +4,8 @@
 #
 #   delta_command.ps1 -Action Install   [-InstallDir <folder>] [-NoPath]
 #   delta_command.ps1 -Action Uninstall [-InstallDir <folder>]
+#   (by hand: powershell -NoProfile -ExecutionPolicy Bypass -File <this file> -Action Install)
+#   install.ps1, create_shortcut.ps1 and uninstall.ps1 run this file's text, not the file (execution policy).
 #   . .\delta_command.ps1               (no -Action: only defines the functions below; the tests use this)
 #
 # Why: Python is installed with PrependPath=0 and Delta lives in its own .venv, so without this a normal

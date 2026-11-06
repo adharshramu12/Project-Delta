@@ -1,6 +1,7 @@
 # Opens Delta's own browser profile so you can sign in to the sites you want Delta to use
 # (Gmail, GitHub, ...). Close the window when you are done. Your normal browser profile is untouched.
 # Uses Google Chrome if installed, otherwise Microsoft Edge (same order as Delta itself).
+# Run it with: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup_chrome_profile.ps1
 $browsers = @(
     @{ name = "chrome"; paths = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
                                   "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",

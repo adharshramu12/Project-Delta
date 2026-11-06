@@ -89,10 +89,11 @@ def test_installer_adds_the_command_respects_trial_installs_and_says_open_a_new_
     ps = _read("install.ps1")
     params = ps.split("param(", 1)[1].split("\n)", 1)[0]
     assert "[switch]$NoPath" in params and "[switch]$NoShortcuts" in params
-    assert '"scripts\\delta_command.ps1") -Action Install' in ps
-    assert "-NoPath:([bool]($NoPath -or $NoShortcuts))" in ps
+    assert 'Invoke-DeltaScript (Join-Path $scripts "delta_command.ps1") @{' in ps and 'Action = "Install"' in ps
+    assert "NoPath = ($noPath -or $noShortcuts)" in ps
+    assert "Install-DeltaShortcuts $InstallDir ([bool]$NoPath) ([bool]$NoShortcuts)" in ps
     assert '"Open a new PowerShell window to use the delta command."' in ps
-    assert "create_shortcut.ps1\") -NoCommand" in ps
+    assert 'Invoke-DeltaScript (Join-Path $scripts "create_shortcut.ps1") @{ NoCommand = $true; Root = $dir }' in ps
     robocopy = next(line for line in ps.splitlines() if line.strip().startswith("robocopy"))
     assert re.search(r"/XD .* bin ", robocopy)  # an update must not delete the delta command it was started from
 

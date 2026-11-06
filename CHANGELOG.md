@@ -73,6 +73,21 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   check. The notification text is now passed to Windows as data only.
 
 ### Fixed
+- On a PC with the default execution policy (Restricted, so no `.ps1` file runs), `irm .../install.ps1 | iex`
+  installed and checked Delta, then failed at step 5 with "running scripts is disabled on this system" for
+  `delta_command.ps1` and `create_shortcut.ps1`, and said "Delta could not be installed". The installer runs as text,
+  which the policy does not cover, but it started those two scripts as files. Now no script starts another of
+  Delta's scripts as a file: `install.ps1`, `create_shortcut.ps1` and `uninstall.ps1` read the other script's text
+  and run it in the same PowerShell, which also keeps them clear of Smart App Control's check of downloaded script
+  files. No execution policy is changed, for the PC or the account. A delta command or icons that still fail at
+  step 5 are a warning ("Some optional parts were not set up (Delta itself works)") with the exact command that
+  adds them, not a failed install. The installer removes the "downloaded from the internet" mark from the files it
+  installs (not the environment), and the messages that name a script (uninstall, Delta's browser profile) give a
+  command with `-ExecutionPolicy Bypass -File`, which applies to that one run only. The Desktop icon (`pythonw.exe`),
+  **Update Delta** (`python.exe -m delta update --stop`), `delta update` and `Install Delta.cmd` already worked under
+  that policy and are now tested under it. The README leads with the `irm` line and says that Smart App Control may
+  block `Install Delta.cmd` from a downloaded zip. Real Smart App Control behaviour is not verified yet (see
+  [docs/NOT_VERIFIED.md](docs/NOT_VERIFIED.md)).
 - In a normal PowerShell, `delta update` (and every other `delta` command the README shows) said "delta is not
   recognized": Delta lives in its own environment and Python is installed without touching the Path. The installer
   now adds a `delta` command (`%LOCALAPPDATA%\Programs\Delta\bin\delta.cmd`) and puts that folder on your own

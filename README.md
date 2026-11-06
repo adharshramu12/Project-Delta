@@ -159,18 +159,22 @@ Keys are stored in **Windows Credential Manager**, never in files.
 
 **Steps**
 
-1. **Download.** Either open PowerShell (Start menu, type PowerShell) and paste:
+1. **Install.** Open PowerShell (Start menu, type PowerShell) and paste:
 
    ```powershell
    irm https://raw.githubusercontent.com/adharshramu12/Project-Delta/main/scripts/install.ps1 | iex
    ```
 
-   or, on GitHub, press **Code > Download ZIP**, then right-click the zip and choose **Extract All...**.
-2. **Install.** In the extracted folder, double-click **`Install Delta.cmd`**. If Windows shows "Windows protected
-   your PC" or a security warning for a downloaded file, choose **More info > Run anyway** (or **Run**). The installer
-   reuses or installs the official, signed Python 3.12 (64-bit), copies Delta to
-   `%LOCALAPPDATA%\Programs\Delta`, installs its packages (a few minutes), adds a **Delta** icon to your
-   Desktop and Start menu, and adds the `delta` command for terminals. A log is kept at `%TEMP%\delta-install.log`.
+   It does not need scripts to be allowed (a new Windows PC does not allow them) and does not change that setting,
+   and it is the way to install on a PC with Smart App Control on. The installer reuses or installs the official, signed Python 3.12 (64-bit),
+   copies Delta to `%LOCALAPPDATA%\Programs\Delta`, installs its packages (a few minutes), adds a **Delta** icon to
+   your Desktop and Start menu, and adds the `delta` command for terminals. A log is kept at
+   `%TEMP%\delta-install.log`.
+2. **Or from a zip.** On GitHub, press **Code > Download ZIP**, right-click the zip, choose **Extract All...**, then
+   double-click **`Install Delta.cmd`** in the extracted folder. If Windows shows "Windows protected your PC" or a
+   security warning for a downloaded file, choose **More info > Run anyway** (or **Run**). On a PC with Smart App
+   Control on, Windows may block `Install Delta.cmd` from a downloaded zip with no way to run it: use the `irm` line
+   from step 1 instead.
 3. **Set up.** Delta opens its setup wizard: pick your AI, set permissions, and pair your Telegram in 3 steps.
    With no AI chosen yet, Delta still opens and says what to add.
 
@@ -208,8 +212,13 @@ Or run Delta's own Python by its full path:
 & "$env:LOCALAPPDATA\Programs\Delta\.venv\Scripts\python.exe" -m delta update --stop
 ```
 
-`scripts\uninstall.ps1` removes Delta and its `delta` command (your chats and memory stay unless you add
-`-RemoveData`).
+**Uninstall.** This removes Delta and its `delta` command (your chats and memory stay unless you add `-RemoveData`):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\Delta\scripts\uninstall.ps1"
+```
+
+`-ExecutionPolicy Bypass` applies to that one run only; it does not change your PC's script setting.
 
 - **Python:** the installer reuses a signed 64-bit (x64) Python 3.12 that is already installed (it asks the
   `py` launcher and the registry), never the Microsoft Store one, and otherwise installs the official one.
@@ -226,7 +235,9 @@ Or run Delta's own Python by its full path:
 |---|---|
 | Double-clicking `Install Delta.cmd` says "Delta's files are not next to this file" | You opened it inside the zip. Right-click the zip, **Extract All...**, then double-click it in the extracted folder. |
 | "Could not create SSL/TLS secure channel" when pasting the `irm` line | Older Windows PowerShell. Run `[Net.ServicePointManager]::SecurityProtocol = 3072` first, then the `irm` line again, or use the zip. |
-| "running scripts is disabled on this system" | Use `Install Delta.cmd` (it allows the installer for that run only). If your company blocks it by policy, ask IT. |
+| "running scripts is disabled on this system" | Paste the `irm` line: it installs on a PC with scripts disabled, and you do not need to change that setting. If an older installer said it at the "delta command" or icons step, Delta is installed; paste the `irm` line again to finish (it keeps your data). To run one of Delta's scripts yourself, use `powershell -NoProfile -ExecutionPolicy Bypass -File <script>` (that run only). If your company blocks even that by policy, ask IT. |
+| Smart App Control blocks `Install Delta.cmd` (a downloaded zip) | Use the `irm` line instead (step 1 above). It downloads and installs Delta without running a file from the zip. |
+| The installer says "Some optional parts were not set up" | Delta is installed and works. Paste the command it printed under that line to add the `delta` command or the icons. |
 | "there is only ... GB free" | Free about 2 GB on the drive with your user folder (Settings > System > Storage), then run the installer again. |
 | "uv ... could not be downloaded" or "installing Delta's packages failed" | Check the internet. On a company network with a proxy: `setx HTTPS_PROXY http://your-proxy:port`, open a new window and run the installer again. Antivirus that quarantines files in `%LOCALAPPDATA%\Programs\Delta` can also cause this: allow the folder and run it again. |
 | "Python 3.12 (64-bit, x64) did not install" | Install Python 3.12 (Windows installer, 64-bit) from python.org, then run the installer again. Python 3.13 or the Microsoft Store Python is not used; the installer adds 3.12 next to it. |
@@ -239,7 +250,7 @@ Or run Delta's own Python by its full path:
 | The installer says another program called delta comes first on your Path | Another tool named `delta` (for example the git diff tool) runs instead. Use the full path it prints, or the full Python path above. |
 | "No AI model is available" | Add a free Groq key in Setup, sign in to Codex or Claude Code, or start LM Studio or Ollama. |
 | A connected app says Node.js or uv is not installed | Run the command it shows (`winget install OpenJS.NodeJS.LTS` or `winget install astral-sh.uv`), then connect again. |
-| Uninstall says it "could not remove" the folder | Restart the PC and run `scripts\uninstall.ps1` again. |
+| Uninstall says it "could not remove" the folder | Restart the PC and run `powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\Delta\scripts\uninstall.ps1"` again. |
 
 ## Connected apps (Notion, GitHub, Slack, Gmail...)
 

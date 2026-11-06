@@ -204,7 +204,8 @@ class Healer:
     def _sign_in_question(url: str, tool: Any) -> str:
         host = (urlparse(url).hostname or "this site") if url else "this site"
         own = str(getattr(type(tool), "__module__", "")).endswith(".browser")
-        helper = (" Delta's own browser profile keeps its own sign-ins: run scripts\\setup_chrome_profile.ps1 once "
+        helper = (" Delta's own browser profile keeps its own sign-ins: in Delta's folder, run "
+                  "powershell -ExecutionPolicy Bypass -File scripts\\setup_chrome_profile.ps1 once "
                   "to sign in to your sites there." if own else "")
         return (f"NEED_USER: {host} wants you to sign in before I can go on. I never type passwords. Please sign in "
                 f"in the browser window, then tell me to carry on.{helper}")
