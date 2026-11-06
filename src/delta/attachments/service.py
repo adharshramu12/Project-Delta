@@ -319,7 +319,13 @@ class AttachmentService:
             base = str(getattr(getattr(first, "cfg", None), "base_url", "") or "")
         except Exception:
             return False
-        return "api.openai.com" in base
+        from urllib.parse import urlsplit
+
+        try:
+            host = (urlsplit(base).hostname or "").lower()
+        except ValueError:
+            return False
+        return host == "api.openai.com"
 
     # --- the request --------------------------------------------------------------------------------------------
     def allowed(self, req: Any, att: Attachment) -> bool:
