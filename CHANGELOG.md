@@ -63,6 +63,9 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   menu gets **Update Delta** (in a Delta folder), which runs `delta update --stop`. An update keeps `bin` in place.
   `scripts\uninstall.ps1` takes the folder off the Path and removes **Update Delta**. The README gives two fallbacks:
   the install line again (updates in place, keeps your data) and Delta's Python by its full path.
+- A picture attached in the dashboard could take 20 seconds or more to show as read on a slow PC: Windows OCR
+  started PowerShell twice (a probe, then the read), and the next file waited behind it. The first OCR read is now
+  also the probe (one PowerShell start), and attached files are uploaded and read at the same time.
 
 ### Fixed (fresh-laptop audit)
 - A damaged `memory.db`, `chats.db`, `learning.db`, `skills.db`, `schedules.db` or `tasks.db` (power cut, full disk)
@@ -78,9 +81,6 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 - Local app servers' logs are kept to about 1 MB each; the learner no longer keeps ids of tasks that ended with a
   question.
 - `delta` and the Desktop icon start faster (httpx loads only for `delta doctor` and the service).
-- A picture attached in the dashboard could take 20 seconds or more to show as read on a slow PC: Windows OCR
-  started PowerShell twice (a probe, then the read), and the next file waited behind it. The first OCR read is now
-  also the probe (one PowerShell start), and attached files are uploaded and read at the same time.
 - Installer: TLS 1.2 on older Windows PowerShell, a free-space check, plain messages when uv or the packages cannot
   be downloaded (proxy hint), and `Install Delta.cmd` explains when it was opened inside the zip. Uninstall stops
   anything still running from Delta's folders first.
