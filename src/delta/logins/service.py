@@ -13,6 +13,14 @@ remote control is locked nothing remote signs in at all.
 Every use is written to the audit log: the login's name, its site, the task, which browser and the outcome. Never
 the user name, the password, a one-time code or a captcha answer.
 
+A simple text captcha on the sign-in form: read on this PC (Windows OCR) only where the user allowed it, with the
+login's "This site has a simple text captcha, let Delta read it" switch or `delta captcha allow <host>`, at most 3
+tries. Otherwise, or after that, Delta PARKS the sign-in (the filled form stays open in the same tab) and sends the
+captcha picture to the chat the request came from (the dashboard, or Telegram as a photo). The user replies with just
+the characters; LoginFlow (delta.logins.flow) hands that reply to answer_captcha(), which checks the tab and the
+origin again, types it, submits once and checks the result. The answer is never logged or audited. A parked sign-in
+expires after PARK_TTL_S and allows at most HUMAN_TRIES answers. reCAPTCHA, hCaptcha and Turnstile are never solved.
+
 The user's OWN browser (their everyday Chrome or Edge, delta.logins.own_browser) has one more question: the first
 time a login is filled there, Delta asks for an explicit yes that names the browser and the site, even when the login
 is "Always allow". The yes is remembered for that site and that browser (LoginStore.allow_own_browser); "Ask every
@@ -22,19 +30,46 @@ it needs the PIN like any sign-in approval.
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from delta.core.state import CURRENT_REQUEST
-from delta.logins.own_browser import OwnBrowserDriver, OwnBrowserSignIn
-from delta.logins.signin import SignInEngine, SignInResult
+from delta.logins.own_browser import OwnBrowserDriver, OwnBrowserSignIn, TabBinding
+from delta.logins.signin import CaptchaStep, SignInEngine, SignInResult
 from delta.logins.store import Login, LoginStore
 from delta.safety.approvals import ApprovalBroker, ApprovalRequest
 from delta.safety.remote_guard import is_remote
 from delta.system.logging import log
 
 OWN_CONSENT_TOOL = "sign_in_own_browser"  # the approval asked once per site and browser before the first own fill
+PARK_TTL_S = 10 * 60  # a sign-in waiting for the user's captcha answer is dropped after this
+HUMAN_TRIES = 3  # captcha answers from the user per parked sign-in
+
+
+@dataclass
+class Parked:
+    """A sign-in waiting for the user to type the captcha they were sent. The form stays filled in its tab."""
+
+    login_id: str
+    key: str  # the chat it was asked from: only an answer from that chat continues it
+    browser: str  # private | own:chrome | own:edge
+    page: Any  # the Playwright page (private) or the own-browser driver
+    bound: TabBinding | None  # own browser: the tab the sign-in is bound to
+    host: str
+    task_id: str
+    tries: int = 0
+    since: float = 0.0
+
+
+def chat_key() -> str:
+    req = CURRENT_REQUEST.get()
+    if req is None:
+        return ""
+    return req.chat_id or f"{req.channel}:{req.user}"
 
 
 class LoginService:
@@ -51,6 +86,10 @@ class LoginService:
         self.settle = settle
         self._task_grants: dict[str, set[str]] = {}  # task id -> login ids allowed for the rest of that task
         self.on_used: Callable[[Login, str], None] | None = None
+        self.parked: dict[str, Parked] = {}  # chat key -> the sign-in waiting for that chat's captcha answer
+        self.last_image: dict[str, bytes] = {}  # chat key -> the captcha picture just sent (the dashboard shows it)
+        self.clock: Callable[[], float] = time.monotonic
+        self._sending: Any = None  # the photo of a captcha on its way to a phone channel
 
     # --- permission ------------------------------------------------------------------------------------
     def forget_task(self, task_id: str) -> None:
@@ -148,23 +187,141 @@ class LoginService:
             with contextlib.suppress(Exception):
                 await send(req.user, Path(folder) / saved, f"{host} is waiting for you on the PC ({kind}).")
 
-    async def _captcha(self, page: Any) -> tuple[bool, str]:
-        if self.solver is None:
-            return False, "captcha help is not set up"
+    async def _captcha(self, page: Any, attempt: int = 1) -> CaptchaStep:
+        """A simple captcha on the form in Delta's private browser: read on this PC where the user allowed it
+        (delta.tools.captcha.CaptchaSolver.auto_fill), else the picture for the user to read."""
         from delta.tools.captcha import PlaywrightCaptchaPage
 
-        result = await self.solver.solve(PlaywrightCaptchaPage(page))
-        return result.ok, result.output
+        return await self._captcha_on(PlaywrightCaptchaPage(page), attempt)
+
+    async def _captcha_on(self, cpage: Any, attempt: int) -> CaptchaStep:
+        if self.solver is None:
+            image = None
+            with contextlib.suppress(Exception):
+                image = await cpage.screenshot("")
+            return CaptchaStep(False, "captcha help is not set up on this PC", image)
+        auto = getattr(self.solver, "auto_fill", None)
+        if not callable(auto):
+            return CaptchaStep(False, "captcha help is not set up on this PC")
+        if attempt > 3:  # the sign-in's last round: the site rejected every answer read here
+            image = None
+            with contextlib.suppress(Exception):
+                image = await cpage.screenshot("")
+            return CaptchaStep(False, "the site rejected the characters Delta read 3 times", image)
+        entered, note, image = await auto(cpage)
+        return CaptchaStep(entered, note, image)
+
+    # --- a sign-in waiting for the user's captcha answer ------------------------------------------------
+    def _park(self, login: Login, result: SignInResult, page: Any, browser: str, task_id: str,
+              bound: TabBinding | None = None, tries: int = 0) -> SignInResult:
+        """Keep the filled form open for the user's answer and send them the picture. Without a chat to answer
+        from (the dashboard's Test button, a watcher) nothing is parked."""
+        key = chat_key()
+        image = result.captcha_image
+        why = result.message.removeprefix("CAPTCHA: ").strip().rstrip(".")
+        allowed = getattr(self.solver, "allowed", None)
+        hint = "" if callable(allowed) and allowed(result.url or login.origin) else (
+            f" To let Delta read this site's captcha itself, turn on 'This site has a simple text captcha' for "
+            f"'{login.name}' in Settings > Logins.")
+        if not key or not image:
+            where = "in your own browser" if browser.startswith("own") else "in Delta's browser"
+            return SignInResult("needs_user", (
+                f"NEEDS HUMAN: {login.site.host} shows a simple captcha: {why}. Ask for the sign-in from the chat "
+                f"(dashboard or Telegram) and Delta will send you the picture to read, or type it {where} on the PC."
+                + hint), result.url)
+        self.parked[key] = Parked(login.id, key, browser, page, bound, login.site.host, task_id, tries, self.clock())
+        self.last_image[key] = image
+        self._send_captcha(image, login)
+        self.audit.record("login.captcha_asked", login=login.id, site=login.origin, browser=browser, tries=tries)
+        return SignInResult("needs_user", (
+            f"CAPTCHA: {login.site.host} shows a simple captcha: {why}. Your user name and password are filled in. "
+            "Reply with just the characters in the picture and Delta will finish signing in (or reply 'cancel')."
+            + hint), result.url, captcha_image=image)
+
+    def _send_captcha(self, image: bytes, login: Login) -> None:
+        """The picture goes with the answer on the dashboard (LoginFlow) and as a photo to a phone channel."""
+        saved = ""
+        if self.proof is not None:
+            with contextlib.suppress(Exception):
+                saved = self.proof.save_image(base64.b64encode(image).decode(), f"captcha-{login.site.host}") or ""
+        req = CURRENT_REQUEST.get()
+        folder = getattr(self.proof, "dir", None)
+        if req is None or not is_remote(req.channel) or not saved or folder is None:
+            return
+        send = getattr(self.channels.get(req.channel), "send_file", None)
+        if callable(send):
+            import asyncio
+            from pathlib import Path
+
+            async def go() -> None:
+                with contextlib.suppress(Exception):
+                    await send(req.user, Path(folder) / saved, f"Captcha for {login.name}: reply with just these "
+                                                               "characters (or 'cancel').")
+
+            self._sending = asyncio.ensure_future(go())  # keep a reference until it is sent
+
+    def waiting(self, key: str) -> Parked | None:
+        """The sign-in parked for this chat, if it has not expired."""
+        p = self.parked.get(key)
+        if p is not None and self.clock() - p.since > PARK_TTL_S:
+            self.parked.pop(key, None)
+            p = None
+        return p
+
+    def cancel(self, key: str) -> Parked | None:
+        self.last_image.pop(key, None)
+        return self.parked.pop(key, None)
+
+    async def answer_captcha(self, key: str, answer: str, task_id: str = "") -> SignInResult:
+        """Continue the parked sign-in of chat `key` with the characters the user typed. Never logged."""
+        parked = self.waiting(key)
+        if parked is None:
+            return SignInResult("failed", "No sign-in is waiting for a captcha any more (it expires after "
+                                          f"{PARK_TTL_S // 60} minutes). Ask again to sign in.")
+        self.parked.pop(key, None)
+        self.last_image.pop(key, None)
+        login = self.store.get(parked.login_id)
+        if login is None:
+            return SignInResult("failed", "That saved login was removed, so Delta stopped.")
+        try:
+            if parked.browser == "private":
+                engine = SignInEngine(self.handoff, self._captcha, self.settle)
+                result = await engine.answer_captcha(parked.page, login, answer)
+            else:
+                result = await OwnBrowserSignIn(self.handoff).answer_captcha(parked.page, parked.bound, login, answer)
+        except Exception as e:
+            log.warning("login.captcha_answer_failed", site=login.origin, error=type(e).__name__)
+            result = SignInResult("failed", f"signing in to {login.name} failed ({type(e).__name__})")
+        self.audit.record("captcha", site=login.site.host, mode="human_reply", ok=result.ok)  # never the answer
+        if result.outcome == "needs_user" and result.captcha_image is not None:
+            if parked.tries + 1 >= HUMAN_TRIES:
+                result = SignInResult("needs_user", f"NEEDS HUMAN: {login.site.host} rejected the captcha "
+                                                    f"{HUMAN_TRIES} times, so Delta stopped. Ask again to start over.",
+                                      result.url)
+            else:
+                result = self._park(login, result, parked.page, parked.browser, task_id or parked.task_id,
+                                    parked.bound, parked.tries + 1)
+        self.store.touch(login.id, result.outcome)
+        self._audit(login, task_id or parked.task_id, result.outcome, "captcha answered by the user", parked.browser)
+        if self.on_used is not None:
+            with contextlib.suppress(Exception):
+                self.on_used(login, result.outcome)
+        return result
 
     # --- the whole thing --------------------------------------------------------------------------------
+    def _find(self, ref: str) -> tuple[Login | None, SignInResult | None]:
+        login, why = self.store.resolve(ref)
+        if login is None:
+            return None, SignInResult("failed", f"{why}. Nothing was typed. The user adds or updates logins on the "
+                                                "PC: Settings > Logins, or `delta logins add`.")
+        return login, None
+
     async def sign_in(self, ref: str, page: Any, task_id: str = "", why: str = "",
                       ask: bool = True) -> SignInResult:
         """Sign in with the saved login `ref` (its name, id or site) in `page`. Audited, whatever happens."""
-        login = self.store.get(ref)
+        login, missing = self._find(ref)
         if login is None:
-            names = ", ".join(x.name for x in self.store.list()) or "none saved yet"
-            return SignInResult("failed", f"no saved login called '{ref}' (saved: {names}). The user adds logins on "
-                                          "the PC: Settings > Logins, or `delta logins add`.")
+            return missing or SignInResult("failed", "no such login")
         if ask:
             ok, how = await self.allowed(login, task_id, why)
             if not ok:
@@ -174,6 +331,7 @@ class LoginService:
         else:
             how = "already decided"
         self._page = page
+        self.cancel(chat_key())  # a new sign-in replaces one still waiting for a captcha in this chat
         try:
             engine = SignInEngine(self.handoff, self._captcha, self.settle)
             result = await engine.sign_in(page, login)
@@ -182,6 +340,8 @@ class LoginService:
             result = SignInResult("failed", f"signing in to {login.name} failed ({type(e).__name__})")
         finally:
             self._page = None
+        if result.outcome == "needs_user" and result.message.startswith("CAPTCHA:"):
+            result = self._park(login, result, page, "private", task_id)
         self.store.touch(login.id, result.outcome)
         self._audit(login, task_id, result.outcome, how)
         if self.on_used is not None:
@@ -192,17 +352,20 @@ class LoginService:
     async def sign_in_own(self, ref: str, driver: OwnBrowserDriver, task_id: str = "", why: str = "") -> SignInResult:
         """Sign in with the saved login `ref` in the user's OWN browser through `driver`. Same permission and audit
         as sign_in, plus the one-time own-browser consent (asked first, even for "always")."""
-        login = self.store.get(ref)
+        login, missing = self._find(ref)
         if login is None:
-            names = ", ".join(x.name for x in self.store.list()) or "none saved yet"
-            return SignInResult("failed", f"no saved login called '{ref}' (saved: {names}). The user adds logins on "
-                                          "the PC: Settings > Logins, or `delta logins add`.")
+            return missing or SignInResult("failed", "no such login")
         browser = f"own:{driver.browser_key}"
         ok, how = await self.own_browser_consent(login, driver.browser_key, driver.browser_label, task_id)
         if not ok:
             self._audit(login, task_id, "not_allowed", how, browser)
-            return SignInResult("needs_user", f"The user did not allow Delta to fill the saved login for {login.name} "
-                                              f"in their own {driver.browser_label} ({how}). Do not try another way.")
+            fix = ("Unlock remote control with /unlock first." if how == "remote control is locked" else
+                   f"Approve the one-time question (dashboard, or Telegram with your PIN) to let Delta type "
+                   f"'{login.name}' into your own {driver.browser_label} for this site, or switch to Delta's private "
+                   "browser (Settings > Browser).")
+            return SignInResult("needs_user", f"NEEDS HUMAN: Delta has no OK yet to type the saved login for "
+                                              f"{login.name} into your own {driver.browser_label} ({how}). Nothing was "
+                                              f"typed. {fix} Do not try another way.")
         if not how:  # consent given before: the login's own permission decides, as in the private browser
             ok, how = await self.allowed(login, task_id, why)
             if not ok:
@@ -210,12 +373,16 @@ class LoginService:
                 return SignInResult("needs_user", f"The user did not allow using the saved login for {login.name} "
                                                   f"({how}). Do not try another way.")
         # else: the consent question just answered names this site and browser, so it covers this use too
+        self.cancel(chat_key())
+        own = OwnBrowserSignIn(self.handoff, captcha=self._captcha_on)
         try:
-            result = await OwnBrowserSignIn(self.handoff).sign_in(driver, login)
+            result = await own.sign_in(driver, login)
         except Exception as e:
             log.warning("login.failed", site=login.origin, browser=browser, error=type(e).__name__)
             result = SignInResult("failed", f"signing in to {login.name} in your {driver.browser_label} failed "
                                             f"({type(e).__name__})")
+        if result.outcome == "needs_user" and result.message.startswith("CAPTCHA:"):
+            result = self._park(login, result, driver, browser, task_id, own.bound)
         self.store.touch(login.id, result.outcome)
         self._audit(login, task_id, result.outcome, how, browser)
         if self.on_used is not None:

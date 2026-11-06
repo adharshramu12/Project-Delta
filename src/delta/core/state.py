@@ -89,6 +89,7 @@ class TaskResult:
     asked_about: str = ""  # needs_user: the original request, so an answer can continue it
     tainted_by: str = ""  # the first outside source the task read (kept after the task ends, for learning)
     grounding: dict[str, Any] = field(default_factory=dict)  # answer grounding (delta.core.grounding)
+    image: str = ""  # needs_user: a small picture for the user to read (base64 JPEG; a sign-in's captcha)
 
 
 # What the user sees when a task fails for a reason that is not theirs (a bug, a full disk): no traceback.

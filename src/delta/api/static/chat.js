@@ -67,6 +67,8 @@
       h("span", {class: "avatar"}, icon("logo")),
       h("div", {class: "answer"},
         h("div", {class: "answer-text"}, D.linkify(String(r.answer || ""))),
+        // a sign-in's captcha to read (small JPEG)
+        live && r.image && /^[A-Za-z0-9+/=]+$/.test(r.image) ? h("img", {class: "captcha-pic", alt: "Captcha: reply with these characters", src: "data:image/jpeg;base64," + r.image}) : null,
         h("div", {class: "answer-meta"}, h("span", {class: "pill " + kind, text: label}), u.parts.length ? h("span", {text: u.parts.join(" · ")}) : null))));
     usage.tasks++; usage.tokens += u.tokens; usage.calls += u.calls; usage.secs += r.wall_s || 0; usage.estimate = usage.estimate || u.estimate;
     usage.fileTokens += ((r.usage || {}).attachments || {}).attachment_tokens_est || 0;

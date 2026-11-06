@@ -21,8 +21,12 @@ What is added for the user's own browser:
   to another tab; the fallback that types keys checks focus first.
 - Fill check. After filling, the field must hold exactly as many characters as the saved value. If an extension or
   the page changed or emptied it, Delta reports it plainly, does not submit and does not try again.
-- One submit, the normal one (Enter in the password box). A simple image captcha is not solved here: the user types
-  it and presses Sign in themselves.
+- One submit, the normal one (Enter in the password box). A simple image captcha follows the same rule as in the
+  private browser: read on this PC only where the user allowed it (the login's captcha switch or `delta captcha
+  allow`), else the picture goes to the user, who replies with the characters (LoginService parks the filled form in
+  its tab; answer_captcha() checks the tab and the origin again before typing it). When the driver cannot take a
+  picture of the captcha, the user types it and presses Sign in themselves, as before. A "code" box that sits on the
+  same form as the password box is a captcha (or a same-form code), never submitted empty.
 - The first-use consent per site and browser lives in delta.logins.service (it is a permission question).
 """
 
@@ -31,11 +35,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from delta.logins.origin import Origin, mismatch, origin_of
-from delta.logins.signin import ERROR_WORDS, Handoff, SignInResult
+from delta.logins.signin import CAPTCHA_SUBMITS, ERROR_WORDS, CaptchaStep, Handoff, SignInResult, captcha_rejected
 from delta.logins.store import Login
 
 FIELD_KINDS = ("password", "user", "otp", "captcha")
@@ -45,6 +50,7 @@ USER_WORDS = re.compile(r"user|e-?mail|login|roll|regd|reg\.? ?no|registration|u
 OTP_WORDS = re.compile(r"one[- ]time|otp|totp|passcode|verification code|security code|2fa|two[- ]factor|"
                        r"authenticat(ion|or) code|\bcode\b", re.I)
 CAPTCHA_WORDS = re.compile(r"captcha|characters|the text in the image|image code", re.I)
+EMPTY_PAGE_WAIT_S = 8.0  # a page that shows nothing yet (hidden until a stylesheet loads) gets this long
 CHALLENGE_WORDS = re.compile(r"(re)?captcha|hcaptcha|turnstile|i'?m not a robot|verify you are human|"
                              r"cloudflare|checking your browser", re.I)
 SETTLE_S = 10.0
@@ -93,13 +99,21 @@ class OwnBrowserDriver(Protocol):
     async def challenge(self) -> str | None: ...  # "reCAPTCHA" and the like, else None
     async def settle(self) -> None: ...  # wait for the page to load after an action
     def remember_secret_box(self, f: FieldRef) -> None: ...  # masked in every later screenshot
+    # Optional (getattr): a JPEG of the captcha picture next to box f (None when it cannot be taken), and a new
+    # captcha picture (False when the page has no way to give one).
+    # async def captcha_image(self, f: FieldRef) -> bytes | None: ...
+    # async def refresh_captcha(self, f: FieldRef) -> bool: ...
 
 
-def classify(name: str, password: bool) -> str:
-    """The kind of a text box from its accessible name ('' = not one Delta fills)."""
+OwnCaptchaHook = Callable[[Any, int], Awaitable[CaptchaStep]]  # (a CaptchaPage over the driver, attempt) -> step
+
+
+def classify(name: str, password: bool, auto_id: str = "") -> str:
+    """The kind of a text box from its accessible name and its HTML id (UI Automation's AutomationId; '' = not one
+    Delta fills). "loginFormCaptcha" with the placeholder "Enter verification Code" is a captcha, not an OTP box."""
     if password:
         return "password"
-    if CAPTCHA_WORDS.search(name or ""):
+    if CAPTCHA_WORDS.search(name or "") or CAPTCHA_WORDS.search(auto_id or ""):
         return "captcha"
     if OTP_WORDS.search(name or ""):
         return "otp"
@@ -108,10 +122,47 @@ def classify(name: str, password: bool) -> str:
     return ""
 
 
+class _OwnCaptchaPage:
+    """delta.tools.captcha's CaptchaPage over the own-browser driver, so the captcha rules (allowlist, OCR first, at
+    most 3 tries, a new picture when one cannot be read) are the same code as in the private browser. Filling goes
+    through OwnBrowserSignIn's checks (same tab, exact origin) like every other box."""
+
+    def __init__(self, d: OwnBrowserDriver, box: FieldRef, url: str,
+                 fill: Callable[[str], Awaitable[str]]) -> None:
+        self.d, self.box, self.url, self._fill = d, box, url, fill
+
+    async def challenge_markers(self) -> list[str]:
+        return []  # robot checks were looked for already (d.challenge())
+
+    async def screenshot(self, image: str) -> bytes | None:
+        take = getattr(self.d, "captcha_image", None)
+        return await take(self.box) if callable(take) else None
+
+    async def has_field(self, field: str) -> bool:
+        return True
+
+    async def is_secret_field(self, field: str) -> bool:
+        return self.box.kind == "password"
+
+    async def fill(self, field: str, value: str) -> None:
+        if why := await self._fill(value):
+            raise DriverError(why)
+
+    async def field_value(self, field: str) -> str:
+        n = await self.d.value_length(self.box)
+        return "x" * (n or 0)
+
+    async def refresh(self, image: str) -> bool:
+        new = getattr(self.d, "refresh_captcha", None)
+        return bool(await new(self.box)) if callable(new) else False
+
+
 class OwnBrowserSignIn:
-    def __init__(self, handoff: Handoff, settle_s: float = SETTLE_S) -> None:
+    def __init__(self, handoff: Handoff, settle_s: float = SETTLE_S, captcha: OwnCaptchaHook | None = None) -> None:
         self.handoff = handoff
         self.settle_s = settle_s
+        self.captcha = captcha
+        self.bound: TabBinding | None = None  # the tab this sign-in is bound to (kept when it waits for the user)
 
     # --- checks --------------------------------------------------------------------------------------------
     async def _same_tab(self, d: OwnBrowserDriver, bound: TabBinding) -> None:
@@ -178,6 +229,34 @@ class OwnBrowserSignIn:
     def _pick(boxes: list[FieldRef], kind: str) -> FieldRef | None:
         return next((f for f in boxes if f.kind == kind), None)
 
+    @classmethod
+    def _captcha_box(cls, boxes: list[FieldRef]) -> FieldRef | None:
+        """The captcha box of a sign-in form. A "code" box on the same form as the password box is one too: a real
+        one-time code is asked AFTER the password, so one shown with it is a captcha (or a same-form code). Either
+        way a person or OCR fills it; it is never submitted empty."""
+        if found := cls._pick(boxes, "captcha"):
+            return found
+        pw = cls._pick(boxes, "password")
+        return next((f for f in boxes if f.kind == "otp" and pw is not None and f.frame_url == pw.frame_url), None)
+
+    @classmethod
+    def _otp_boxes(cls, boxes: list[FieldRef]) -> list[FieldRef]:
+        """One-time-code boxes, not counting the captcha box of a form that is back after a wrong captcha."""
+        cap = cls._captcha_box(boxes)
+        return [f for f in boxes if f.kind == "otp" and f is not cap]
+
+    async def _form_soon(self, d: OwnBrowserDriver, saved: Origin, bound: TabBinding) -> tuple[list[FieldRef], str]:
+        """_form, but a page that shows nothing yet (many ERPs keep the page hidden until a stylesheet arrives) gets up
+        to EMPTY_PAGE_WAIT_S before 'no form' is believed."""
+        boxes, refusal = await self._form(d, saved)
+        loop = asyncio.get_running_loop()
+        end = loop.time() + EMPTY_PAGE_WAIT_S
+        while not boxes and not refusal and loop.time() < end and not (await d.text()).strip():
+            await asyncio.sleep(0.5)
+            await self._same_tab(d, bound)
+            boxes, refusal = await self._form(d, saved)
+        return boxes, refusal
+
     async def _has_password(self, d: OwnBrowserDriver) -> bool:
         return any(f.kind == "password" for f in await d.fields())
 
@@ -212,6 +291,7 @@ class OwnBrowserSignIn:
         bound = await d.binding()
         if bound is None:
             return SignInResult("failed", f"could not find Delta's window in {d.browser_label}")
+        self.bound = bound
         url = await d.top_url()
         # 1. where we are
         if mismatch(saved, url):
@@ -236,7 +316,7 @@ class OwnBrowserSignIn:
                                                   "solves. The user did not complete it.", url)
             await self._settle(d)
             await self._same_tab(d, bound)
-        boxes, refusal = await self._form(d, saved)
+        boxes, refusal = await self._form_soon(d, saved, bound)
         if refusal:
             return SignInResult("refused", "REFUSED: " + refusal, await d.top_url())
         user, pw = self._pick(boxes, "user"), self._pick(boxes, "password")
@@ -258,8 +338,9 @@ class OwnBrowserSignIn:
         # 3. a user-name-only first step (the password comes on the next page)
         if pw is None and user is not None:
             if not login.username:
-                return SignInResult("no_form", "the page asks for a user name, but this login has none saved",
-                                    await d.top_url())
+                return SignInResult("no_form", f"{saved.host} asks for a user name, but the saved login "
+                                               f"'{login.name}' has no user name. Nothing was typed. Save it again "
+                                               "with the user name in Settings > Logins (Replace).", await d.top_url())
             if why := await self._fill(d, bound, saved, user, login.username, False, filled):
                 return SignInResult("refused", why, await d.top_url())
             await self._check_then_submit(d, bound, saved, user)
@@ -271,32 +352,126 @@ class OwnBrowserSignIn:
                 return SignInResult("refused", "REFUSED: " + refusal, await d.top_url())
             pw, user = self._pick(boxes, "password"), None
             if pw is None:
-                return SignInResult("no_form", f"entered the user name on {saved.host} but no password box came",
+                return SignInResult("no_form", f"entered the user name on {saved.host} but no password box came "
+                                               f"(now at {await d.top_url()}). Nothing else was typed.",
                                     await d.top_url())
         assert pw is not None
         if not login.password:
-            return SignInResult("no_form", "the page asks for a password, but this login has none saved",
-                                await d.top_url())
-        if user is not None and login.username and (
-                why := await self._fill(d, bound, saved, user, login.username, False, filled)):
-            return SignInResult("refused", why, await d.top_url())
-        if why := await self._fill(d, bound, saved, pw, login.password, True, filled):
-            await self._clear(d, filled)
-            return SignInResult("refused", why, await d.top_url())
-        # 4. submit once, the normal way; a simple captcha is the user's to type and submit
-        before = await d.top_url()
-        if self._pick(boxes, "captcha") is not None:
-            filled.clear()  # the user finishes this form; it must keep what Delta filled
-            done = await self.handoff("captcha", saved.host, f"{saved.host} shows a captcha: type the characters and "
-                                                             f"press Sign in in your {d.browser_label}, then Approve")
-            if not done:
-                return SignInResult("needs_user", f"NEEDS HUMAN: {saved.host} has a captcha on the form; the user did "
-                                                  "not complete it.", await d.top_url())
-        else:
+            return SignInResult("no_form", f"{saved.host} asks for a password, but the saved login '{login.name}' has "
+                                           "no password saved (only a user name). Nothing was typed. Save it again "
+                                           "with the password in Settings > Logins (Replace).", await d.top_url())
+        result = SignInResult("failed", "not submitted", await d.top_url())
+        for attempt in range(1, CAPTCHA_SUBMITS + 2):  # the last round only fetches the picture for the user
+            if user is not None and login.username and (
+                    why := await self._fill(d, bound, saved, user, login.username, False, filled)):
+                return SignInResult("refused", why, await d.top_url())
+            if why := await self._fill(d, bound, saved, pw, login.password, True, filled):
+                await self._clear(d, filled)
+                return SignInResult("refused", why, await d.top_url())
+            # 4. a simple captcha on the form: read here where allowed, else the user reads it
+            before = await d.top_url()
+            cap = self._captcha_box(boxes)
+            if cap is not None:
+                step = await self._captcha_step(d, bound, saved, cap, attempt, filled)
+                if step is not None:
+                    filled.clear()  # the form waits for the user with what Delta filled
+                    return step
+            elif attempt > 1:
+                return result  # the captcha went away; the last answer stands
             await self._check_then_submit(d, bound, saved, pw)
             filled.clear()
+            await self._settle(d)
+            result = await self._after(d, bound, saved, before)
+            if not (cap is not None and result.outcome in ("wrong_password", "failed")
+                    and captcha_rejected(await d.text())):
+                return result
+            boxes, refusal = await self._form(d, saved)  # only the captcha was wrong: the form is back
+            if refusal:
+                return SignInResult("refused", "REFUSED: " + refusal, await d.top_url())
+            user, pw = self._pick(boxes, "user"), self._pick(boxes, "password")
+            if pw is None:
+                return result
+        return SignInResult("needs_user", f"NEEDS HUMAN: {saved.host} kept rejecting the captcha; Delta stopped "
+                                          f"after {CAPTCHA_SUBMITS} tries.", await d.top_url())
+
+    async def _captcha_step(self, d: OwnBrowserDriver, bound: TabBinding, saved: Origin, cap: FieldRef, attempt: int,
+                            filled: list[FieldRef]) -> SignInResult | None:
+        """None when Delta typed the captcha (go on and submit); else the result that ends this round: the picture for
+        the user (parked by LoginService), or the old hand-off when no picture can be taken here."""
+        url = await d.top_url()
+
+        async def fill(value: str) -> str:
+            return await self._fill(d, bound, saved, cap, value, False, filled)
+
+        cpage = _OwnCaptchaPage(d, cap, url, fill)
+        step = await self.captcha(cpage, attempt) if self.captcha is not None else CaptchaStep(False, "", None)
+        if step.entered:
+            return None
+        if step.image is None:
+            image = None
+            with contextlib.suppress(Exception):
+                image = await cpage.screenshot("")
+            step = CaptchaStep(False, step.note, image)
+        if step.image is not None:
+            return SignInResult("needs_user", f"CAPTCHA: {step.note or 'it needs a person to read it'}", url,
+                                captcha_image=step.image)
+        done = await self.handoff("captcha", saved.host, f"{saved.host} shows a captcha: type the characters and "
+                                                         f"press Sign in in your {d.browser_label}, then Approve")
+        if not done:
+            return SignInResult("needs_user", f"NEEDS HUMAN: {saved.host} has a captcha on the form; the user did "
+                                              "not complete it.", await d.top_url())
         await self._settle(d)
-        return await self._after(d, bound, saved, before)
+        return await self._after(d, bound, saved, url)
+
+    async def answer_captcha(self, d: OwnBrowserDriver, bound: TabBinding | None, login: Login,
+                             answer: str) -> SignInResult:
+        """Finish a sign-in that waited for the user to read the captcha, in the same tab: the tab and the origin
+        are checked again, the password filled again if the page cleared it, the answer typed, one submit, then the
+        same check that it worked. A captcha the site rejects comes back with the new picture."""
+        saved = login.site
+        filled: list[FieldRef] = []
+        if bound is None:
+            return SignInResult("failed", "the sign-in lost its tab; ask again to start over")
+        try:
+            await self._same_tab(d, bound)
+            if why := mismatch(saved, await d.top_url()):
+                return SignInResult("refused", f"REFUSED: the sign-in tab is no longer on the saved site: {why}. "
+                                               "Nothing was typed.", await d.top_url())
+            boxes, refusal = await self._form(d, saved)
+            if refusal:
+                return SignInResult("refused", "REFUSED: " + refusal, await d.top_url())
+            user, pw, cap = self._pick(boxes, "user"), self._pick(boxes, "password"), self._captcha_box(boxes)
+            if pw is None or cap is None:
+                return SignInResult("no_form", f"the sign-in form on {saved.host} is gone; ask again to start over.",
+                                    await d.top_url())
+            if user is not None and login.username and not await d.value_length(user) and (
+                    why := await self._fill(d, bound, saved, user, login.username, False, filled)):
+                return SignInResult("refused", why, await d.top_url())
+            if await d.value_length(pw) != len(login.password) and (
+                    why := await self._fill(d, bound, saved, pw, login.password, True, filled)):
+                return SignInResult("refused", why, await d.top_url())
+            if why := await self._fill(d, bound, saved, cap, answer, False, filled):
+                return SignInResult("refused", why, await d.top_url())
+            before = await d.top_url()
+            await self._check_then_submit(d, bound, saved, pw)
+            filled.clear()
+            await self._settle(d)
+            result = await self._after(d, bound, saved, before)
+            if result.outcome in ("wrong_password", "failed") and captcha_rejected(await d.text()):
+                boxes, _ = await self._form(d, saved)
+                image = None
+                if (cap := self._captcha_box(boxes)) is not None and callable(getattr(d, "captcha_image", None)):
+                    with contextlib.suppress(Exception):
+                        image = await d.captcha_image(cap)  # type: ignore[attr-defined]
+                return SignInResult("needs_user", f"CAPTCHA: {saved.host} said the characters were wrong; here is "
+                                                  "the new picture.", await d.top_url(), captcha_image=image)
+            return result
+        except TabChangedError as e:
+            await self._clear(d, filled)
+            return SignInResult("aborted", f"STOPPED: {e}. Delta cleared what it had typed and did not submit.", "")
+        except DriverError as e:
+            await self._clear(d, filled)
+            return SignInResult("failed", f"could not finish signing in to {saved.host}: {e}.", "")
 
     async def _check_then_submit(self, d: OwnBrowserDriver, bound: TabBinding, saved: Origin, f: FieldRef) -> None:
         if why := await self._check(d, bound, saved, f):
@@ -313,7 +488,7 @@ class OwnBrowserSignIn:
             url = await d.top_url()
             if mismatch(saved, url) and origin_of(url) is not None and not await self._has_password(d):
                 return SignInResult("signed_in", f"signed in to {saved.host}; the site moved on to {url}", url)
-            if any(f.kind == "otp" for f in await d.fields()):
+            if self._otp_boxes(await d.fields()):
                 done = await self.handoff("otp", saved.host, f"{saved.host} asks for a one-time code or second step: "
                                                              f"enter it in your {d.browser_label} on your PC, then "
                                                              "Approve")
@@ -322,7 +497,7 @@ class OwnBrowserSignIn:
                                                       "not complete it in time.", url)
                 for _ in range(30):
                     await self._settle(d)
-                    if not any(f.kind == "otp" for f in await d.fields()):
+                    if not self._otp_boxes(await d.fields()):
                         break
                     await asyncio.sleep(0.5)
                 else:

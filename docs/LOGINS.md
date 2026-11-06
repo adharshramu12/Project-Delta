@@ -19,7 +19,24 @@ never sees them.
 3. **Ask.** "What is on my timetable tomorrow?" Delta calls `sign_in`, opens the site in the browser you use with
    Delta (its private browser, or your own default browser), signs in and reads the page.
 
+Saving again with the same name asks whether to **Replace** it: the login is updated in place, never copied. A login
+saved without a password says so on its card ("NO password saved") and in the save message.
+
 Logins can only be added or changed on the PC. A password never goes through Telegram or any chat.
+
+## "Log in to my ERP": no AI at all
+
+A request that only asks to sign in ("Login my college ERP portal", "sign in to euerp") runs `sign_in` directly: no
+planner, no agent loop, **0 AI calls and 0 tokens**. Delta finds the login from your words (its name or its site:
+"Example University ERP" finds a login named "euerp" for `https://newerp.example-university.edu`), opens the page,
+fills it, handles a simple captcha (below), submits once and checks the sign-in worked (the form is gone). Two logins that both
+fit are never guessed between: Delta names them and asks. "try again" or "done, try again now" in the same chat
+re-runs the same sign-in, again without AI. A request that asks for more ("log in and check my timetable") goes to the
+agent as before.
+
+When something stops it, the message says exactly what: which login, which field is missing ("'euerp' has no
+password saved (only a user name)"), which address did not match the saved site, or that the form stayed hidden. It
+never says a password is missing when one is saved.
 
 ## How a login is kept
 
@@ -63,8 +80,19 @@ while remote control is locked nothing remote signs in. Change the setting in Se
   answer stops the sign-in.
 - **reCAPTCHA, hCaptcha, Cloudflare Turnstile.** Never solved by Delta. The same hand-off: you complete it on the
   PC, or the sign-in stops.
-- **A simple image captcha** on your own account's form follows the captcha rule: only on sites you allowed with
-  `delta captcha allow <host>`, read with Windows OCR first, at most 3 attempts, then a hand-off to you.
+- **A simple text captcha** (a picture of a few characters, as on many college ERPs). Each login has a switch, off by
+  default: **"This site has a simple text captcha, let Delta read it"** (Settings > Logins, on the add form and on the
+  login's card; or `delta logins captcha NAME --on`). It does what `delta captcha allow <host>` does, for that
+  login's exact origin only. When it is on, Delta reads the picture on this PC with Windows OCR (only if OCR is not
+  available, and you let pictures go to the AI, the AI reads it), at most 3 tries, asking the site for a new picture
+  when one cannot be read and filling the form again when the site says only the captcha was wrong ("The
+  verification code is incorrect"). A rejected *password* is never sent again.
+  When the switch is off, or the 3 tries are used up, Delta keeps the filled form open and **sends you the captcha
+  picture** in the chat you asked from (the dashboard shows it with the answer; Telegram gets it as a photo). Reply
+  with just the characters and Delta types them into that same form (after checking the tab and the exact site
+  again), submits once and checks the result. A wrong reply brings the new picture (3 replies at most); "cancel"
+  stops; it expires after 10 minutes. Your reply is never written to a log or the audit.
+  A captcha box is never taken for a one-time-code box, even when it says "Enter verification Code".
 - **Wrong password.** Delta stops at once and says so. It never retries a rejected password.
 
 ## Which browser: Delta's private browser or your own
@@ -103,9 +131,12 @@ saving without DPAPI. Your own browser is your real browser, so Delta adds these
   keyboard focus.
 - **Checked after filling.** If the box does not hold exactly what Delta filled (a password manager extension or
   the page changed or cleared it), Delta says so plainly, does not submit and does not try again.
-- **One normal submit.** Delta presses Enter in the password box once, as you would. A simple image captcha in your
-  own browser is yours to type: Delta fills the user name and password, then asks you to type the characters and
-  press Sign in yourself.
+- **One normal submit.** Delta presses Enter in the password box once, as you would. A simple text captcha follows
+  the same rule as in the private browser: read on this PC when the login's captcha switch is on, else the picture
+  is sent to you and your reply is typed into the same tab (the tab binding and origin checks run again first).
+  Delta takes the picture from the screen, only that rectangle, with its window in front. If it cannot take one,
+  you type the characters and press Sign in yourself, as before. A "code" box shown on the same form as the password
+  box is treated as the captcha, never submitted empty.
 - **Pictures stay masked.** Your browser already shows dots in a password box. After Delta fills one, it also paints
   that area over in every screenshot Delta takes (one window or the whole screen), in case the page or a "show
   password" button turns the box into plain text.
@@ -128,7 +159,8 @@ the user name, the password, a one-time code or a captcha answer.
 |---|---|
 | Terminal | `delta logins add NAME --site URL [--login-url URL] [--username U] [--always] [--allow-http] [--replace]` |
 | Terminal | `delta logins list`, `delta logins remove NAME`, `delta logins test NAME`, `delta logins allow NAME --always / --ask` |
-| Dashboard | Settings > Logins and watchers: add, test, remove, change permission |
+| Terminal | `delta logins captcha NAME --on / --off`, `delta logins add ... --simple-captcha` |
+| Dashboard | Settings > Logins and watchers: add, replace, test, remove, change permission, the simple-captcha switch |
 | Telegram | `/logins`: names, sites and permissions only (read-only) |
 | The AI | `list_logins`, `sign_in(site)` |
 
@@ -143,8 +175,8 @@ or dismissed, long lists scroll, and there are new tools for dropdowns (`browser
 These tools also work in your own browser, with small differences: elements are found by their label or visible
 text (there is no numbered page listing there), `browser_tabs` only lists, switches or closes the tabs of Delta's
 own window, `browser_dialog` answers the dialog showing now (in the private browser it decides the next one), and
-`browser_upload` fills the browser's own Open dialog with the file's path. `solve_captcha` stays private-browser
-only.
+`browser_upload` fills the browser's own Open dialog with the file's path. The `solve_captcha` tool stays
+private-browser only (a saved login's own captcha handling above works in both).
 
 See also [WATCHERS.md](WATCHERS.md) for checking a portal on a schedule, and [NOT_VERIFIED.md](NOT_VERIFIED.md) for
 what has not been tried on real hardware yet.

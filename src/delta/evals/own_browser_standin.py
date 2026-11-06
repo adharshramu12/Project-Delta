@@ -66,8 +66,8 @@ class PlaywrightOwnDriver:
                               ("user", USER_SEL)):
                 box = await _visible(frame, sel)
                 if box is not None and not any(f.kind == kind and f.frame_url == url for f in out):
-                    if kind == "user" and any(f.kind in ("otp", "captcha") and f.frame_url == url for f in out):
-                        continue  # an OTP or captcha box can also match the generic user-name selector
+                    if kind == "user" and any(f.kind == "otp" and f.frame_url == url for f in out):
+                        continue  # an OTP box can also match the generic user-name selector
                     out.append(FieldRef(kind, url, (frame, box), kind))
         return out
 
@@ -114,6 +114,20 @@ class PlaywrightOwnDriver:
 
     def remember_secret_box(self, f: FieldRef) -> None:
         """Masked with CSS in set_value (this stand-in is a Playwright page)."""
+
+    async def captcha_image(self, f: FieldRef) -> bytes | None:
+        from delta.tools.captcha import PlaywrightCaptchaPage
+
+        with contextlib.suppress(Exception):
+            return await PlaywrightCaptchaPage(await self._page()).screenshot("")
+        return None
+
+    async def refresh_captcha(self, f: FieldRef) -> bool:
+        from delta.tools.captcha import PlaywrightCaptchaPage
+
+        with contextlib.suppress(Exception):
+            return await PlaywrightCaptchaPage(await self._page()).refresh("")
+        return False
 
     async def observe(self) -> str:
         return (await self.text())[:3000]

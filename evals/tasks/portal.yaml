@@ -147,3 +147,64 @@
     - step_output_contains: {tool: sign_in, text: did not type anything}
     - portal_state: {logins: 0, posts: 0}
     - password_nowhere: true
+
+# "Log in to my ERP" is a fixed tool flow (delta.logins.flow): no planner, no agent loop, no AI call at all. The
+# script below is what an AI-driven sign-in would cost (a plan, then list_logins, sign_in and a summary); with the flow
+# it is never used, and the meter proves no model was called.
+- id: portal-login-saved-site-no-ai
+  description: a plain request to sign in to a saved login runs sign_in directly, with 0 AI calls, and is checked
+  needs: [browser]
+  request: Log in to my college ERP portal
+  timeout_s: 180
+  portal: {}
+  script:
+    plan: [{needs_tools: true, goal: sign in to the college ERP, tools: [list_logins, sign_in], success_criteria: ["signed in to the ERP"]}]
+    chat:
+      - call: {tool: list_logins, args: {}}
+      - call: {tool: sign_in, args: {site: College ERP}}
+      - text: "DONE: Signed in to your college ERP."
+  check:
+    - status: done
+    - tool_runs: {tool: sign_in, count: 1}
+    - step_output_contains: {tool: sign_in, text: signed in}
+    - meter: {key: calls, equals: 0}
+    - portal_state: {logins: 1, failed: 0, posts: 1}
+    - password_nowhere: true
+
+# A portal built like a real college ERP (hidden until a late stylesheet loads, "Enter verification Code" captcha box,
+# a hidden MFA box) with the login's "simple text captcha" switch on: Windows OCR (a stand-in here) reads a wrong
+# answer first, the site says "The verification code is incorrect.", Delta reads the new picture and signs in. Never
+# an OTP hand-off, never an AI call.
+- id: portal-erp-simple-captcha-ocr
+  description: simple captcha read on this PC with the login's switch on; a rejected captcha is re-read, bounded
+  needs: [browser]
+  request: Sign in to my college ERP
+  timeout_s: 180
+  portal: {mode: erp_captcha, login: {simple_captcha: true, login_url: "{portal}/"}, ocr: [WRONG7, K7Q2]}
+  script:
+    plan: [{needs_tools: true, goal: sign in, tools: [sign_in], success_criteria: ["signed in"]}]
+  check:
+    - status: done
+    - meter: {key: calls, equals: 0}
+    - portal_state: {logins: 1, failed: 0, posts: 2, captcha_wrong: 1}
+    - portal_asked: {tool: sign_in_handoff, count: 0}
+    - password_nowhere: true
+
+# The same ERP with the switch off (the default): nothing is read automatically. The form is filled, kept open, and
+# the captcha picture goes back to the user with the answer, who replies with the characters (tests/e2e covers the
+# reply). Nothing is submitted, no "complete it in the open browser", no AI call.
+- id: portal-erp-captcha-asks-user
+  description: captcha switch off; the user gets the captcha picture to read, nothing is submitted
+  needs: [browser]
+  request: Sign in to my college ERP
+  timeout_s: 180
+  portal: {mode: erp_captcha, login: {login_url: "{portal}/"}}
+  script:
+    plan: [{needs_tools: true, goal: sign in, tools: [sign_in], success_criteria: ["signed in"]}]
+  check:
+    - status: needs_user
+    - answer_contains: Reply with just the characters
+    - answer_not_contains: open browser
+    - meter: {key: calls, equals: 0}
+    - portal_state: {logins: 0, posts: 0}
+    - password_nowhere: true

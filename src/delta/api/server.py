@@ -151,7 +151,7 @@ def _result_json(r: TaskResult) -> dict[str, Any]:
             "provider": r.provider, "steps": [{"tool": s.tool, "ok": s.ok} for s in r.steps],
             "checks": v.checks if v else [], "seen_screen": bool(v and v.screenshot), "tokens": r.tokens,
             "usage": r.usage, "wall_s": r.wall_s, "fallback": r.fallback,
-            "options": r.options, "questions": r.questions, "asked_about": r.asked_about}
+            "options": r.options, "questions": r.questions, "asked_about": r.asked_about, "image": r.image}
 
 
 def create_app(c: Container, token: str) -> FastAPI:
@@ -264,7 +264,7 @@ def create_app(c: Container, token: str) -> FastAPI:
             try:
                 if chats is not None and chats.get(chat_id) is not None:  # the chat may have been deleted
                     chats.add(chat_id, "delta", res.answer, {k: v for k, v in results[req.id].items()
-                                                            if k not in ("answer", "chat_id")})
+                                                            if k not in ("answer", "chat_id", "image")})
             except Exception:
                 log.exception("api.chat_save_failed", task=req.id)
             try:

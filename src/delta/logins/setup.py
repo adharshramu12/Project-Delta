@@ -20,3 +20,13 @@ def attach(settings: Any, registry: Any, hub: Any, audit: Any, approvals: Any, s
     for tool in login_tools(service, hub):
         registry.register(tool)
     return service
+
+
+def attach_flow(orchestrator: Any, service: LoginService, executor: Any, events: Any) -> None:
+    """Saved-login requests as a fixed tool flow (delta.logins.flow), and each login's captcha switch as part of the
+    captcha allowlist (exact origin only)."""
+    from delta.logins.flow import LoginFlow
+
+    orchestrator.login_flow = LoginFlow(service, executor, events)
+    if service.solver is not None and hasattr(service.solver, "origin_allowed"):
+        service.solver.origin_allowed = service.store.captcha_allowed

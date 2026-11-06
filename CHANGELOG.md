@@ -194,6 +194,24 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 - Telegram `/apps` now shows your connected apps; the list of open windows moved to `/windows` (a button under
   `/apps` opens it too).
 
+### Fixed (saved logins, from a real college-ERP report)
+- "Log in to my ERP" is a fixed tool flow: no planner and no agent loop, 0 AI calls (the report: 61.7k tokens and
+  18 AI calls for one failed login). "try again" re-runs the same sign-in without re-planning.
+- Which login a request means is found from its words or any address on the site ("Example University ERP" -> "euerp");
+  two that fit are named, never guessed. Messages say exactly which login and field is missing or which address
+  did not match, and never claim a missing password when one is saved. Saving the same name asks to Replace (in
+  place, never a copy); a login saved without a password says so. Card status in plain words.
+- A captcha box ("Enter verification Code") is no longer taken for a one-time-code box, a rejected captcha is told
+  apart from a rejected password (a password is still never re-sent), and a sign-in form hidden until its stylesheet
+  loads is no longer taken for "already signed in".
+- New per-login switch "This site has a simple text captcha, let Delta read it" (off by default; Settings > Logins,
+  `delta logins captcha NAME --on`): like `delta captcha allow`, for that exact origin. Otherwise Delta sends the
+  captcha picture to the chat (dashboard or Telegram) and types the user's reply into the same filled form.
+- The same captcha handling in your own Chrome/Edge (UI Automation), and a clear message when the one-time
+  own-browser consent has not been given.
+- The planner (Codex and the other CLI providers) no longer answers "I can't perform desktop actions in this
+  interface": such a reply becomes a tool plan.
+
 ## 0.2.0 - Unreleased
 
 Not tagged yet. Everything merged after 0.1.0 (pull requests #9 to #23) plus the production hygiene batch.
