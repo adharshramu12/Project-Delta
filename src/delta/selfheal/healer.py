@@ -90,11 +90,14 @@ def retry_safe(name: str, risk: str, failure: Failure) -> bool:
 
 class Healer:
     def __init__(self, cfg: SelfHealConfig, executor: Any, events: Any = None,
-                 can_see: Callable[[], bool] = lambda: False, settle_s: float = 1.5) -> None:
+                 can_see: Callable[[], bool] = lambda: False, settle_s: float = 1.5,
+                 can_ocr: Callable[[], bool] = lambda: False, can_mark: Callable[[], bool] = lambda: False) -> None:
         self.cfg = cfg
         self.executor = executor
         self.events = events
         self.can_see = can_see
+        self.can_ocr = can_ocr    # Windows OCR works here: the OCR rung (click_text) is used
+        self.can_mark = can_mark  # set-of-marks is available: the vision rung suggests look_with_marks
         self.settle_s = settle_s
         self.engine: Any = None  # TaskEngine (event log), set by bootstrap / the eval runner
         self._task: dict[str, int] = {}
@@ -359,7 +362,7 @@ class Healer:
         rung = self._rung.get(key, current)
         tried = [current]
         while True:
-            nxt = strategy.next_rung(family, rung, self.can_see())
+            nxt = strategy.next_rung(family, rung, self.can_see(), self.can_ocr())
             if nxt is None or nxt == strategy.ASK:
                 self._rung[key] = strategy.ASK
                 words = ", ".join(strategy.RUNG_WORDS[r] for r in dict.fromkeys(tried))
@@ -374,7 +377,8 @@ class Healer:
                 self._pending[(task_id, family)] = (nxt, target)
                 line = f"Stepping down to the screen picture for '{label or name}'."
                 await self.record(task_id, failure, line, False, name, rung=nxt)
-                return Recovery(result, [line], hint=strategy.vision_hint(label or "the control"), failure=failure)
+                return Recovery(result, [line], hint=strategy.vision_hint(label or "the control", self.can_mark()),
+                                failure=failure)
             translate = strategy.STEP_DOWN.get((name, nxt))
             move = translate(args, {"label": label, "title": self._title(steps)}) if translate else None
             if move is not None and move.tool in self._names() and self.take(task_id):

@@ -3,7 +3,8 @@
     - id: files-create-note            unique, short
       suite: files                     files | documents | browser | apps | memory (default: the file name)
       request: Create notes.txt in {sandbox} saying hello
-      needs: [browser]                 optional: browser (a real Chrome/Edge), windows (Windows only)
+      needs: [browser]                 optional: browser (a real Chrome/Edge), windows (Windows only),
+                                       ocr (Windows OCR with a language installed)
       approve: approve                 what the eval answers when Delta asks: approve (default) | deny
       setup:                           optional, before the task runs
         files: {"in.txt": "text"}      written into the sandbox folder
@@ -14,6 +15,10 @@
         verify: [{passed: true, reason: "..."}]
       inject: [{tool, times, output}]  optional: make tool calls fail (delta.selfheal.inject; evals only)
       fake_browser: {moved: true}      optional: the fake browser (delta.evals.fakebrowser) with failure switches
+      perception: {fixture: page}      optional: perception tools (delta.perception) on a drawn picture:
+                                       fixture page (the fake browser's page) | text (lines in `text`);
+                                       other keys are PerceptionConfig settings (ocr, cache, max_marks...)
+      helpers: {max_helpers: 2}        optional: parallel read-only helpers on (HelpersConfig settings)
       check:                           all must pass; see delta.evals.checkers
         - file_contains: {path: notes.txt, text: hello}
       timeout_s: 120
@@ -30,7 +35,7 @@ from typing import Any
 
 import yaml
 
-SUITES = ("files", "documents", "browser", "apps", "memory", "selfheal")
+SUITES = ("files", "documents", "browser", "apps", "memory", "selfheal", "perception", "helpers")
 
 
 @dataclass
@@ -47,6 +52,8 @@ class EvalTask:
     description: str = ""
     inject: list[dict[str, Any]] = field(default_factory=list)
     fake_browser: dict[str, Any] | None = None
+    perception: dict[str, Any] | None = None
+    helpers: dict[str, Any] | None = None
 
 
 class SpecError(ValueError):
@@ -74,12 +81,18 @@ def _task(raw: Any, suite: str, where: str) -> EvalTask:
     fake = raw.get("fake_browser")
     if fake is not None and not isinstance(fake, dict):
         raise SpecError(f"{where} {raw['id']}: fake_browser must be a mapping of switches")
+    extra: dict[str, dict[str, Any] | None] = {}
+    for key in ("perception", "helpers"):
+        value = raw.get(key)
+        if value is not None and not isinstance(value, dict):
+            raise SpecError(f"{where} {raw['id']}: {key} must be a mapping of settings")
+        extra[key] = dict(value) if value is not None else None
     return EvalTask(id=str(raw["id"]), suite=str(raw.get("suite", suite)), request=str(raw["request"]),
                     check=list(check), script={str(k): list(v or []) for k, v in script.items()},
                     setup=dict(raw.get("setup") or {}), needs=[str(n) for n in raw.get("needs") or []],
                     approve=approve, timeout_s=float(raw.get("timeout_s", 120)),
                     description=str(raw.get("description", "")), inject=list(inject),
-                    fake_browser=dict(fake) if fake is not None else None)
+                    fake_browser=dict(fake) if fake is not None else None, **extra)
 
 
 def load_specs(folder: Path, suites: list[str] | None = None, ids: list[str] | None = None) -> list[EvalTask]:

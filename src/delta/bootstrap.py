@@ -276,6 +276,39 @@ def attach_selfheal(settings: Settings, router: ModelRouter, executor: ToolExecu
     return healer
 
 
+def attach_perception(settings: Settings, router: ModelRouter, executor: ToolExecutor, orchestrator: Orchestrator,
+                      browsers: Any = None, ctl: Any = None, proof: ProofRecorder | None = None,
+                      governor: Any = None) -> Any:
+    """Set-of-marks, Windows OCR and the perception cache (delta.perception), and the opt-in parallel read-only
+    helpers (delta.helpers). The perception tools hide themselves where they cannot work (no vision model, not
+    Windows, no OCR language). Helper tools are registered only when helpers.enabled is on, so with the
+    default settings the planner and the agent see exactly the tools they saw before."""
+    from delta.perception.cache import PerceptionCache
+    from delta.perception.ocr import WindowsOcr
+    from delta.perception.tools import Perception, perception_tools
+
+    cfg = settings.perception
+    perception = Perception(cfg, router, WindowsOcr(cfg.ocr), PerceptionCache(cfg.cache), hub=browsers, ctl=ctl,
+                            proof=proof, governor=governor)
+    for t in perception_tools(perception):
+        executor.registry.register(t)
+    orchestrator.perception = perception
+    healer = orchestrator.healer
+    if healer is not None:
+        names = set(executor.registry.names())
+        healer.can_ocr = lambda: "click_text" in names and perception.ocr.available()
+        healer.can_mark = lambda: cfg.marks and perception.can_see()
+    if settings.helpers.enabled:
+        from delta.helpers.supervisor import HelperSupervisor
+        from delta.helpers.tools import helper_tools
+
+        supervisor = HelperSupervisor(settings.helpers, router, executor, orchestrator.engine)
+        for t in helper_tools(supervisor, settings.helpers.read_page):
+            executor.registry.register(t)
+        orchestrator.helpers = supervisor
+    return perception
+
+
 def build(settings: Settings) -> Container:
     data = settings.data_dir
     data.mkdir(parents=True, exist_ok=True)  # first run: databases need the folder to exist
@@ -380,6 +413,8 @@ def build(settings: Settings) -> Container:
     governor.on_change(on_health)
     attach_engine(settings, router, executor, orchestrator, proof, registry, audit)  # tasks.db, watchdog
     attach_selfheal(settings, router, executor, orchestrator, events)  # recovery, undo, opt-in model ladder
+    attach_perception(settings, router, executor, orchestrator, browsers, ctl if desktop_ok else None, proof,
+                      governor)  # set-of-marks, OCR, perception cache, opt-in read-only helpers
     from delta.safety.remote_guard import RemoteGuard
     from delta.system.notify import notify
 

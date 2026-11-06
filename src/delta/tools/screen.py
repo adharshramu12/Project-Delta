@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -51,8 +52,8 @@ def find_window_handle(title: str) -> int | None:
     return found[0] if found else None
 
 
-def capture_window_jpeg(hwnd: int, max_width: int) -> tuple[str, tuple[int, int], tuple[int, int], tuple[int, int]]:
-    """One window -> (base64 jpeg, window size, image size, window's top-left on screen).
+def capture_window_image(hwnd: int) -> tuple[Any, tuple[int, int]]:
+    """One window -> (PIL picture at full size, window's top-left on screen).
 
     PrintWindow asks the app to draw itself, so this works even when other windows cover it:
     Delta can look at Notepad while the user keeps working in front of it."""
@@ -78,12 +79,30 @@ def capture_window_jpeg(hwnd: int, max_width: int) -> tuple[str, tuple[int, int]
         mem.DeleteDC()
         src.DeleteDC()
         win32gui.ReleaseDC(hwnd, hdc)
+    return img, (left, top)
+
+
+def capture_screen_image() -> Any:
+    """The primary monitor as a PIL picture at full size."""
+    import mss
+    from PIL import Image
+
+    with mss.mss() as sct:
+        shot = sct.grab(sct.monitors[1])
+        return Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+
+
+def capture_window_jpeg(hwnd: int, max_width: int) -> tuple[str, tuple[int, int], tuple[int, int], tuple[int, int]]:
+    """One window -> (base64 jpeg, window size, image size, window's top-left on screen)."""
+    from PIL import Image
+
+    img, origin = capture_window_image(hwnd)
     size = img.size
     if img.width > max_width:
         img = img.resize((max_width, round(img.height * max_width / img.width)), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=70, optimize=True)
-    return base64.b64encode(buf.getvalue()).decode(), size, img.size, (left, top)
+    return base64.b64encode(buf.getvalue()).decode(), size, img.size, origin
 
 
 class LookArgs(BaseModel):
@@ -140,6 +159,11 @@ class LookAtScreen(Tool[LookArgs]):
                 "Use list_windows / read_window (desktop apps) or browser_read (web pages) instead: they "
                 "read the screen as text. To enable vision, add a free NVIDIA key in Setup, or install "
                 f"Ollama with a vision model. ({str(e)[:120]})"), {"vision_available": False})
+        from delta.llm.usage import bump
+        from delta.perception.images import image_tokens
+
+        bump(self.router, "images_sent")
+        bump(self.router, "image_tokens_est", image_tokens(iw, ih))
         evidence: dict = {"vision_provider": resp.provider, "screen": [sw, sh], "window": args.window}
         if self.proof and (name := self.proof.save_image(b64, args.window or "screen")):
             evidence["proof_image"] = name

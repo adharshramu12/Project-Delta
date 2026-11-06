@@ -121,6 +121,8 @@ def _show(engine: Any, task_id: str, as_json: bool) -> int:
               f"{tok} {s['model']}{'  [changes something]' if s['side_effect'] else ''}")
         if s["summary"]:
             print(f"       {s['summary'][:160]}")
+    for h in data.get("helpers") or []:
+        print(f"  helper {'ok' if h['ok'] else 'failed'}: {h['summary']}  (child task {h.get('child', '?')})")
     for c in data["checks"]:
         print(f"  check {'passed' if c['ok'] else 'failed'}: {c['summary']}")
     if t["answer"]:

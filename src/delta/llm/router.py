@@ -167,6 +167,19 @@ class ModelRouter:
             self.fallback_used = self.last_provider or ""
             return resp
 
+    async def complete_api_only(self, messages: list[Message], tools: list[dict] | None = None,
+                                task: str = "helper") -> LLMResponse:
+        """One call on the normal route for `task`, skipping CLI providers (Claude Code, Codex, Cline), which
+        keep one live session per task and must not be shared by parallel helpers. Changes no route or
+        default; raises AllProvidersFailedError when only CLI providers are set up."""
+        candidates = [p for p in self.candidates(task) if not _is_cli(p)]
+        errors: list[str] = []
+        kinds: list[str] = []
+        if not candidates:
+            raise AllProvidersFailedError(
+                f"No API model provider is available for task '{task}' (CLI providers are not used here)", [])
+        return await self._walk(candidates, messages, tools, task, False, errors, kinds)
+
     def _fallback_candidates(self, task: str, tried: set[str], errors: list[str], kinds: list[str]) -> list[Provider]:
         """router.fallbacks (opt-in), only after outage-type failures: rate limit, unreachable, quota."""
         if not self.fallbacks or not kinds:

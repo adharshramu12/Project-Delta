@@ -268,6 +268,35 @@ class UndoConfig(BaseModel):
     retention_days: float = Field(default=7, ge=0)  # older undo copies are removed (0 = keep)
 
 
+class PerceptionConfig(BaseModel):
+    """How Delta sees (delta.perception). Added later: older settings files load with these defaults.
+    Pictures stay on this PC except that a picture goes to the vision model you chose."""
+    # Set-of-marks: numbered boxes over clickable elements; the model answers with a number and Delta clicks
+    # that element by its handle. Offered only when a model that can see pictures is set up.
+    marks: bool = True
+    max_marks: int = Field(default=40, ge=5, le=99)      # marks drawn on one picture
+    max_side: int = Field(default=1280, ge=512, le=2048)  # longest side of a marked picture, in pixels
+    jpeg_quality: int = Field(default=60, ge=30, le=90)
+    # Windows' built-in OCR for apps with no accessibility tree. auto = use it when Windows has it.
+    ocr: Literal["auto", "off"] = "auto"
+    # Do not send a picture or a window read again when it has not changed since the last one.
+    cache: bool = True
+
+
+class HelpersConfig(BaseModel):
+    """Parallel read-only helpers (delta.helpers): for a task that needs several independent lookups, the
+    planner may hand them to up to `max_helpers` helpers that run at the same time. Helpers can only search the
+    web, fetch or read pages in a fresh headless browser context and read files in your allowed folders; they
+    can never click, type, write, send or use your own browser (enforced in code). OFF by default: turning it
+    on adds a few lines to every planner request, so it costs a little more on simple tasks."""
+    enabled: bool = False
+    max_helpers: int = Field(default=2, ge=1, le=4)
+    token_budget: int = Field(default=6000, ge=500, le=100_000)  # per helper, input + output tokens
+    timeout_s: float = Field(default=60, ge=5, le=600)           # per helper
+    max_steps: int = Field(default=4, ge=1, le=10)               # model calls per helper
+    read_page: bool = True  # helpers may read a page in a fresh headless browser context (no cookies)
+
+
 Autonomy = Literal["ask-everything", "ask-risky", "trusted", "autopilot"]
 
 
@@ -306,6 +335,8 @@ class Settings(BaseModel):
     selfheal: SelfHealConfig = Field(default_factory=SelfHealConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     undo: UndoConfig = Field(default_factory=UndoConfig)
+    perception: PerceptionConfig = Field(default_factory=PerceptionConfig)
+    helpers: HelpersConfig = Field(default_factory=HelpersConfig)
     boundaries: Boundaries = Field(default_factory=Boundaries)
     apps: dict[str, AppEntry] = Field(default_factory=dict)
     config_dir: Path = REPO_ROOT / "config"

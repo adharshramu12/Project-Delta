@@ -319,6 +319,33 @@ class TaskEngine:
         self.store.append(task_id, "failure", ok=0, summary=redact_text(summary, SUMMARY_CHARS),
                           data=json.dumps({"failure": failure}))
 
+    def helper(self, parent_id: str, child_id: str, data: dict[str, Any]) -> None:
+        """A read-only helper (delta.helpers) that ran for this task: a child task row (already final, so a
+        crash can never leave one to resume) with one event per source it read, and a line in the parent's
+        log that the timeline shows."""
+        self._safe("helper", self._helper, parent_id, child_id, data)
+
+    def _helper(self, parent_id: str, child_id: str, data: dict[str, Any]) -> None:
+        if self.store.get(parent_id) is None:
+            return
+        ok = bool(data.get("ok"))
+        question = redact_text(str(data.get("question") or ""), SUMMARY_CHARS)
+        if self.store.get(child_id) is None:
+            self.store.create(child_id, TaskState.DONE if ok else TaskState.FAILED, text=question, channel="helper",
+                              note=f"read-only helper of task {parent_id}",
+                              answer=redact_text(str(data.get("answer") or data.get("error") or ""), 2000),
+                              tokens_in=int(data.get("tokens") or 0), calls=int(data.get("calls") or 0),
+                              steps=int(data.get("steps") or 0), finished=time.time())
+            for source in data.get("sources") or []:
+                name, _, what = str(source).partition(" ")
+                self.store.append(child_id, "helper_read", tool=name, ok=1, risk="read",
+                                  summary=redact_text(what, SUMMARY_CHARS))
+        line = f"Helper {data.get('index', '')}: {question}" + ("" if ok else f" (not answered: {data.get('error')})")
+        keep = {k: data.get(k) for k in ("index", "tokens", "calls", "steps", "seconds", "refused", "sources")}
+        self.store.append(parent_id, "helper", tool="parallel_research", ok=int(ok), risk="read",
+                          summary=redact_text(line, SUMMARY_CHARS),
+                          data=json.dumps(redact_value({"child": child_id, **keep}, 200), default=str)[:2000])
+
     # --- start-up, resume, discard -------------------------------------------------------------
     def recover(self) -> list[dict[str, Any]]:
         """At start-up: tasks left running by a crash or power cut become interrupted. Also prunes."""
@@ -409,6 +436,9 @@ class TaskEngine:
                        **_data(e, "failure", "rung")} for e in events if e["kind"] == "recovery"]
         failures = [{"ts": e["ts"], "summary": e["summary"], **_data(e, "failure")} for e in events
                     if e["kind"] == "failure"]
+        helpers = [{"ts": e["ts"], "ok": bool(e["ok"]), "summary": e["summary"],
+                    **_data(e, "child", "tokens", "seconds", "sources", "refused")}
+                   for e in events if e["kind"] == "helper"]
         undo = self._undo_summary(task_id)
         steps = []
         for s in steps_of(events):
@@ -419,7 +449,7 @@ class TaskEngine:
         for view in steps:
             view.update(failed.get(view["step"], {}))
         return {"task": task, "steps": steps, "states": states, "checks": checks, "notes": notes,
-                "recoveries": recoveries, "failures": failures, "undo": undo,
+                "recoveries": recoveries, "failures": failures, "undo": undo, "helpers": helpers,
                 "running": task["state"] in {str(s) for s in RUNNING}, "now": time.time()}
 
     def _undo_summary(self, task_id: str) -> dict[str, Any]:

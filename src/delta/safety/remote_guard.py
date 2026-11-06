@@ -55,7 +55,9 @@ SYSTEM_APPROVERS = frozenset({"timeout", "shutdown"})
 # Tools that need the PIN whenever the request came from a remote channel: they show what is on the PC
 # (screen, webcam, windows, files, private messages, clipboard) or run arbitrary code that could.
 REMOTE_PIN_TOOLS = {
-    "look_at_screen": "see the screen", "take_screenshot": "take a screenshot", "read_window": "read a window",
+    "look_at_screen": "see the screen", "look_with_marks": "see the screen",
+    "read_screen_text": "read the screen", "click_text": "read the screen to find what to click",
+    "take_screenshot": "take a screenshot", "read_window": "read a window",
     "camera_photo": "take a webcam photo", "read_file": "read a file on the PC", "send_file": "send a file from the PC",
     "read_messages": "read your messages", "run_shell": "run a command on the PC",
     "run_python": "run code on the PC",

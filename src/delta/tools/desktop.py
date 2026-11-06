@@ -23,6 +23,7 @@ from functools import partial
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field, field_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from delta.tools.base import Risk, Tool, ToolResult
 
@@ -556,6 +557,25 @@ class ClickElementArgs(BaseModel):
     name: str = Field(description="Visible name of the button/link/field, as shown by read_window")
     control_type: str | None = Field(default=None, description="e.g. Button, Edit, MenuItem")
     window: str | None = None
+    # Set only by click_mark (delta.perception): the exact UI Automation element of a mark. Not offered to the
+    # model. Used only while that element still has this name; otherwise the name search below runs.
+    handle: SkipJsonSchema[str | None] = None
+
+
+def _marked_element(handle: str | None, name: str) -> Any:
+    if not handle:
+        return None
+    from delta.perception.marks import BOOK
+
+    el = BOOK.handle(handle)
+    if el is None:
+        return None
+    try:
+        if (el.element_info.name or "").strip().lower() == name.strip().lower() and el.is_visible():
+            return el
+    except Exception:  # the element is gone
+        return None
+    return None
 
 
 class ClickElement(_DesktopTool[ClickElementArgs]):
@@ -576,6 +596,15 @@ class ClickElement(_DesktopTool[ClickElementArgs]):
 
     async def run(self, args: ClickElementArgs) -> ToolResult:
         def go() -> str:
+            marked = _marked_element(args.handle, args.name)
+            if marked is not None:  # the very element the user's mark pointed at
+                how = "invoked"
+                try:
+                    marked.invoke()
+                except Exception:
+                    marked.click_input()
+                    how = "clicked"
+                return f"{how} [{marked.element_info.control_type}] {marked.element_info.name}"
             w = _find_window(args.window)
             want = args.name.lower()
             matches = [el for el in (w.descendants(control_type=args.control_type) if args.control_type
@@ -601,6 +630,9 @@ class ClickAtArgs(BaseModel):
     y: int
     button: str = Field(default="left", pattern="^(left|right)$")
     double: bool = False
+    # Set only by click_mark / click_text (delta.perception): the text the click is aimed at (from OCR or a
+    # mark). Not offered to the model. It can only make the click count as riskier, never safer.
+    expect: SkipJsonSchema[str] = ""
 
 
 class ClickAt(_DesktopTool[ClickAtArgs]):
@@ -611,11 +643,11 @@ class ClickAt(_DesktopTool[ClickAtArgs]):
 
     def risk_for(self, args: ClickAtArgs) -> Risk:
         # A coordinate click on a Send/Pay/Delete button is that action, exactly like click_element.
-        return self.click_risk_at(args.x, args.y)
+        return riskiest(self.click_risk_at(args.x, args.y), click_risk(args.expect) if args.expect else Risk.ACT)
 
     def summary(self, args: ClickAtArgs) -> str:
         names = self.labels_at(args.x, args.y)
-        on = f" on '{names[-1]}'" if names else ""
+        on = f" on '{names[-1]}'" if names else (f" on '{args.expect[:60]}'" if args.expect else "")
         return f"{'double-' if args.double else ''}{args.button}-click at ({args.x},{args.y}){on}"
 
     def input_targets(self, args: ClickAtArgs) -> list[Target] | None:

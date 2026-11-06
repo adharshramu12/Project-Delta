@@ -164,6 +164,26 @@ undo:
   max_task_mb: 200
   retention_days: 7
 
+# How Delta sees. Pictures stay on this PC, except that a picture goes to the vision model you chose.
+perception:
+  marks: true                 # numbered boxes on clickable elements; Delta clicks the chosen one by its handle
+  max_marks: 40               # marks per picture
+  max_side: 1280              # longest side of a marked picture (pixels): smaller = fewer image tokens
+  jpeg_quality: 60
+  ocr: auto                   # Windows' built-in OCR for apps with no accessibility tree | off
+  cache: true                 # do not send an unchanged screen or window again
+
+# Parallel read-only helpers: OFF by default (it adds a few lines to every planner request). When on, the
+# planner may split independent lookups between helpers that can only search, read pages and read files in
+# your allowed folders. They can never click, type, write, send or use your own browser.
+helpers:
+  enabled: false
+  max_helpers: 2              # 1 to 4 at the same time
+  token_budget: 6000          # per helper
+  timeout_s: 60               # per helper
+  max_steps: 4                # model calls per helper
+  read_page: true             # read pages in a fresh headless browser context (no cookies, no sign-ins)
+
 # Writer and Documents: write_post, prepare_post (Delta never presses Post), make_document.
 writer:
   enabled: true

@@ -97,14 +97,25 @@ def cost_of(provider: str, tokens_in: int, tokens_out: int) -> float | None:
     return round((tokens_in * p_in + tokens_out * p_out) / 1_000_000, 6)
 
 
-def skip_reason(task: EvalTask, has_browser: bool, scripted: bool) -> str:
+def skip_reason(task: EvalTask, has_browser: bool, scripted: bool, has_ocr: bool = True) -> str:
     if scripted and not task.script.get("plan"):
         return "no script for the scripted model"
     if "windows" in task.needs and sys.platform != "win32":
         return "needs Windows"
     if "browser" in task.needs and not has_browser:
         return "needs Chrome or Edge"
+    if "ocr" in task.needs and not has_ocr:
+        return "needs Windows OCR (not available on this PC)"
     return ""
+
+
+async def ocr_available() -> bool:
+    from delta.perception.ocr import WindowsOcr
+
+    try:
+        return await WindowsOcr("auto").probe()
+    except Exception:
+        return False
 
 
 class _Router:
@@ -119,13 +130,38 @@ class _Router:
         if self.model is None:
             provider = ScriptedProvider(fill(task.script, values))
             return ModelRouter({"scripted": provider}, {j: ["scripted"] for j in ("plan", "chat", "verify",
-                                                                                 "vision")})
+                                                                                 "vision", "helper")})
         from delta.bootstrap import build_providers
         from delta.config import load_settings
 
         user = load_settings()
         preferred = self.model if self.model in user.llm.providers else user.llm.preferred
         return ModelRouter(build_providers(user), user.llm.routes, preferred=preferred)
+
+
+def _perception(task: EvalTask, router: Any, fake_mgr: Any) -> Any:
+    from delta.config import PerceptionConfig
+    from delta.evals.perception_fixtures import page_capture, text_capture
+    from delta.perception.cache import PerceptionCache
+    from delta.perception.marks import Capture
+    from delta.perception.ocr import WindowsOcr
+    from delta.perception.tools import Perception
+
+    spec = dict(task.perception or {})
+    cfg = PerceptionConfig(**{k: v for k, v in spec.items() if k in PerceptionConfig.model_fields})
+    p = Perception(cfg, router, WindowsOcr(cfg.ocr), PerceptionCache(cfg.cache))
+    fixture = str(spec.get("fixture", "page"))
+    lines = [str(x) for x in spec.get("text") or []]
+
+    async def capture(where: str, window: str | None) -> Capture:
+        if fixture == "text":
+            return text_capture(lines)
+        if fake_mgr is None or not fake_mgr.current_url:
+            raise LookupError("no page is open")
+        return page_capture(fake_mgr)
+
+    p.capture_override = capture
+    return p
 
 
 async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory: _Router,
@@ -194,10 +230,18 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     writer = writer_tools(router, settings.writer, events)
     tools += [t for t in writer if t.name == "make_document"]
     browser = None
+    fake_mgr: Any = None
     if task.fake_browser is not None:  # evals only: the fake browser with failure switches
         from delta.evals.fakebrowser import FakeBrowserManager, fake_browser_tools
 
-        tools += fake_browser_tools(FakeBrowserManager(sandbox / "page_state.json", task.fake_browser))
+        fake_mgr = FakeBrowserManager(sandbox / "page_state.json", task.fake_browser)
+        tools += fake_browser_tools(fake_mgr)
+    perception = None
+    if task.perception is not None:  # set-of-marks and OCR on a picture drawn for the eval
+        perception = _perception(task, router, fake_mgr)
+        from delta.perception.tools import perception_tools
+
+        tools += perception_tools(perception)
     elif "browser" in task.needs and has_browser:
         from delta.tools import browser as browser_mod
 
@@ -220,6 +264,18 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         executor.faults = FaultInjector(fill(task.inject, values))
     orch = Orchestrator(settings, router, executor, memory, None, events, audit, None, None, proof)
     orch.engine = engine
+    orch.perception = perception
+    if task.helpers is not None:  # parallel read-only helpers, on for this eval
+        from delta.config import HelpersConfig
+        from delta.helpers.supervisor import HelperSupervisor
+        from delta.helpers.tools import helper_tools
+
+        hcfg = HelpersConfig(**{"enabled": True, **{k: v for k, v in task.helpers.items()
+                                                    if k in HelpersConfig.model_fields}})
+        supervisor = HelperSupervisor(hcfg, router, executor, engine)
+        for t in helper_tools(supervisor, read_page=False):
+            registry.register(t)
+        orch.helpers = supervisor
     if settings.selfheal.enabled:
         orch.healer = Healer(settings.selfheal, executor, events, can_see=lambda: False, settle_s=0.05)
         orch.healer.engine = engine
@@ -241,7 +297,8 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         out.status, out.error, steps = "error", f"{type(e).__name__}: {e}", []
     out.seconds = round(time.monotonic() - started, 2)
     out.cost_usd = cost_of(out.provider or "scripted", out.tokens_in, out.tokens_out)
-    ctx = CheckContext(sandbox=sandbox, status=out.status, answer=out.answer, steps=steps,
+    meter = dict(getattr(router, "meter", {}) or {})
+    ctx = CheckContext(sandbox=sandbox, status=out.status, answer=out.answer, steps=steps, meter=meter,
                        page_state=site.snapshot(), memories=[m.content for m in memory.list()],
                        tasks_db=data / "tasks.db", timeline=engine.timeline(req.id), undo=undo,
                        policy=executor.policy, task_id=req.id)
@@ -262,6 +319,7 @@ async def run_suite(tasks: list[EvalTask], model: str | None = None, keep: bool 
     for var in ("NO_PROXY", "no_proxy"):
         os.environ[var] = ",".join(x for x in (os.environ.get(var, ""), local) if x)
     has_browser = browser_available()
+    has_ocr = await ocr_available() if any("ocr" in t.needs for t in tasks) else False
     root = Path(tempfile.mkdtemp(prefix="delta-eval-"))
     outcomes: list[TaskOutcome] = []
     router_factory = _Router(model)
@@ -269,7 +327,7 @@ async def run_suite(tasks: list[EvalTask], model: str | None = None, keep: bool 
     try:
         with FixtureSite(SITE_DIR) as site:
             for task in tasks:
-                if why := skip_reason(task, has_browser, model is None):
+                if why := skip_reason(task, has_browser, model is None, has_ocr):
                     outcomes.append(TaskOutcome(task.id, task.suite, status="skipped", skipped=why))
                     log(f"  - {task.id}: skipped ({why})")
                     continue

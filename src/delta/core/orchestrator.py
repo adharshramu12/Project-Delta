@@ -300,7 +300,24 @@ def claims_no_tools(text: str) -> bool:
     return bool(_NO_TOOLS.search(text))
 
 
-LOOKING = {"read_window", "list_windows", "path_info", "look_at_screen", "media_status"}
+LOOKING = {"read_window", "list_windows", "path_info", "look_at_screen", "media_status", "look_with_marks",
+           "read_screen_text"}
+
+
+def _jpeg_tokens(b64: str) -> int:
+    """Estimated image tokens of a base64 JPEG (its size read from the header; 0 if unreadable)."""
+    try:
+        import base64
+        import io
+
+        from PIL import Image
+
+        from delta.perception.images import image_tokens
+
+        with Image.open(io.BytesIO(base64.b64decode(b64))) as img:
+            return image_tokens(*img.size)
+    except Exception:
+        return 0
 
 
 def stuck_in_loop(steps: list[StepRecord], repeats: int = 3) -> bool:
@@ -361,6 +378,8 @@ ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "search_files", "web_searc
                 "media_status", "do_actions", "scroll"}
 BROWSER_TOOLS = BROWSER_ACTIONS | {"browser_read"}
 SCREEN_TOOLS = {"click_element", "click_at", "type_text", "press_keys", "set_field"}
+# Set-of-marks and OCR (delta.perception): sent with the screen tools, and only when they are usable here.
+PERCEPTION_TOOLS = {"look_with_marks", "click_mark", "read_screen_text", "click_text"}
 WEBSITE = re.compile(r"https?://|www\.|\b[\w-]+\.(com|org|net|in|io|ai|dev|app)\b|\b(website|web ?site|web ?page|"
                      r"browser|chrome|edge|youtube|gmail|notebooklm|google (docs|drive|sheets|slides)|gemini|"
                      r"chatgpt|amazon|flipkart|linkedin|twitter|instagram|facebook|wikipedia)\b", re.I)
@@ -370,6 +389,8 @@ class Orchestrator:
     engine: Any = None  # TaskEngine (delta.engine), set by bootstrap: task states in tasks.db. None = not recorded
     healer: Any = None  # Healer (delta.selfheal), set by bootstrap: recovery playbooks. None = no self-heal
     ladder: Any = None  # ModelLadder (delta.llm.ladder): opt-in cheap-first models. None or empty = off
+    perception: Any = None  # Perception (delta.perception): set-of-marks, OCR, the perception cache. None = off
+    helpers: Any = None  # HelperSupervisor (delta.helpers): parallel read-only helpers. None or disabled = off
 
     def __init__(self, settings: Settings, router: ModelRouter, executor: ToolExecutor,
                  memory: MemoryStore | None, governor: Governor | None, events: EventBus,
@@ -443,6 +464,11 @@ class Orchestrator:
             for helper in (self.healer, self.ladder):
                 if helper is not None:
                     helper.forget(req.id)
+            if self.perception is not None:
+                from delta.perception.marks import BOOK
+
+                self.perception.cache.forget(req.id)
+                BOOK.forget(req.id)
             try:
                 await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
             except Exception:
@@ -497,7 +523,7 @@ class Orchestrator:
         # Boot the acting model (Claude Code: ~6 s) while the plan is being made, not after.
         warm = asyncio.create_task(self.router.prewarm("chat"))
         plan = await make_plan(self.router, req.with_context, self.executor.registry.names(), memory_ctx,
-                               self.s.agent.name, known, environment)
+                               self.s.agent.name, known, environment, helpers=self._helper_slots())
         with contextlib.suppress(Exception):
             await warm
         await self.events.publish("task.plan", task_id=req.id, plan=plan.__dict__)
@@ -519,6 +545,15 @@ class Orchestrator:
             messages.append({"role": "user", "content": (
                 f"Already done: {steps[0].tool}({json.dumps(steps[0].args)}) -> {steps[0].output[:800]}\n"
                 "Continue from here to finish the task.")})
+        if plan.research and self._helper_slots():
+            # Independent lookups go to read-only helpers at the same time (opt-in, delta.helpers).
+            await self.events.publish("task.step", task_id=req.id, tool="parallel_research",
+                                      args={"questions": plan.research})
+            found = await self.executor.execute("parallel_research", {"questions": plan.research}, task_id=req.id)
+            steps.append(StepRecord("parallel_research", {"questions": plan.research}, found.ok,
+                                    found.output[:2000], found.evidence))
+            if found.output:
+                messages.append({"role": "user", "content": found.output[:6000]})
         budget = self._step_budget()
         messages[0]["content"] += "\n\n" + abilities_text(self._brain(), self._can_see(), budget)
         verification: Verification | None = None
@@ -659,6 +694,14 @@ class Orchestrator:
         first = self.router.candidates("chat")
         return first[0].name if first else ""
 
+    def _helper_slots(self) -> int:
+        """How many parallel read-only helpers the planner may ask for: 0 unless turned on (off by default)."""
+        if self.helpers is None or not self.helpers.enabled:
+            return 0
+        if "parallel_research" not in self.executor.registry.names():
+            return 0
+        return int(self.helpers.slots())
+
     def _can_see(self) -> bool:
         return "look_at_screen" in self.executor.registry.names() and bool(self.router.candidates("vision"))
 
@@ -672,7 +715,7 @@ class Orchestrator:
         return bool(first) and first[0].supports("vision") and self._can_see()
 
     async def _observe(self, tool: str, task_id: str, steps: list[StepRecord] | None = None,
-                       request: str = "", evidence: dict[str, Any] | None = None
+                       request: str = "", evidence: dict[str, Any] | None = None, seq: int = -10
                        ) -> tuple[str, str, dict[str, Any], str | None] | None:
         """What the screen/page shows right after an action: (observer, text, args, screenshot)."""
         if not self.s.agent.auto_observe:
@@ -681,6 +724,12 @@ class Orchestrator:
         if tool in PIXEL_ACTIONS and self._brain_sees():
             shot, target = await self._screenshot(proof_target(steps or []) or "", OBSERVE_WIDTH, "after " + tool)
             if shot:
+                if self._same_picture(task_id, target, shot):  # perception cache: not sent twice
+                    from delta.perception.cache import SAME_PICTURE
+
+                    return "screenshot", SAME_PICTURE, {"window": target}, None
+                usage.bump(self.router, "images_sent")
+                usage.bump(self.router, "image_tokens_est", _jpeg_tokens(shot))
                 return "screenshot", f"(screenshot of {target} attached below)", {"window": target}, shot
         args: dict[str, Any]
         if tool in BROWSER_ACTIONS and "browser_read" in names:
@@ -703,9 +752,34 @@ class Orchestrator:
         if not result.ok:
             return None
         text = result.output
+        if observer == "read_window" and self.perception is not None and task_id:
+            # Perception cache: an unchanged window is one line, a changed one only its changed lines.
+            window = str(result.evidence.get("window") or args.get("window") or "")
+            text, cached = self.perception.cache.window_text(task_id, window, text, seq)
+            if cached:
+                usage.bump(self.router, "perception_cache_hits")
         if len(text) > OBSERVE_CHARS:
             text = text[:OBSERVE_CHARS] + "\n…[more: call the read tool again with a focus]"
         return observer, text, args, None
+
+    def _same_picture(self, task_id: str, target: str, b64: str) -> bool:
+        if self.perception is None or not task_id:
+            return False
+        try:
+            import base64
+            import io
+
+            from PIL import Image
+
+            from delta.perception.images import digest
+
+            img = Image.open(io.BytesIO(base64.b64decode(b64)))
+            seen = self.perception.cache.picture_seen(task_id, f"step:{target}", digest(img))
+        except Exception:
+            return False
+        if seen:
+            usage.bump(self.router, "perception_cache_hits")
+        return bool(seen)
 
     async def _fresh_media_status(self, task_id: str, steps: list[StepRecord]) -> None:
         """Playback tasks: what Windows says is playing right now goes into the evidence, so the
@@ -760,7 +834,7 @@ class Orchestrator:
         if set(wanted) & BROWSER_TOOLS or WEBSITE.search(request):  # not ALWAYS_TOOLS' browser_read
             keep |= BROWSER_TOOLS
         if set(wanted) & SCREEN_TOOLS:
-            keep |= SCREEN_TOOLS
+            keep |= SCREEN_TOOLS | PERCEPTION_TOOLS
         return [s for s in specs if s["function"]["name"] in keep]
 
     async def _complete_with_recovery(self, messages: list[Message], tools: list[dict[str, Any]],
@@ -886,7 +960,9 @@ class Orchestrator:
                                          "content": "Not run: the task stopped to ask the user."})
                     messages.append({"role": "assistant", "content": heal.stop})
                     return heal.stop, ""
-                if result.ok and (seen := await self._observe(call.name, req.id, steps, req.text, result.evidence)):
+                acted = str(result.evidence.get("resolved_to") or call.name)  # click_mark -> browser_click, ...
+                seq = sum(1 for m in messages if m.get("role") == "tool")
+                if result.ok and (seen := await self._observe(acted, req.id, steps, req.text, result.evidence, seq)):
                     observer, text, obs_args, shot = seen
                     if shot:
                         latest_shot = (shot, obs_args.get("window", ""))

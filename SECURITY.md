@@ -259,6 +259,45 @@ Permanent deletes are not covered and still ask you first, as before.
 **Test-only failure injection** (`ToolExecutor.faults`, the fake eval browser) cannot be switched on from
 settings or any channel; only the eval runner and unit tests set it.
 
+### Perception: marks, OCR and screenshots
+
+- **Every marked click is an ordinary click.** `click_mark` and `click_text` are resolved by the ToolExecutor
+  into `browser_click` (by the element's ref), `click_element` (the exact UI Automation element, used only while
+  it still has the name that was marked) or, only with no handle, `click_at`. That real call then passes policy
+  (incl. Autopilot rules), approvals, Remote Guard, ExfilGuard, the taint guard and the resume repeat check,
+  exactly as if the model had asked for it. A denied `browser_click`, `click_element` or `click_at` is denied
+  through a mark too; denying `click_mark` or `click_text` themselves also works.
+- **Risk is never lowered.** A mark's risk is the risk of its label (Send, Pay, Delete...), so self-heal never
+  retries a risky marked click on its own. An OCR-aimed coordinate click counts as the riskier of what Windows
+  says is under the point and the text it was aimed at; the hidden `expect` field can only raise the risk and is
+  not offered to the model.
+- **Screens are outside content.** `look_with_marks` and `read_screen_text` mark the task as having read outside
+  content (taint guard) and, from a phone, need the PIN like `look_at_screen`; so does `click_text`, which reads
+  the screen to find its target.
+- **Where pictures go.** Screenshots and marked pictures stay on this PC (the task's proof folder). The only copy
+  that leaves is the picture sent to the vision model you configured, as before. OCR runs locally in Windows;
+  its temporary picture file is deleted right after reading.
+
+### Parallel read-only helpers
+
+Off by default (`helpers.enabled`). When on, the read-only rule is enforced by `delta/helpers/readonly.py`, not by
+the helper's prompt:
+
+- only `web_search`, `fetch_page`, `helper_read_page`, `read_file`, `list_dir`, `search_files` and `path_info`,
+  and only calls whose risk is READ; anything else is refused and written to the audit log (`helper.refused`);
+- file reads only inside your allowed folders, checked on the real path, so a link cannot lead out of them;
+- tools that drive your own browser, the desktop, messaging or the screen are refused by their module, whatever
+  their name; `helper_read_page` opens a fresh headless browser context with no profile, cookies or sign-ins and
+  closes it right after;
+- helpers never ask you: a read that would need an approval (Remote Guard PIN, ExfilGuard, a policy question) is
+  refused, never "Allow for this task", never learned trust;
+- every allowed call still runs through a ToolExecutor that shares the main policy, audit log, Remote Guard,
+  ExfilGuard (incl. its encoded-data rule, with the parent task's taint passed on) and watchdog;
+- helper model calls skip CLI providers (Claude Code, Codex, Cline); routes and defaults are unchanged;
+- results come back marked as outside content, so the parent task is tainted from then on (sends, deletes and
+  code need your yes);
+- each helper is a child task in `tasks.db` created already final, so a crash never leaves one to resume.
+
 ### What is *not* protected (honestly)
 
 - **Telegram bot chats are not end-to-end encrypted.** Messages travel encrypted, but Telegram's servers can
@@ -277,6 +316,10 @@ settings or any channel; only the eval runner and unit tests set it.
   not put secrets in a schedule. It sits in Delta's data folder, readable by your Windows account.
 - **The step log is plain text** in `tasks.db` (redacted as above, not encrypted like memory). File names, page
   addresses and short results of your tasks are in it for 30 days by default (`engine.retention_days`).
+- **A marked picture shows whatever is on that page or window** (including private text) to the vision model you
+  chose, like `look_at_screen` always did. Use a local vision model for private screens.
+- **OCR and marks can be wrong.** A vision model can pick the wrong mark and OCR can misread text; the click is
+  still judged by its real target and risk, but an ordinary wrong click (for example the wrong tab) can happen.
 - **If you raise the permission level while a scheduled task is running**, that run follows your new level
   from then on: a change you make yourself is not treated as the schedule raising it.
 
