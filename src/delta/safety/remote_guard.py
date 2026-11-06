@@ -48,6 +48,7 @@ SENSITIVE = {
     "browser": "change which browser Delta uses",
     "signin": "open Delta's private browser on the PC for signing in",
     "apps": "connect or disconnect an app",
+    "logins": "use a saved site login",
 }
 
 
@@ -70,6 +71,10 @@ REMOTE_PIN_TOOLS = {
     "schedule_task": "create a scheduled task", "resume_schedule": "turn a scheduled task back on",
     # opens a browser window on the PC for whoever is there to sign in to (delta.tools.browser_switch)
     "open_signin_browser": "open Delta's private browser on the PC",
+    # types a saved password into a site (delta.logins); approving each use from a phone needs the PIN as well
+    "sign_in": "use a saved site login", "browser_upload": "send a file from the PC to a website",
+    # a watcher signs in on a schedule, unattended (delta.watchers)
+    "watch_portal": "watch a site with a saved login",
 }
 # Read tools that need the PIN remotely only when they look outside the allowed folders.
 REMOTE_PIN_OUTSIDE_ALLOWED = {"list_dir": "list a folder", "search_files": "search files",

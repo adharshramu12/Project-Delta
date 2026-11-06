@@ -47,10 +47,11 @@ from delta.tools.browser_choice import (
     unavailable_reason,
 )
 
-# Tool names both kits provide, in the order the model sees them; solve_captcha exists only in the
-# private browser.
+# Tool names both kits provide, in the order the model sees them; solve_captcha and the extra actions (select,
+# check, upload, hover, wait, tabs, dialog: delta.tools.browser_actions) exist only in the private browser.
 BROWSER_NAMES = ("browser_open", "browser_search", "browser_read", "browser_click", "browser_fill",
-                 "browser_press", "browser_scroll", "browser_back", "solve_captcha")
+                 "browser_press", "browser_scroll", "browser_back", "browser_select", "browser_check",
+                 "browser_upload", "browser_hover", "browser_wait", "browser_tabs", "browser_dialog", "solve_captcha")
 SIGNIN_HOLD_S = 30 * 60  # the private browser stays open this long for the user to sign in
 
 

@@ -337,7 +337,8 @@ def stuck_in_loop(steps: list[StepRecord], repeats: int = 3) -> bool:
 DESKTOP_ACTIONS = {"click_element", "click_at", "do_actions", "type_text", "press_keys", "set_field", "scroll",
                    "focus_window", "close_window", "open_app", "open_target"}
 BROWSER_ACTIONS = {"browser_open", "browser_search", "browser_click", "browser_fill", "browser_press",
-                   "browser_scroll", "browser_back"}
+                   "browser_scroll", "browser_back", "browser_select", "browser_check", "browser_upload",
+                   "browser_hover", "browser_wait", "browser_tabs", "sign_in"}
 TEXT_ACTIONS = {"type_text", "set_field", "press_keys"}
 PIXEL_ACTIONS = {"click_at", "scroll", "do_actions"}  # aimed by coordinates: only a screenshot shows what happened
 OBSERVE_CHARS = 1500

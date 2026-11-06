@@ -143,7 +143,7 @@ class Scheduler:
             if not s.held and now - due > self.grace:
                 await self._missed(s, due, now)
                 continue
-            if s.kind == "task" and self._quiet_now(s):
+            if s.kind in ("task", "watch") and self._quiet_now(s):
                 if not s.held:
                     self.store.set_held(s.id, True)
                     self.store.record_run(s.id, "held", "quiet hours: runs when they end", due=due, started=now)
@@ -158,6 +158,8 @@ class Scheduler:
         self.store.record_run(s.id, "missed", why, due=due, started=now)
         self.store.finish(s.id, now, "missed", why, nxt, disable=nxt is None)
         log.info("scheduler.missed", schedule=s.id, due=due.isoformat())
+        if s.kind == "watch":
+            return  # a watcher simply looks at its next time; a missed look is not worth a message
         what = f"reminder: {s.prompt}" if s.kind == "reminder" else f"scheduled task \"{s.name}\""
         await self.deliver(s, f"{ICON['missed']} I missed your {what} (due {fmt_when(due, s.tz)}) because the PC "
                               "was off or asleep. "
@@ -193,6 +195,14 @@ class Scheduler:
             if s.kind == "reminder":
                 status, summary = "done", s.prompt
                 await self.deliver(s, f"{ICON['reminder']} Reminder: {s.prompt}", channel, user, "done")
+            elif s.kind == "watch":  # a portal watcher: no AI; tells the owner only what is new (delta.watchers)
+                watchers = getattr(self.c, "watchers", None)
+                if watchers is None:
+                    raise RuntimeError("watchers are not available")
+                async with self._sem:
+                    status, text, summary = await watchers.run_schedule(s, channel, user, trigger)
+                if text:
+                    await self.deliver(s, text, channel, user, status if status in ("done", "failed") else "done")
             else:
                 async with self._sem:
                     res = await self._submit(s, channel, user)
