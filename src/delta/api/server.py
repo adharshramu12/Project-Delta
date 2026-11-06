@@ -326,12 +326,29 @@ def create_app(c: Container, token: str) -> FastAPI:
 
     @app.post("/api/tasks/{task_id}/cancel", dependencies=[Depends(auth)])
     async def cancel_task(task_id: str) -> dict[str, bool]:
+        from delta.control import let_go, stop_task
+
         t = by_id.get(task_id)
-        if t is None or t.done():
-            return {"ok": False}
+        if t is None or t.done():  # asked from Telegram, a schedule or another channel: stop it by its id
+            return {"ok": stop_task(c, task_id, by="dashboard")}
         c.audit.record("task.cancel_requested", task=task_id)
+        current = c.running is t
+        if current:
+            let_go(c)  # let go of the mouse and keyboard, hide the in-control ring
         t.cancel()
         return {"ok": True}
+
+    @app.post("/api/tasks/stop-all", dependencies=[Depends(auth)])
+    async def stop_all_tasks() -> dict[str, int]:
+        from delta.control import stop_all
+
+        queued = list(getattr(c, "active", {}).values())
+        extra = 0
+        for t in list(by_id.values()):  # dashboard tasks still getting ready (attachments) stop too
+            if not t.done() and t not in queued and t is not c.running:
+                t.cancel()
+                extra += 1
+        return {"stopped": stop_all(c, by="dashboard") + extra}
 
     @app.get("/api/tasks/{task_id}", dependencies=[Depends(auth)])
     async def get_task(task_id: str) -> dict[str, Any]:

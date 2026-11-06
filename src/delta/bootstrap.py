@@ -80,6 +80,27 @@ def build_providers(settings: Settings) -> dict[str, Provider]:
     return providers
 
 
+def arm_stop(c: Any) -> None:
+    """A new task starts: clear an earlier stop, and make Esc twice / Ctrl+Alt+Shift+S stop this one."""
+    from delta.system import input_stop
+
+    input_stop.reset()
+    signal = getattr(c, "signal", None)
+    if signal is None:
+        return
+    loop = asyncio.get_running_loop()
+
+    def from_hotkey(kind: str) -> None:  # called on the overlay thread
+        from delta.control import stop_running
+
+        loop.call_soon_threadsafe(lambda: stop_running(c, by=f"hotkey:{kind}"))
+
+    try:
+        signal.arm(from_hotkey)
+    except Exception as e:  # the signal is a convenience: a task never fails because of it
+        log.warning("signal.arm_failed", error=str(e))
+
+
 @dataclass
 class Container:
     settings: Settings
@@ -106,6 +127,8 @@ class Container:
     connectors: Any = None  # delta.connectors.tools.AppTools: connected apps (its .manager connects them)
     logins: Any = None  # delta.logins.service.LoginService: saved site logins
     watchers: Any = None  # delta.watchers.service.WatchService: portals watched on a schedule
+    signal: Any = None  # delta.system.agent_cursor.AgentCursor: "Delta is in control" ring and stop hotkeys
+    active: dict[str, asyncio.Task[Any]] = field(default_factory=dict)  # every task asked for, waiting or running
 
     @property
     def engine(self) -> Any:
@@ -126,15 +149,26 @@ class Container:
         if self.guard is not None and self.guard.locked and is_remote(req.channel):
             self.audit.record("guard.blocked", task=req.id, channel=req.channel, user=req.user, why="locked")
             return TaskResult(req.id, "failed", self.guard.locked_message())
-        async with self._task_lock:
-            self.running = asyncio.current_task()
-            capped = self._cap_autonomy(autonomy_cap)
-            try:
-                return await self.orchestrator.run(req)
-            finally:
-                self.running = None
-                if capped is not None and self.orchestrator.executor.policy is capped:
-                    self.orchestrator.executor.policy = make_policy(self.settings)  # today's rules again
+        me = asyncio.current_task()
+        active = getattr(self, "active", None)  # every task asked for, so "stop all" reaches waiting ones too
+        if me is not None and active is not None:
+            active[req.id] = me
+        try:
+            async with self._task_lock:
+                self.running = me
+                capped = self._cap_autonomy(autonomy_cap)
+                try:
+                    arm_stop(self)
+                    return await self.orchestrator.run(req)
+                finally:
+                    self.running = None
+                    if (signal := getattr(self, "signal", None)) is not None:
+                        signal.stop()  # the ring never outlives its task (done, failed or stopped)
+                    if capped is not None and self.orchestrator.executor.policy is capped:
+                        self.orchestrator.executor.policy = make_policy(self.settings)  # today's rules again
+        finally:
+            if active is not None and active.get(req.id) is me:
+                active.pop(req.id, None)
 
     def _cap_autonomy(self, cap: str | None) -> Any:
         """Lower the permission level for the task about to run (tasks run one at a time); never raises it."""
@@ -406,7 +440,7 @@ def build(settings: Settings) -> Container:
         *power_tools(),
         *pc_tools(send_file),
         RunShell(),
-        *app_tools(settings.apps),
+        *app_tools(settings.apps, data / "cache"),  # installed-apps index cached in the data folder
         *media_tools(),
         *meeting_tools(),
         *messaging_tools(chats),
@@ -427,19 +461,23 @@ def build(settings: Settings) -> Container:
     closers: list[tuple[str, Callable[[], Awaitable[None]]]] = []
     proof = ProofRecorder(data / "runs")
     desktop_ok = _installed("pywinauto", "pyautogui", "mss")
+    signal: Any = None  # the "Delta is in control" ring and the stop hotkeys (desktop PCs only)
     if desktop_ok:
         from delta.system.agent_cursor import AgentCursor
+        from delta.system.agent_cursor import install as install_signal
         from delta.tools.desktop import DesktopController, desktop_tools
         from delta.tools.screen import screen_tools
 
-        AgentCursor.recover(data)  # a previous run that died while orange gives the cursor back
-        cursor = AgentCursor(data, enabled=settings.browser.orange_cursor)
+        AgentCursor.recover(data)  # an older version that died with the pointer orange gives it back
+        cursor = AgentCursor(data, enabled=settings.browser.orange_cursor)  # ring + border + stop hotkeys
+        install_signal(cursor)  # Delta's own browser and screenshots find it here
+        signal = cursor
         ctl = DesktopController(cursor)
         for t in [*desktop_tools(ctl), *screen_tools(router, governor, proof)]:
             registry.register(t)
 
         async def close_desktop() -> None:
-            cursor.restore()
+            cursor.close()
             ctl.close()
 
         closers.append(("desktop", close_desktop))
@@ -524,6 +562,7 @@ def build(settings: Settings) -> Container:
     container = Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
                           Lifecycle(data), task_lock, closers, chats=ChatStore(data / "chats.db"),
                           live_channels=live_channels, guard=guard, emergency=emergency, scheduler=scheduler,
-                          browsers=browsers, connectors=connectors, logins=logins, watchers=watchers)
+                          browsers=browsers, connectors=connectors, logins=logins, watchers=watchers,
+                          signal=signal)
     scheduler.bind(container)
     return container

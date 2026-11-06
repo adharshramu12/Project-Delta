@@ -4,7 +4,8 @@ Written before the faster app opening (batch H) so the same file measures the ol
 new one ("after"). It only uses what both have: OpenApp.run, start_apps() and match_start_app().
 
   lookup_cold   find an app by its Start-menu name with nothing cached (the old path asks PowerShell's
-                Get-StartApps every time Delta starts)
+                Get-StartApps every time Delta starts; the new one only on a fresh install or after a change)
+  lookup_restart  (new code only) the same lookup after a restart: the index is read from the data folder
   lookup_warm   the same lookup again
   launch        open Notepad (on PATH) until its window is in front
   open_again    open Notepad again while it is already open
@@ -80,10 +81,10 @@ def test_open_app_benchmark(tmp_path, capsys):
     from delta.tools.apps import OpenApp, OpenAppArgs, match_start_app, start_apps
 
     code = "after" if hasattr(apps, "reset_app_index") else "before"
-    tool = OpenApp({})
-    if hasattr(tool, "index"):
-        tool.index.cache_dir = tmp_path  # a fresh PC: nothing cached on disk either
+    tool = OpenApp({}, tmp_path) if code == "after" else OpenApp({})  # type: ignore[call-arg]
     timings: dict[str, list[float]] = {"lookup_cold": [], "lookup_warm": [], "launch": [], "open_again": []}
+    if code == "after":
+        timings["lookup_restart"] = []
     outputs: list[str] = []
     before = _notepad_pids()
     try:
@@ -95,6 +96,11 @@ def test_open_app_benchmark(tmp_path, capsys):
             t0 = time.perf_counter()
             match_start_app("notepad", start_apps())
             timings["lookup_warm"].append(time.perf_counter() - t0)
+            if code == "after":
+                apps.AppIndex(tmp_path).store()  # what the first start leaves in the data folder
+                t0 = time.perf_counter()
+                match_start_app("notepad", apps.AppIndex(tmp_path).store())  # Delta restarted
+                timings["lookup_restart"].append(time.perf_counter() - t0)
 
             _close_notepads(before)
             time.sleep(0.5)

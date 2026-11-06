@@ -23,6 +23,7 @@ from typing import Any
 
 import psutil
 
+from delta.system.input_stop import StopRequestedError
 from delta.tools.base import Risk, Tool, ToolResult
 from delta.tools.browser import (
     SEARCHY,
@@ -473,6 +474,8 @@ class _UBTool(Tool[Any]):
             return ToolResult(False, f"STOPPED: {e}, and you kept using the computer. Do not continue; "
                                      "tell the user where you got to.")
         except LookupError as e:
+            return ToolResult(False, str(e))
+        except StopRequestedError as e:  # the user pressed Stop: never retried
             return ToolResult(False, str(e))
         except Exception as e:  # UIA hiccups are normal outcomes for the agent to react to
             return ToolResult(False, f"{type(e).__name__}: {str(e)[:200]}")

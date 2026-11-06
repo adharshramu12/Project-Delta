@@ -26,7 +26,7 @@
   const q = h("input", {type: "search", placeholder: "Search tasks", "aria-label": "Search tasks"});
   const list = h("div", {class: "table-list", role: "list"});
   const more = btn("Show more", () => load(true), "more");
-  box.append(h("div", {class: "toolbar"}, tabs, h("label", {class: "search"}, icon("search"), q)), list);
+  box.append(h("div", {class: "toolbar"}, tabs, h("label", {class: "search"}, icon("search"), q), btn("Stop all", stopAll, "sm", "stop")), list);
 
   async function resume(id, confirmLast, where) {
     const r = await api(`/api/tasks/${encodeURIComponent(id)}/resume`, {method: "POST", body: JSON.stringify(confirmLast ? {confirm_last: confirmLast} : {})}).catch(e => ({message: D.plain(e)}));
@@ -56,6 +56,18 @@
     return h("div", {class: "row"}, go, drop);
   }
 
+  // Stop: Delta lets go of the mouse and keyboard; nothing of yours is closed.
+  const RUNNING = new Set(["queued", "planning", "acting", "verifying", "waiting_user"]);
+  const stopped = () => { setTimeout(refresh, 600); D.emit("tasks:changed"); };
+  const stopButton = id => btn("Stop", async e => {
+    e.stopPropagation(); e.currentTarget.disabled = true;
+    await api(`/api/tasks/${encodeURIComponent(id)}/cancel`, {method: "POST"}).catch(() => null); stopped();
+  }, "sm", "stop");
+  async function stopAll() {
+    const n = ((await api("/api/tasks/stop-all", {method: "POST"}).catch(() => null)) || {}).stopped || 0;
+    D.toast({title: n ? `Stopped ${n}` : "Nothing is running", kind: n ? "ok" : "info"}); stopped();
+  }
+
   function row(t) {
     const tokens = (t.tokens_in || 0) + (t.tokens_out || 0);
     const meta = [D.when(t.created), t.channel, `${t.steps} ${t.steps === 1 ? "step" : "steps"}`];
@@ -65,6 +77,7 @@
       h("button", {type: "button", class: "trow-main", onclick: () => openTimeline(t.id), "aria-label": "Open steps of: " + (t.text || "task")},
         pill(t.state), h("span", {class: "trow-text", text: (t.text || "").slice(0, 160)}), h("span", {class: "trow-meta muted", text: meta.join(" · ")}), icon("chev-right")));
     if (t.state === "interrupted") r.append(actions(t, list));
+    if (RUNNING.has(t.state)) r.append(h("div", {class: "row"}, stopButton(t.id)));
     return r;
   }
   async function load(append) {

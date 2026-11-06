@@ -764,6 +764,9 @@ async def robust_click(page: Any, target: Any, tries: int = CLICK_TRIES, what: s
     raise ActionFailed(explain(last or RuntimeError("click failed"), what))
 
 
+QUIET_TOOLS = frozenset({"browser_read", "browser_wait"})  # look only: no "Delta is in control" signal
+
+
 class _BrowserTool[A: BaseModel](Tool[A]):
     def __init__(self, mgr: BrowserManager) -> None:
         self.mgr = mgr
@@ -772,8 +775,13 @@ class _BrowserTool[A: BaseModel](Tool[A]):
         return [self.mgr.current_url] if self.mgr.current_url.startswith("http") else []
 
     async def _guarded(self, coro_fn: Any) -> ToolResult:
+        from delta.system.agent_cursor import driving
+
+        # Acting in Delta's browser window shows the "Delta is in control" ring; reading does not.
+        signal = contextlib.nullcontext() if self.name in QUIET_TOOLS else driving()
         try:
-            return await coro_fn()
+            with signal:
+                return await coro_fn()
         except ActionFailed as e:
             return ToolResult(False, f"{self.name} failed: {e}")
         except Exception as e:  # playwright timeouts etc. are normal outcomes for the agent

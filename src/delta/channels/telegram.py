@@ -47,7 +47,7 @@ HELP = (
     "on the PC), /disconnect notion. Then just ask: \"search my Notion for the launch plan\".\n\n"
     "<b>Schedules</b>: \"every day at 9 am check my attendance\", \"remind me at 6 pm to call Ravi\", "
     "\"what's scheduled?\" (making or turning on a schedule from here needs your PIN)\n\n"
-    "/stop - stop what I'm doing now\n"
+    "/stop - stop what I'm doing now (or just send \"stop\"); /stop all - stop everything waiting too\n"
     "/tasks - recent tasks; resume or discard one that was interrupted\n"
     "/undo - put back the files a task changed (needs your PIN)\n"
     "/unlock - enter your PIN (screen, camera, files, commands, approving deletes or sends,\n"
@@ -339,10 +339,12 @@ class TelegramChannel(PCMenu):
     async def _stop_cmd(self, update: Any, ctx: Any) -> None:
         if not is_allowed(update.effective_user.id, self.allowed):
             return
-        from delta.control import stop_running
+        from delta.control import stop_command
 
-        stopped = stop_running(self.c, by=f"telegram:{update.effective_user.id}")
-        await update.message.reply_text("⏹ Stopped." if stopped else "Nothing is running right now.")
+        words = "/stop " + " ".join(ctx.args) if ctx is not None and ctx.args else "/stop"  # /stop or /stop all
+        reply = stop_command(self.c, words, by=f"telegram:{update.effective_user.id}")
+        await update.message.reply_text(reply or "Send /stop to stop what I'm doing now, or /stop all to stop "
+                                                 "everything, including tasks waiting their turn.")
 
     async def _apply(self, say: Any, kind: str, value: str, uid: int) -> None:
         from delta.control import set_autonomy, set_main_ai, set_model
@@ -410,6 +412,12 @@ class TelegramChannel(PCMenu):
         if not is_allowed(user.id, self.allowed):
             log.warning("telegram.rejected", user=user.id)
             await self._try_pair(update, update.message.text)
+            return
+        from delta.control import stop_command
+
+        # "stop" / "stop all" as a plain message works like /stop: first, so it is never taken as a PIN or a task
+        if (reply := stop_command(self.c, update.message.text or "", by=f"telegram:{user.id}")) is not None:
+            await update.message.reply_text(reply)
             return
         if await self._take_pin(update, str(user.id)):
             return

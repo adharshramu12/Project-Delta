@@ -158,9 +158,10 @@ def test_plain_copy_no_em_dashes_or_emoji():
 def test_the_payload_stays_small():
     """Low-end laptops: the dashboard's own code and styles (icons excluded) stay small, with no framework.
     Raised from 215 KB to 221 KB for Settings > Logins and watchers (logins.js and its card, about 6.3 KB after
-    deduplication). Lazy loading would not lower this total: it counts every file the dashboard ships."""
+    deduplication), then to 222 KB for Stop / Stop all on running tasks in the Tasks view (about 0.9 KB). Lazy
+    loading would not lower this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 221_000, total
+    assert total < 222_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 

@@ -255,6 +255,7 @@ class Healer:
         can_retry = pb.retry and safe
         done: list[str] = []
         dismissed = ""
+        relaunched = False
         found = strategy.rung_of(name, self.executor.registry.get(name))
         family = found[0] if found else ("web" if name.startswith("browser_") else "desktop")
         for action in pb.actions:
@@ -279,11 +280,17 @@ class Healer:
                 can_retry = can_retry and bool(dismissed)
             elif action == "reopen":
                 can_retry = can_retry and await self._reopen(task_id, result, steps, failure)
+            elif action == "relaunch":
+                if not await self._relaunch(task_id, name, result, steps, failure):
+                    continue  # nothing to relaunch: not part of what was tried
+                relaunched = True
             done.append(action)
         if can_retry:
             r2 = await self._exec(task_id, name, new_args, steps, failure)
             if r2 is not None and r2.ok:
                 line = pb.line_ok
+                if relaunched:
+                    line = "The browser window was gone; opened the page again and carried on."
                 if dismissed:
                     line = f"Closed a banner that was in the way ('{dismissed}') and tried again."
                     if "cookie" in result.output.lower() or "cookie" in dismissed.lower():
@@ -333,6 +340,21 @@ class Healer:
         except Exception:
             return False
         return bool(decision.verdict == Verdict.ALLOW and str(decision.risk) in SAFE_RISKS)
+
+    async def _relaunch(self, task_id: str, name: str, result: ToolResult, steps: list[StepRecord],
+                        failure: Failure) -> bool:
+        """The browser window the task was working in is gone (closed by mistake, crashed): open the page the
+        task was on again, in the same browser, once. Never for browser_open itself (that is the relaunch)."""
+        if name == "browser_open" or "browser_open" not in self._names():
+            return False
+        if "no browser window open" not in (result.output or "").lower():
+            return False
+        url = next((str(s.evidence.get("url")) for s in reversed(steps)
+                    if s.ok and str(s.evidence.get("url") or "").startswith(("http://", "https://"))), "")
+        if not url:
+            return False
+        r = await self._exec(task_id, "browser_open", {"url": url}, steps, failure)
+        return bool(r is not None and r.ok)
 
     async def _reopen(self, task_id: str, result: ToolResult, steps: list[StepRecord], failure: Failure) -> bool:
         """After the watchdog restarted Delta's own browser: open the page the task was on again."""

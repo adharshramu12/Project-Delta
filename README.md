@@ -515,12 +515,16 @@ grounding: {mode: report, max_checks: 1}   # report | strict | off
 | *"I'm not well, message Ravi now"* | 🆘 Emergency alert to your saved contacts (WhatsApp message or call) |
 | `/tasks` | Recent tasks; Resume or Discard one that was interrupted (Resume needs your PIN) |
 | `/undo` | Put back the files a task changed (needs your PIN) |
-| `/stop` `/status` `/help` | Stop a task, PC health and AIs, all commands |
+| `/stop` `/stop all` `/status` `/help` | Stop the task (or everything waiting too; a plain "stop" works), PC health and AIs, all commands |
 
 ## Safety by design
 
 - **You stay in charge:** every action is risk-checked. Deleting, sending and anything that leaves
   your PC need your approval (unless you choose autopilot). Deletes go to the Recycle Bin.
+- **You can always see and stop it:** while Delta drives your mouse, keyboard or browser, an orange ring
+  follows the pointer and a thin orange border marks the screen (your own pointer is never changed). Stop it
+  anytime: press Esc twice, press Ctrl+Alt+Shift+S, press Stop in the dashboard, or send "stop" (or `/stop all`)
+  from your phone. Delta lets go of the keyboard and mouse at once and closes nothing of yours.
 - **Autopilot still asks** before deleting anything that can't be undone, changing files outside your
   folders, typing or clicking in a terminal, the Run box or Delta itself, and, once a task has read a web page,
   file or message, before sending, deleting, running code, saving to memory or opening a link that carries
