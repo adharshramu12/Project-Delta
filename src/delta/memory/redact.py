@@ -19,11 +19,12 @@ from delta.engine.redact import TOKEN_PATTERNS
 REMOVED = "[secret removed]"
 
 _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
-# "<secret word> is|was|=|: <value>" ; the value is one token (no spaces), at least 3 characters.
+# "<secret word> is|was|=|: <value>"; the value is one token (no spaces), at least 3 characters. A secret word
+# followed by an ordinary word ("token budget", "pin the tab") is left alone.
 _SAID_SECRET = re.compile(
     r"(?i)\b(pass(?:word|code|phrase)?|pwd|pin|otp|one[- ]time (?:code|password)|cvv|cvc|security code|"
     r"api[ _-]?key|secret(?: key)?|token|private key|recovery code|seed phrase)"
-    r"(\s*(?:is|was|=|:|-)\s*|\s+)(['\"]?)([^\s'\"]{3,})\3")
+    r"(\s*(?:\bis\b|\bwas\b|=|:)\s*)(['\"]?)([^\s'\"]{3,})\3")
 
 
 def _luhn(digits: str) -> bool:

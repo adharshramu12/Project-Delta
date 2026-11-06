@@ -39,7 +39,7 @@ def test_redaction_removes_keys_cards_and_said_secrets():
 
 def test_redaction_leaves_ordinary_text_alone():
     for ok in ("I use a password manager", "the invoice total is 1234567890123", "my locker is 4417",
-               "call 9876543210 tomorrow"):
+               "call 9876543210 tomorrow", "pin the tab", "keep the token budget low", "secret santa list"):
         assert redact_secrets(ok) == (ok, 0)
 
 
