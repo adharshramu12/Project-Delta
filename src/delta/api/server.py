@@ -317,6 +317,10 @@ def create_app(c: Container, token: str) -> FastAPI:
     register_setup(app, c, auth)
     register_settings(app, c, auth)
     register_apps(app, c, auth)
+    from delta.api.documents_routes import register as register_documents
+
+    register_documents(app, c, auth)
+
     register_schedules(app, c, auth)
 
     @app.get("/api/runs/unfinished", dependencies=[Depends(auth)])

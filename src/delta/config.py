@@ -171,6 +171,18 @@ class CaptchaConfig(BaseModel):
     allowed_sites: list[str] = Field(default_factory=list)
 
 
+class WriterConfig(BaseModel):
+    # Writer and Documents (write_post, prepare_post, make_document). See README "Writer and Documents".
+    enabled: bool = True
+    output_dir: str = "auto"  # auto = <Documents>\\Delta. Or any absolute path.
+    page_size: Literal["A4", "Letter"] = "A4"
+    latex: Literal["auto", "off"] = "auto"  # auto = use tectonic/xelatex/pdflatex only if already installed
+    pdf_browser: str = ""  # Chrome/Edge/Chromium used to print PDFs; "" = found automatically
+    voice_file: str = ""  # your past posts (plain text) to copy your voice; "" = <output_dir>\\my-posts.txt
+    substack_publication: str = ""  # e.g. "yourname": prepare_post opens yourname.substack.com/publish/post
+    model_task: Literal["plan", "chat"] = "plan"  # which AI route writes (plan = the strongest models first)
+
+
 class ApiConfig(BaseModel):
     host: str = "127.0.0.1"  # never 0.0.0.0: remote access goes through Tailscale/Cloudflare Tunnel
     port: int = 7878
@@ -225,6 +237,7 @@ class Settings(BaseModel):
     addons: AddonsConfig = Field(default_factory=AddonsConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     captcha: CaptchaConfig = Field(default_factory=CaptchaConfig)
+    writer: WriterConfig = Field(default_factory=WriterConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     boundaries: Boundaries = Field(default_factory=Boundaries)
     apps: dict[str, AppEntry] = Field(default_factory=dict)

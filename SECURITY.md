@@ -66,6 +66,26 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 - **Your data stays on your PC** (`%LOCALAPPDATA%\Delta`): memory, chats, skills, audit log. Shutdown stops
   every Delta process; nothing keeps listening.
 
+## Writer and Documents
+
+- **No automated publishing.** `prepare_post` only copies text to the clipboard and opens the compose page in
+  your normal browser through Windows. It has no code that clicks, types or submits (a test checks this), so
+  you always press Post yourself. This also keeps you within LinkedIn's User Agreement (section 8.2).
+- **Files only in the documents folder.** `make_document` writes new files (never overwrites) in
+  `Documents\Delta` or `writer.output_dir`. That folder is added to the allowed folders; it is a normal
+  `write` action, so with "ask-risky" Delta asks first, as for any other file it creates.
+- **Sending a document goes through the normal gate.** From Telegram, the file is sent with `send_file`
+  through the ToolExecutor: policy, the taint rule (after reading a web page, sending asks first), the
+  Remote Guard PIN and "paired owner only" all apply. Nothing new can send a file anywhere else.
+- **Document text is data, never code.** Content from web pages stays untrusted. HTML is escaped, and the PDF
+  is printed in a throwaway headless browser profile with JavaScript disabled, offline, and every request
+  refused except `data:` URLs, so a document cannot fetch or run anything.
+- **LaTeX (optional) compiles locked down:** `-no-shell-escape` (tectonic `--untrusted`), `openin_any=p` and
+  `openout_any=p` so TeX cannot read or write files outside its temporary folder, a timeout, and maths that
+  contains file, shell or macro commands (`\input`, `\write18`, `\def`, ...) is printed as plain text.
+- **Dashboard downloads** use the same bearer token as every other route and serve only files listed in the
+  documents folder, matched by exact name.
+
 ## Captchas (opt-in, your own accounts only)
 
 Delta can help with **simple image/text captchas** on sites where you log in to **your own account**
