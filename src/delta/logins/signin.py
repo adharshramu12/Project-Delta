@@ -29,7 +29,8 @@ from typing import Any
 from delta.logins.origin import Origin, mismatch, origin_of
 from delta.logins.store import Login
 
-OUTCOMES = ("signed_in", "already_signed_in", "wrong_password", "refused", "needs_user", "no_form", "failed")
+OUTCOMES = ("signed_in", "already_signed_in", "wrong_password", "refused", "needs_user", "no_form", "failed",
+            "aborted")  # aborted: the user switched tabs or the page moved mid-fill (own browser, own_browser.py)
 
 # Fields, found inside one frame. Order matters: the most specific selector first.
 PASSWORD_SEL = "input[type=password]"

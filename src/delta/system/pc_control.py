@@ -213,8 +213,13 @@ def screenshot() -> Path:
     from PIL import Image
 
     with mss.mss() as grab:
-        shot = grab.grab(grab.monitors[0])
+        everything = grab.monitors[0]
+        shot = grab.grab(everything)
     img = Image.frombytes("RGB", shot.size, shot.rgb)
+    from delta.logins import mask
+
+    if mask.active():  # password boxes Delta filled in the user's own browser
+        mask.mask_screen(img, (int(everything.get("left", 0)), int(everything.get("top", 0))))
     if img.width > 2560:
         img.thumbnail((2560, 2560))
     path = _out("screen")

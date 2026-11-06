@@ -581,8 +581,11 @@ class UBBack(_UBTool):
 
 
 def user_browser_tools(ctl: DesktopController, prefer: str = "auto") -> list[Tool]:
+    from delta.tools.user_browser_actions import user_browser_more_tools
+
     ub = UserBrowser(ctl, prefer)
-    return [UBOpen(ub), UBSearch(ub), UBRead(ub), UBClick(ub), UBFill(ub), UBPress(ub), UBScroll(ub), UBBack(ub)]
+    return [UBOpen(ub), UBSearch(ub), UBRead(ub), UBClick(ub), UBFill(ub), UBPress(ub), UBScroll(ub), UBBack(ub),
+            *user_browser_more_tools(ub)]
 
 
 __all__ = ["UserBrowser", "default_browser", "user_browser_tools"]

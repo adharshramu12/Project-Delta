@@ -16,8 +16,8 @@ never sees them.
 
    The password is asked for without being shown, so it is never in the shell history or the process list.
 2. **Choose the permission.** "Ask every time" (the default) or "Always allow for this site".
-3. **Ask.** "What is on my timetable tomorrow?" Delta calls `sign_in`, opens the site in its private browser, signs
-   in and reads the page.
+3. **Ask.** "What is on my timetable tomorrow?" Delta calls `sign_in`, opens the site in the browser you use with
+   Delta (its private browser, or your own default browser), signs in and reads the page.
 
 Logins can only be added or changed on the PC. A password never goes through Telegram or any chat.
 
@@ -67,10 +67,60 @@ while remote control is locked nothing remote signs in. Change the setting in Se
   `delta captcha allow <host>`, read with Windows OCR first, at most 3 attempts, then a hand-off to you.
 - **Wrong password.** Delta stops at once and says so. It never retries a rejected password.
 
+## Which browser: Delta's private browser or your own
+
+Logins work in both browser choices (Settings > Browser, `/browser` on Telegram, or "use my default browser"):
+
+| Browser choice | Where Delta types the login |
+|---|---|
+| Delta's private browser | Its own separate profile, in the background. |
+| My default browser, Chrome or Edge | **Your everyday browser**, in the one window Delta opens there, with your real sessions and extensions. |
+
+`sign_in` never changes your browser choice. It signs in where the task already is. (Only when your own browser
+cannot be driven on this PC does that one task use the private browser instead, and Delta says so.)
+
+Every rule above applies the same way in your own browser: the exact origin, no lookalike or punycode host, no
+http downgrade, no other port, no form inside a frame from another site, the password never shown to the AI,
+written to a log or kept in memory, a wrong password never retried, the same permission and PIN rules, and no
+saving without DPAPI. Your own browser is your real browser, so Delta adds these:
+
+- **A one-time consent per site.** The first time Delta would type a saved login into your own browser, it asks
+  you first, naming the browser and the site: *"First time in your own browser: let Delta type your saved login
+  for College ERP (https://erp.example.edu) into Google Chrome, your everyday browser with your real tabs,
+  sessions and extensions?"* It asks this **even when the login is "Always allow"**. There is no "Allow for this
+  task" button: Approve once and Delta remembers it for that site in that browser (Chrome and Edge are asked
+  separately). Deny, or no answer, and nothing is typed. From a phone, approving needs your PIN, and nothing is
+  asked while remote control is locked. To withdraw it, set the login to "Ask every time" (that clears the
+  consent too) or remove the login. Replacing a login's password also clears it.
+- **Bound to one tab.** The sign-in is tied to the tab that is open in Delta's window when it starts. Before and
+  after every field, and before pressing Enter, Delta checks that this tab is still the one in front of it and
+  that the page and the frame holding the form are still on the saved site. If you switch tabs or windows, close
+  Delta's window, use the mouse or keyboard, or the page goes somewhere else, Delta stops at once, clears what it
+  typed and does not submit. Your other tabs and windows are never touched.
+- **Typed into the box, not the keyboard.** Delta puts the value straight into that box through Windows UI
+  Automation, so it cannot land in another tab, and nothing goes through the clipboard. If a page ignores that,
+  Delta types it into the box a few characters at a time, checking before each burst that the box still has the
+  keyboard focus.
+- **Checked after filling.** If the box does not hold exactly what Delta filled (a password manager extension or
+  the page changed or cleared it), Delta says so plainly, does not submit and does not try again.
+- **One normal submit.** Delta presses Enter in the password box once, as you would. A simple image captcha in your
+  own browser is yours to type: Delta fills the user name and password, then asks you to type the characters and
+  press Sign in yourself.
+- **Pictures stay masked.** Your browser already shows dots in a password box. After Delta fills one, it also paints
+  that area over in every screenshot Delta takes (one window or the whole screen), in case the page or a "show
+  password" button turns the box into plain text.
+- **Watchers stay in the private browser.** Scheduled watcher checks run in the background, so they always use
+  Delta's private browser, never your own.
+
+The page's address is read from the page itself (UI Automation's document value), never from the address bar,
+which hides "http://" and "https://". If Delta cannot read the full address of the page or of the frame holding
+the form, it refuses.
+
 ## Every use is audited
 
-The audit log gets the login's name, its site, the task, how it was allowed and the outcome. Never the user name,
-the password, a one-time code or a captcha answer.
+The audit log gets the login's name, its site, the task, which browser (`private` or `own:chrome` / `own:edge`), how
+it was allowed and the outcome. The one-time own-browser consent is audited too (`login.own_browser_consent`). Never
+the user name, the password, a one-time code or a captcha answer.
 
 ## Commands
 
@@ -89,6 +139,12 @@ afterwards that the page really changed, elements inside frames and new tabs can
 or dismissed, long lists scroll, and there are new tools for dropdowns (`browser_select`), checkboxes
 (`browser_check`), file upload (`browser_upload`, which asks first because the file leaves the PC), hover
 (`browser_hover`), waits (`browser_wait`), tabs (`browser_tabs`) and dialogs (`browser_dialog`).
+
+These tools also work in your own browser, with small differences: elements are found by their label or visible
+text (there is no numbered page listing there), `browser_tabs` only lists, switches or closes the tabs of Delta's
+own window, `browser_dialog` answers the dialog showing now (in the private browser it decides the next one), and
+`browser_upload` fills the browser's own Open dialog with the file's path. `solve_captcha` stays private-browser
+only.
 
 See also [WATCHERS.md](WATCHERS.md) for checking a portal on a schedule, and [NOT_VERIFIED.md](NOT_VERIFIED.md) for
 what has not been tried on real hardware yet.

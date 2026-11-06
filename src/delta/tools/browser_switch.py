@@ -47,8 +47,9 @@ from delta.tools.browser_choice import (
     unavailable_reason,
 )
 
-# Tool names both kits provide, in the order the model sees them; solve_captcha and the extra actions (select,
-# check, upload, hover, wait, tabs, dialog: delta.tools.browser_actions) exist only in the private browser.
+# Tool names both kits provide, in the order the model sees them. The extra actions (select, check, upload, hover,
+# wait, tabs, dialog) are in both: delta.tools.browser_actions (private) and delta.tools.user_browser_actions (the
+# user's own browser). solve_captcha exists only in the private browser.
 BROWSER_NAMES = ("browser_open", "browser_search", "browser_read", "browser_click", "browser_fill",
                  "browser_press", "browser_scroll", "browser_back", "browser_select", "browser_check",
                  "browser_upload", "browser_hover", "browser_wait", "browser_tabs", "browser_dialog", "solve_captcha")
@@ -189,6 +190,15 @@ class BrowserHub:
             note += (" A task is using the browser right now, so it finishes there; the switch applies from "
                      "the next task.")
         return note
+
+    def own_signin_driver(self) -> Any:
+        """The driver sign_in uses to fill a saved login in the user's own browser (delta.logins.own_uia), or None
+        when the user's own browser cannot be driven on this PC."""
+        if self.ub is None:
+            return None
+        from delta.logins.own_uia import UIAOwnDriver
+
+        return UIAOwnDriver(self.ub)
 
     def _private_in_use(self) -> bool:
         return any(tb.used and tb.pick.kind == "private" for tb in self._active.values())
