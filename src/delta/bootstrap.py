@@ -242,6 +242,8 @@ def build(settings: Settings) -> Container:
         from delta.tools.browser import BrowserManager, browser_tools
 
         browser = BrowserManager(data)
+        browser.diff_snapshots = settings.browser.snapshot_diffs
+        browser.full_every = settings.browser.full_snapshot_every
         for t in browser_tools(browser):
             registry.register(t)
         from delta.tools.captcha import captcha_tool
