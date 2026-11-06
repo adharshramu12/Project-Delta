@@ -28,6 +28,14 @@ Memory, grounding and learning counters (Batch D), added by the orchestrator:
   contradicted_claims  claims a check proved wrong (the attempt failed and was retried)
   learning_candidates  lesson or repaired-recipe candidates saved by the task
 
+Attachment counters (delta.attachments), added by the attachment service:
+  attachments                 files sent with the request
+  attachment_tokens_est       estimated tokens of the compact extracts and of read_attachment answers
+  attachment_full_tokens_est  what sending every page of those files would have cost (for comparison)
+  attachment_pages_read       pages or slides pulled later with read_attachment
+  attachment_images           attached pictures sent to a vision model (also in images_sent / image_tokens_est)
+  attachment_cache_hits       files or picture answers served from the cache (no reading, no model call)
+
 summary() turns the counters into what the dashboard and the API show.
 """
 
@@ -74,6 +82,10 @@ PERCEPTION_KEYS = ("images_sent", "image_tokens_est", "marks_used", "ocr_calls",
                    "helper_tokens", "helpers")
 
 
+ATTACHMENT_KEYS = ("attachments", "attachment_tokens_est", "attachment_full_tokens_est", "attachment_pages_read",
+                   "attachment_images", "attachment_cache_hits")
+
+
 LEARNING_KEYS = ("memory_hits", "memory_untrusted_hits", "grounding_claims", "grounding_checks", "unverified_claims",
                  "contradicted_claims", "learning_candidates")
 
@@ -93,6 +105,11 @@ def bump(router: Any, key: str, value: int = 1) -> None:
 def perception(meter: dict[str, int]) -> dict[str, int]:
     """The perception and helper counters that are not zero (empty for a task that used none)."""
     return {k: int(meter[k]) for k in PERCEPTION_KEYS if meter.get(k)}
+
+
+def attachments(meter: dict[str, int]) -> dict[str, int]:
+    """The attachment counters that are not zero (empty for a task without files)."""
+    return {k: int(meter[k]) for k in ATTACHMENT_KEYS if meter.get(k)}
 
 
 def learning(meter: dict[str, int]) -> dict[str, int]:
@@ -148,4 +165,6 @@ def summary(meter: dict[str, int]) -> dict[str, Any]:
         out_summary["perception"] = extra
     if learned := learning(meter):
         out_summary["learning"] = learned
+    if files := attachments(meter):
+        out_summary["attachments"] = files
     return out_summary

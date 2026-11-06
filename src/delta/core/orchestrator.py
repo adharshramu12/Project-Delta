@@ -382,6 +382,7 @@ ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "search_files", "web_searc
                 "media_status", "do_actions", "scroll",
                 "find_app_tool", "use_app_tool"}  # connected apps: only offered while an app is connected
 BROWSER_TOOLS = BROWSER_ACTIONS | {"browser_read"}
+ATTACHMENT_TOOLS = {"read_attachment", "look_at_attachment"}
 SCREEN_TOOLS = {"click_element", "click_at", "type_text", "press_keys", "set_field"}
 # Set-of-marks and OCR (delta.perception): sent with the screen tools, and only when they are usable here.
 PERCEPTION_TOOLS = {"look_with_marks", "click_mark", "read_screen_text", "click_text"}
@@ -399,6 +400,7 @@ class Orchestrator:
     gate: Any = None  # PromotionGate (delta.learning.gate): lessons and repaired recipes. None = no candidates
     lessons: Any = None  # LessonBook (delta.learning.lessons): self-heal recoveries -> lesson candidates. None = off
     connectors: Any = None  # AppTools (delta.connectors.tools): connected apps' one-line index for the planner
+    attachments: Any = None  # AttachmentService (delta.attachments): files sent with a request. None = off
 
     def __init__(self, settings: Settings, router: ModelRouter, executor: ToolExecutor,
                  memory: MemoryStore | None, governor: Governor | None, events: EventBus,
@@ -492,6 +494,11 @@ class Orchestrator:
                 await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
             except Exception:
                 log.exception("router.release_failed", task=req.id)
+        if req.attachment_notes and result.status != "cancelled":
+            # Plain words the model might leave out: a picture that was not seen, pages that could not be read.
+            notes = [n for n in dict.fromkeys(req.attachment_notes) if n not in result.answer]
+            if notes:
+                result.answer = (result.answer.rstrip() + "\n\n" + "\n".join(notes)).strip()
         result.tainted_by = (self._after.get(req.id) or (None, None))[0] or ""
         result.tokens = dict(self.router.meter)
         result.usage = usage.summary(result.tokens)
@@ -516,21 +523,24 @@ class Orchestrator:
     async def _run(self, req: TaskRequest) -> TaskResult:
         if self.engine is not None:  # queued -> planning; tool steps move it to acting (delta.engine)
             self.engine.begin(req, str(self.executor.policy.b.autonomy))
-        if reply := small_talk(req.text, self.s.agent.owner_name):  # "hi", "thanks": 0 tokens, instant
+        # Files sent with the request: read on this PC, a compact extract goes with it (delta.attachments). A
+        # message with files is never small talk, an instant command or a learned recipe: it is about the files.
+        files = await self._attach(req)
+        if not files and (reply := small_talk(req.text, self.s.agent.owner_name)):  # "hi", "thanks": 0 tokens
             return TaskResult(req.id, "done", reply, fast=True)
         # Never guess what only the user can decide (e.g. a meeting's day/time): ask first, 0 tokens.
-        if question := ask_first(req.text):
+        if not files and (question := ask_first(req.text)):
             return TaskResult(req.id, "needs_user", question.text, options=question.options,
                               asked_about=req.text)
         steps: list[StepRecord] = []
         # Instant commands ("pause the music", "start a Google Meet"): 0 tokens, no planner call.
-        if intent := match_intent(req.text, set(self.executor.registry.names())):
+        if not files and (intent := match_intent(req.text, set(self.executor.registry.names()))):
             quick = Plan(True, goal=req.text, success_criteria=[intent.check],
                          direct={"tool": intent.tool, "args": intent.args})
             await self.events.publish("task.plan", task_id=req.id, plan=quick.__dict__)
             if done := await self._direct(req, quick, steps):
                 return done
-        if not steps and (done := await self._replay(req, steps)):
+        if not files and not steps and (done := await self._replay(req, steps)):
             return done
         memory_ctx = await self._memory_context(req)
         if self.learning and (rules := standing_instructions(self.learning)):
@@ -552,7 +562,7 @@ class Orchestrator:
         self._planned.add(req.id)  # the planner already looked for facts to learn: no extra call later
         if plan.remember and self.memory and self.s.memory.enabled and self.s.memory.auto_extract:
             for fact in plan.remember:
-                if req.history and not traced_to_user(fact, req.text):
+                if (req.history or req.attachment_context) and not traced_to_user(fact, req.text):
                     # The planner read earlier turns too (answers that may come from web pages): a fact is
                     # kept only when the user's own message says it (audit item M7).
                     log.info("memory.fact_not_from_user", task=req.id)
@@ -646,6 +656,30 @@ class Orchestrator:
                   f"{self.s.agent.max_attempts} attempts: {verification.reason if verification else ''}")
         return TaskResult(req.id, "failed", answer.strip(), self.s.agent.max_attempts, steps, verification,
                           self.router.last_provider or "", plan.skill_id)
+
+    async def _attach(self, req: TaskRequest) -> bool:
+        """Read the request's attached files and put their compact extract into the request. True when the
+        message itself carries files. The task is marked as having read outside content (ExfilGuard and the taint
+        rule apply from the first step) and the extract is logged as outside text for memory provenance."""
+        if self.attachments is None or not (req.attachments or req.chat_id):
+            return bool(req.attachments)
+        try:
+            prepared = await self.attachments.prepare(req)
+        except Exception:
+            log.exception("attachments.prepare_failed", task=req.id)
+            if req.attachments:
+                req.attachment_notes.append("I could not read the attached file, so I answered without it.")
+            return bool(req.attachments)
+        req.attachment_context = prepared.context
+        req.attachment_notes.extend(prepared.notes)
+        if prepared.ids:
+            self.executor.taint(req.id, "attachment")
+            observations = getattr(self.executor, "observations", None)
+            if observations is not None:
+                observations.add(req.id, "attachment", True, {"ids": prepared.ids}, prepared.outside, {}, True, True)
+            await self.events.publish("task.attachments", task_id=req.id, files=len(prepared.ids),
+                                      tokens=prepared.tokens, full_tokens=prepared.full_tokens)
+        return bool(req.attachments)
 
     async def _replay(self, req: TaskRequest, steps: list[StepRecord]) -> TaskResult | None:
         """A proven skill with a recipe: one small call to fill its slots, then its tool calls run
@@ -889,6 +923,8 @@ class Orchestrator:
         keep = set(wanted) | ALWAYS_TOOLS
         if (req := CURRENT_REQUEST.get()) and req.channel in ("telegram", "slack"):
             keep |= {"send_file", "search_files"}  # away from the PC: "send me that file" must always work
+        if req is not None and req.attachment_context:
+            keep |= ATTACHMENT_TOOLS  # pull more pages, or look at a picture, only when needed
         if set(wanted) & BROWSER_TOOLS or WEBSITE.search(request):  # not ALWAYS_TOOLS' browser_read
             keep |= BROWSER_TOOLS
         if set(wanted) & SCREEN_TOOLS:

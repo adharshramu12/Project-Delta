@@ -22,14 +22,15 @@ from delta.llm.schemas import LLMError, LLMResponse, Message, ToolCall
 class ScriptedProvider:
     local = False
 
-    def __init__(self, script: dict[str, list[Any]], name: str = "scripted") -> None:
+    def __init__(self, script: dict[str, list[Any]], name: str = "scripted", sees: bool = True) -> None:
         self.name = name
+        self.sees = sees  # False: a model that cannot take pictures (attachments: {vision: false})
         self.queues = {k: list(v) for k, v in script.items()}
         self.calls: list[str] = []
         self._n = 0
 
     def supports(self, task: str) -> bool:
-        return True
+        return self.sees or task != "vision"
 
     async def unload(self) -> None:
         return None

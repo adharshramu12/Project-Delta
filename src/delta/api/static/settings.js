@@ -91,6 +91,11 @@
     $("s_onlydomains").value = b.allowed_domains.join("\n");
     $("s_savedir").value = s.save_dir; $("s_savedir").title = s.save_dir_resolved;
     $("s_protected").textContent = "Always protected, whatever you set: Windows system files, saved passwords and keys, and Delta's own data folder (so Delta can never change its own rules). New files currently go to: " + s.save_dir_resolved;
+    const a = s.attachments || {};
+    $("s_vision").replaceChildren(...[["auto", "Any AI I have that can see pictures"], ["off", "Off: use only the text in pictures"],
+      ...(a.providers || []).map(p => [p, "Only " + p + ", for pictures"])].map(([v, t]) => h("option", {value: v, text: t, selected: v === (a.vision || "auto")})));
+    $("s_vmodel").value = a.vision_model || "";
+    $("s_vnote").textContent = a.can_see_pictures ? "An AI that can see pictures is ready." : "No AI here can see pictures, so Delta uses the text in them and says so.";
     $("s_mem").checked = s.memory.enabled; $("s_extract").checked = s.memory.auto_extract; $("s_skills").checked = s.memory.learn_skills;
     $("s_addons").replaceChildren(...(s.addons.available.length ? s.addons.available.map(a => h("label", {class: "check"},
       h("input", {type: "checkbox", dataset: {addon: a}, checked: s.addons.enabled.includes(a)}), " ", a === "mcp" ? "mcp (connect other apps through the Model Context Protocol)" : a))
@@ -132,6 +137,7 @@
       memory: {enabled: $("s_mem").checked, auto_extract: $("s_extract").checked, learn_skills: $("s_skills").checked},
       save_dir: $("s_savedir").value || "auto",
       addons_enabled: [...document.querySelectorAll("[data-addon]")].filter(i => i.checked).map(i => i.dataset.addon),
+      attachments: {vision: $("s_vision").value || "auto", vision_model: $("s_vmodel").value.trim()},
     };
     $("s_save").disabled = true;
     const r = await api("/api/settings", {method: "PUT", body: JSON.stringify(body)}).catch(e => ({detail: D.plain(e)}));

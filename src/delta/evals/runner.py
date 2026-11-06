@@ -130,7 +130,8 @@ class _Router:
         from delta.llm.router import ModelRouter
 
         if self.model is None:
-            provider = ScriptedProvider(fill(task.script, values))
+            sees = bool((task.attachments or {}).get("vision", True))
+            provider = ScriptedProvider(fill(task.script, values), sees=sees)
             return ModelRouter({"scripted": provider}, {j: ["scripted"] for j in ("plan", "chat", "verify",
                                                                                  "vision", "helper")})
         from delta.bootstrap import build_providers
@@ -216,7 +217,10 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
                         memory=MemoryConfig(auto_extract=True, learn_skills=False), data_dir=data, apps=apps,
                         boundaries=Boundaries(allowed_paths=[str(sandbox)], autonomy=autonomy),  # type: ignore[arg-type]
                         writer=WriterConfig(output_dir=str(sandbox), latex="off"))
+    attachments, attached = await _attachments(task, data, values)
     router = router_factory.make(task, values)
+    if attachments is not None:
+        attachments.router = router
     events = EventBus()
     memory = MemoryStore(data / "memory.db")
     for fact in setup.get("memory") or []:
@@ -296,6 +300,12 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         orch.gate = gate
         orch.lessons = LessonBook(learning_store, gate) if settings.learning.lessons else None
     orch.perception = perception
+    if attachments is not None:  # files sent with the request: the store, the extract, the two read tools
+        from delta.attachments.tools import attachment_tools
+
+        for t in attachment_tools(attachments):
+            registry.register(t)
+        orch.attachments = attachments
     if connector is not None:
         orch.connectors = connector.tools
         executor.guard = connector.guard
@@ -314,7 +324,8 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         orch.healer = Healer(settings.selfheal, executor, events, can_see=lambda: False, settle_s=0.05)
         orch.healer.engine = engine
     channel = connector.channel if connector is not None else "api"
-    req = TaskRequest(fill(task.request, values), channel=channel, user="5" if channel != "api" else "")
+    req = TaskRequest(fill(task.request, values), channel=channel, user="5" if channel != "api" else "",
+                      attachments=attached)
     started = time.monotonic()
     try:
         for _ in range(task.runs - 1):  # earlier runs of a repeated task: same data folder, same script
@@ -369,6 +380,27 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         if extra is not None:
             extra.close()
     return out
+
+
+async def _attachments(task: EvalTask, data: Path, values: dict[str, str]) -> tuple[Any, list[str]]:
+    """The attachment service and the ids of the files made for a task with `attachments:` ({attachment_N} values
+    are set for the script), else (None, [])."""
+    if task.attachments is None:
+        return None, []
+    from delta.attachments.service import AttachmentService
+    from delta.config import AttachmentsConfig
+    from delta.evals.attachment_fixtures import build
+
+    spec = dict(task.attachments)
+    raw = {"ocr": "off", **dict(spec.get("settings") or {})}
+    cfg = AttachmentsConfig(**{k: v for k, v in raw.items() if k in AttachmentsConfig.model_fields})
+    service = AttachmentService(cfg, data, None)
+    ids = []
+    for n, f in enumerate(fill(spec.get("files") or [], values), 1):
+        att, _ = await service.ingest_bytes(build(dict(f)), str(f.get("name", f"file{n}")), "", "eval")
+        values[f"attachment_{n}"] = att.id
+        ids.append(att.id)
+    return service, ids
 
 
 def _learning_stores(task: EvalTask, data: Path, values: dict[str, str]) -> tuple[Any, Any]:

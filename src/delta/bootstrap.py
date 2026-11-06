@@ -327,6 +327,42 @@ def attach_perception(settings: Settings, router: ModelRouter, executor: ToolExe
     return perception
 
 
+def attach_attachments(settings: Settings, router: ModelRouter, executor: ToolExecutor, orchestrator: Orchestrator,
+                       ocr: Any = None) -> Any:
+    """Files and pictures sent in the chat or on Telegram (delta.attachments): the store in the data folder, the
+    two read tools (offered only with a request that has files) and, when the user named a provider for pictures
+    only (attachments.vision + vision_model), a separate router for it, so the normal routes never change."""
+    cfg = settings.attachments
+    if not cfg.enabled:
+        return None
+    from delta.attachments.service import AttachmentService
+    from delta.attachments.tools import attachment_tools
+
+    service = AttachmentService(cfg, settings.data_dir, router, ocr, pictures_router(settings))
+    try:
+        service.prune()
+    except Exception as e:  # an unreadable folder must never stop Delta from starting
+        log.warning("attachments.prune_failed", error=str(e))
+    for t in attachment_tools(service):
+        executor.registry.register(t)
+    orchestrator.attachments = service
+    return service
+
+
+def pictures_router(settings: Settings) -> ModelRouter | None:
+    """attachments.vision names one of the user's API providers and vision_model a model on it: a router with only
+    that provider, used for attached pictures only. Anything else (auto, off, a CLI provider) returns None and the
+    pictures use the normal vision route."""
+    cfg = settings.attachments
+    name, model = (cfg.vision or "").strip(), (cfg.vision_model or "").strip()
+    pcfg = settings.llm.providers.get(name)
+    if not model or pcfg is None or pcfg.kind != "openai":
+        return None
+    only = settings.model_copy(deep=True)
+    only.llm.providers = {name: pcfg.model_copy(update={"models": {"chat": model, "vision": model}})}
+    return ModelRouter(build_providers(only), {"vision": [name]}, preferred=name)
+
+
 def attach_learning(settings: Settings, orchestrator: Orchestrator, learning: LearningStore,
                     skills: SkillStore | None) -> None:
     """The promotion gate (delta.learning.gate): lesson candidates from self-heal and repaired recipe versions,
@@ -458,6 +494,8 @@ def build(settings: Settings) -> Container:
     attach_selfheal(settings, router, executor, orchestrator, events)  # recovery, undo, opt-in model ladder
     attach_perception(settings, router, executor, orchestrator, browsers, ctl if desktop_ok else None, proof,
                       governor)  # set-of-marks, OCR, perception cache, opt-in read-only helpers
+    perception = orchestrator.perception
+    attach_attachments(settings, router, executor, orchestrator, perception.ocr if perception is not None else None)
     attach_learning(settings, orchestrator, learning, skills)  # promotion gate, lessons, recipe repair
     from delta.safety.remote_guard import RemoteGuard
     from delta.system.notify import notify
