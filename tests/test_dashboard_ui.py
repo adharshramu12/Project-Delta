@@ -199,3 +199,16 @@ def test_text_colors_meet_wcag_aa(theme):
              ("text-3", "warn-soft")]
     for fg, bg in pairs:
         assert _contrast(t[fg], t[bg]) >= 4.5, f"{theme}: {fg} on {bg} is {_contrast(t[fg], t[bg]):.2f}"
+
+
+def test_the_page_itself_never_scrolls():
+    """Only the panes inside scroll. The shell clips (overflow:clip cannot be scrolled by scrollIntoView, hidden can)
+    and contains its absolutely placed children (visually hidden labels), so nothing makes the page taller than the
+    window.
+    The real-browser check is tests/e2e/test_dashboard_e2e.py::test_dashboard_fills_the_window."""
+    css = STYLES["app.css"]
+    shell = re.search(r"^\.app\{([^}]*)\}", css, re.M)
+    assert shell, "the .app shell rule"
+    rules = shell.group(1)
+    assert "overflow:clip" in rules and "position:relative" in rules and "height:100vh" in rules, rules
+    assert "body{" in css and "overflow:hidden" in re.search(r"^body\{([^}]*)\}", css, re.M).group(1)  # type: ignore[union-attr]

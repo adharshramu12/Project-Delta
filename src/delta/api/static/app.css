@@ -27,7 +27,8 @@ code,.mono,pre{font-family:var(--mono);font-size:.92em}
 .ic .logo-fg{fill:none;stroke:var(--bg);stroke-width:2}
 
 /* ---- frame */
-.app{display:grid;grid-template-columns:var(--sidebar-w) minmax(0, 1fr);height:100vh}
+/* Only the panes scroll, never the page: clip (unlike hidden) cannot be scrolled by scrollIntoView. */
+.app{position:relative;overflow:clip;display:grid;grid-template-columns:var(--sidebar-w) minmax(0, 1fr);grid-template-rows:minmax(0, 1fr);height:100vh}
 body.sb-collapsed .app{grid-template-columns:var(--sidebar-w-collapsed) minmax(0, 1fr)}
 .sidebar{display:flex;flex-direction:column;min-height:0;background:var(--bg);border-right:1px solid var(--border);padding:var(--s3) var(--s2);gap:var(--s1)}
 .sb-head{display:flex;align-items:center;gap:var(--s2);padding:0 var(--s1) var(--s3) var(--s2);height:40px}
@@ -107,7 +108,7 @@ body.sb-collapsed .nav-item[data-go="chat"]{position:relative}
 .banner-line .ic,.pcheck .ic{width:16px;height:16px;margin-top:2px}
 
 .views{flex:1;min-height:0;display:flex;outline:none}
-.view{flex:1;min-width:0;overflow-y:auto;scrollbar-gutter:stable}
+.view{position:relative;flex:1;min-width:0;overflow-y:auto;scrollbar-gutter:stable}
 .view-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s4);max-width:1040px;margin:0 auto;padding:var(--s8) var(--s8) var(--s4)}
 .view-head p{margin-top:var(--s1);max-width:640px}
 .view-body{max-width:1040px;margin:0 auto;padding:0 var(--s8) var(--s12)}
@@ -375,7 +376,7 @@ body.panel-closed .panel{display:none}
 .view-settings{display:grid;grid-template-columns:220px minmax(0, 1fr);overflow:hidden}
 .settings-nav{display:flex;flex-direction:column;gap:2px;padding:var(--s8) var(--s3);border-right:1px solid var(--border);overflow-y:auto}
 .settings-nav a{color:var(--text-2);text-decoration:none;font-size:var(--fs-sm);padding:6px 10px;border-radius:var(--r-sm)}
-.settings-body{overflow-y:auto;padding:0 0 0;min-width:0;scroll-padding-top:var(--s4)}
+.settings-body{position:relative;overflow-y:auto;padding:0 0 0;min-width:0;scroll-padding-top:var(--s4)}
 .settings-body > .view-head,.settings-body > .group,.settings-body > .banner{max-width:760px;margin-left:var(--s8);margin-right:var(--s8);padding-left:0;padding-right:0}
 .settings-body .group{scroll-margin-top:var(--s4)}
 .savebar{position:sticky;bottom:0;display:flex;align-items:center;justify-content:flex-end;gap:var(--s2);padding:var(--s3) var(--s8);border-top:1px solid var(--border);background:var(--surface);margin-top:var(--s4);z-index:2}

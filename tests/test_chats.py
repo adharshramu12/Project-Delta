@@ -1,5 +1,5 @@
 from delta.core.state import TaskRequest
-from delta.memory.chats import NEW_TITLE, ChatStore, title_from
+from delta.memory.chats import NEW_TITLE, TELEGRAM_TITLE, ChatStore, shown_title, title_from
 
 
 def test_title_from_first_message():
@@ -61,3 +61,15 @@ def test_greeting_does_not_name_the_chat(tmp_path):
     assert s.get(c.id).title == NEW_TITLE
     s.add(c.id, "user", "open notepad and write a shopping list")
     assert s.get(c.id).title == "Open notepad and write a shopping list"
+
+
+def test_telegram_chat_id_is_never_shown(tmp_path):
+    s = ChatStore(tmp_path / "c.db")
+    c = s.create("Telegram 6057519957")  # the Telegram channel's key for this person's chat
+    assert shown_title(c.title) == TELEGRAM_TITLE == "Telegram chat"
+    assert c.to_dict()["title"] == "Telegram chat" and "6057519957" not in str(c.to_dict())
+    # the channel still finds the chat by its stored title
+    assert [ch.id for ch in s.list("Telegram 6057519957") if ch.title == "Telegram 6057519957"] == [c.id]
+    assert shown_title("Telegram -1001234567") == "Telegram chat"  # group chats have negative ids
+    for title in ("Telegram ideas", "Plan Telegram 2 launch", "New chat"):
+        assert shown_title(title) == title

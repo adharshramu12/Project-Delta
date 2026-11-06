@@ -34,6 +34,10 @@ CREATE INDEX IF NOT EXISTS chat_messages_chat ON chat_messages(chat_id, id);
 """
 
 NEW_TITLE = "New chat"
+# A Telegram conversation is stored as "Telegram <chat id>" so the bot finds it again (channels/telegram.py). The
+# number is private: the dashboard (sidebar, window title) shows this instead.
+TELEGRAM_TITLE = "Telegram chat"
+_TELEGRAM_ID_TITLE = re.compile(r"^Telegram -?\d+$")
 _FILLER = re.compile(r"^(?:please|pls|can you|could you|hey|hi|delta|ok|okay|now|just)[,\s]+", re.I)
 
 
@@ -47,6 +51,11 @@ def title_from(text: str, words: int = 7) -> str:
     return (t[:1].upper() + t[1:])[:60] if t else NEW_TITLE
 
 
+def shown_title(title: str) -> str:
+    """The title people see: a Telegram chat's internal "Telegram 6057519957" becomes "Telegram chat"."""
+    return TELEGRAM_TITLE if _TELEGRAM_ID_TITLE.match(title) else title
+
+
 @dataclass
 class Chat:
     id: str
@@ -58,7 +67,8 @@ class Chat:
     count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        """For the dashboard: `title` is the shown one (shown_title); the stored one stays on the object."""
+        return asdict(self) | {"title": shown_title(self.title)}
 
 
 class ChatStore:
