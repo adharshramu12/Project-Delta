@@ -67,7 +67,30 @@ def match_intent(text: str, available: set[str]) -> Intent | None:
         if m:
             intent = build(m)
             return intent if intent.tool in available else None
+    if (sched := schedule_intent(t)) is not None:
+        return sched if sched.tool in available else None
     return None
+
+
+# "remind me at 6 pm to call Ravi", "every day at 9 am check my attendance": saved as a schedule with no
+# planner call, when the sentence starts like a schedule and the time is certain (delta.scheduler.parse).
+_SCHEDULE_START = re.compile(POLITE + r"(?:remind\s+me|set\s+(?:a\s+)?reminder|every|each|daily|hourly)\b", re.I)
+
+
+def schedule_intent(text: str) -> Intent | None:
+    if not _SCHEDULE_START.match(text):
+        return None
+    from delta.core.clarify import SCHEDULING
+    from delta.scheduler.parse import ParseError, parse_schedule
+
+    if SCHEDULING.search(text) and not text.lower().lstrip().startswith("remind"):
+        return None  # "every Monday schedule a meeting...": a calendar job for the planner, not a routine
+
+    try:
+        parse_schedule(text)
+    except ParseError:
+        return None  # unclear: the planner (or a question back) handles it
+    return Intent("schedule_task", {"text": text}, "the schedule is saved")
 
 
 # Greetings and thanks: answered on the spot. Sending "hi" to an AI app costs ~12k tokens of its

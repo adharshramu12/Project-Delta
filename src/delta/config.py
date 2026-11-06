@@ -182,6 +182,17 @@ class QuietHours(BaseModel):
     end: str = "07:00"
 
 
+class SchedulerConfig(BaseModel):
+    """Scheduled tasks and reminders (delta.scheduler). Runs only while the background service is on."""
+    enabled: bool = True
+    # a run missed while the PC was off or asleep still runs once if it is at most this late
+    grace_minutes: float = Field(default=60, ge=0)
+    # scheduled AI runs at once (Delta still does one heavy task at a time overall)
+    max_concurrent: int = Field(default=1, ge=1, le=4)
+    history_limit: int = Field(default=50, ge=1, le=1000)  # runs kept per schedule
+    timezone: str = ""  # IANA name like "Asia/Kolkata"; empty = this PC's own time zone
+
+
 Autonomy = Literal["ask-everything", "ask-risky", "trusted", "autopilot"]
 
 
@@ -214,6 +225,7 @@ class Settings(BaseModel):
     addons: AddonsConfig = Field(default_factory=AddonsConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     captcha: CaptchaConfig = Field(default_factory=CaptchaConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     boundaries: Boundaries = Field(default_factory=Boundaries)
     apps: dict[str, AppEntry] = Field(default_factory=dict)
     config_dir: Path = REPO_ROOT / "config"

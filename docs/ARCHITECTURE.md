@@ -64,6 +64,7 @@ A rung that cannot prove its result hands over to the next one **with what it al
 | `memory/*` | profile facts, task episodes, learned skills with recipes |
 | `system/*` | governor (CPU/RAM/GPU/temps/battery), lifecycle, logging, secrets (Windows Credential Manager), PC control, notifications |
 | `daemon.py` | the background service, the lean app window, leftover-window cleanup, full shutdown |
+| `scheduler/*` | scheduled tasks and reminders: rules and next-run maths, plain-words parsing, SQLite store, the loop, agent tools, `delta schedule` |
 
 ## The agent loop (rung 4)
 ```
@@ -146,6 +147,39 @@ Before the matrix: denied tools, paths, apps and domains are DENY; quiet hours t
 **Messaging on the user's behalf.** One-time messages ask with the app, person and exact text. A delegated chat (`chat_for_me`) is approved once with its limits (who, app, minutes, mood, goal); each reply also asks unless the user turned that off; it never answers money, OTP, password, personal-detail or "are you a bot" messages (it hands the chat back); every sent message is audited; "stop chatting" ends it.
 
 **The user at the keyboard wins.** Moving the mouse pauses desktop actions; Delta continues only after the mouse is still for 4 s, and stops if the user keeps working.
+
+## Scheduled tasks
+
+`delta.scheduler` keeps schedules in `schedules.db` (SQLite, Delta's data folder): the task text, a rule
+(once, daily, weekly, every N minutes or hours with a 5 minute floor, or a 5-field cron line), a time zone
+(empty = the PC's own), who made it (channel and user), the permission level at that moment, enabled, next
+run, last run and status, and a bounded run history.
+
+- **Rules** (`rules.py`) are kept as local wall-clock times, so a 9 AM run stays at 9 AM across daylight saving.
+  A time inside a DST gap runs right after the jump; a repeated time runs once (the first). Intervals count
+  real elapsed time. Only the computed next run is stored, in UTC. Named zones use the standard library's
+  `zoneinfo` (Windows gets the zone data from the `tzdata` package already in the lockfile); a zone that
+  cannot be loaded falls back to the PC's own instead of failing.
+- **Parsing** (`parse.py`) turns plain words into a rule with regular expressions, no AI. Anything unclear raises
+  a question back ("What time should it run?"). `core/intents.py` sends sentences that start like a schedule
+  ("remind me", "every", "daily") straight to `schedule_task`; the planner knows the tool for the rest.
+- **The loop** (`service.py`) starts in `delta run` after the chat channels and stops before them. It wakes for
+  the earliest next run, at least every 20 seconds (which also notices a wake from sleep), and when a
+  schedule changes. For each due schedule: skip if the same schedule is still running (recorded as skipped);
+  if it is later than the grace window (default 1 hour) record "missed" and move on; during quiet hours hold
+  task runs (reminders still go out) and run them once when quiet hours end; otherwise move `next_run`
+  forward first (so a crash never repeats a run) and start it. Task runs go through `Container.submit`, the
+  normal Orchestrator / ToolExecutor / ApprovalBroker path, as the schedule's own channel and user, behind a
+  semaphore (`max_concurrent`, default 1). Reminders skip the AI and only deliver the message.
+- **Permission level**: `Container.submit(autonomy_cap=...)` swaps in a policy at the lower of the schedule's
+  saved level and today's level for that one task (tasks run one at a time), then rebuilds today's policy.
+  Nothing can raise it.
+- **Delivery**: Telegram and Slack get the result through their `send_text`; everything also goes to the
+  dashboard (a `schedule.result` event, the **Scheduled tasks** chat, a Windows notification when no phone
+  channel took it).
+- **Surfaces**: agent tools `schedule_task` (confirms the parsed schedule once at every permission level),
+  `list_schedules`, `pause_schedule`, `resume_schedule`, `delete_schedule`, `run_schedule_now`; API routes in
+  `api/schedule_routes.py` (dashboard token); the Schedules panel (`static/schedules.js`); `delta schedule`.
 
 ## Processes and lifecycle
 ```

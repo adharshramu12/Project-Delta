@@ -41,6 +41,8 @@ HELP = (
     "/apps - what is open, tap to close it\n"
     "/screen - a screenshot of the PC now\n"
     "/camera - a photo from the webcam of whoever is at the PC\n\n"
+    "<b>Schedules</b>: \"every day at 9 am check my attendance\", \"remind me at 6 pm to call Ravi\", "
+    "\"what's scheduled?\" (making or turning on a schedule from here needs your PIN)\n\n"
     "/stop - stop what I'm doing now\n"
     "/unlock - enter your PIN (screen, camera, files, commands, approving deletes or sends,\n"
     "  closing apps and keys need it)\n"
@@ -127,6 +129,16 @@ class TelegramChannel(PCMenu):
                 await self.app.bot.send_photo(int(user), f, caption=caption[:1000])
             else:
                 await self.app.bot.send_document(int(user), f, filename=path.name, caption=caption[:1000])
+
+    async def send_text(self, user: str, text: str) -> None:
+        """A message Delta starts itself (a scheduled task's result, a reminder) in an allowed user's chat."""
+        if not is_allowed(user, self.allowed):
+            raise ValueError("not an allowed Telegram user")
+        for part in chunks(text):
+            try:
+                await self.app.bot.send_message(int(user), to_html(part), parse_mode="HTML")
+            except Exception:
+                await self.app.bot.send_message(int(user), part)
 
     async def reply(self, update: Any, text: str, **kw: Any) -> None:
         """Formatted (bold, code, links); plain text if Telegram rejects the markup."""

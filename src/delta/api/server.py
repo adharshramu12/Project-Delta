@@ -310,12 +310,14 @@ def create_app(c: Container, token: str) -> FastAPI:
         return {"ok": True}
 
     from delta.api.apps_routes import register as register_apps
+    from delta.api.schedule_routes import register as register_schedules
     from delta.api.settings_routes import register as register_settings
     from delta.api.setup_routes import register as register_setup
 
     register_setup(app, c, auth)
     register_settings(app, c, auth)
     register_apps(app, c, auth)
+    register_schedules(app, c, auth)
 
     @app.get("/api/runs/unfinished", dependencies=[Depends(auth)])
     async def unfinished_run() -> dict[str, Any]:

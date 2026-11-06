@@ -400,6 +400,9 @@ async def run(open_ui: bool = False) -> int:
                                            log_config=None))
     serve = asyncio.create_task(server.serve(), name="api")
     channels = await _start_channels(c)
+    if c.scheduler is not None:  # scheduled tasks: after the channels, so results can reach the phone
+        await c.scheduler.start()
+        c.lifecycle.on_shutdown("scheduler", c.scheduler.stop)
     log.info("delta.running", api=f"{settings.api.host}:{settings.api.port}",
              channels=[getattr(x, "name", "") for x in channels])
     print(f"Delta is running → http://{settings.api.host}:{settings.api.port}  (Ctrl+C or dashboard Shutdown to stop)")

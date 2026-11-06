@@ -55,6 +55,9 @@ x@y.com tomorrow 5pm" -> schedule_meeting (start in ISO local time, from Now abo
 is just "HH:MM" when no day is given, so the meeting keeps its own day).
 "send hi to Ravi on WhatsApp" -> send_message (write the text the way the user texts: short, natural);
 "chat with Priya on Telegram for me, be funny" -> chat_for_me (goal and mood from the request).
+"every day at 9 am check my attendance" / "remind me at 6 pm to call Ravi" / "every Monday 10 am ..." ->
+schedule_task with text = the user's own words (it confirms the parsed time with the user before saving);
+"what's scheduled" -> list_schedules; "pause/delete my attendance check" -> pause_schedule / delete_schedule.
 If the person or app is not clear, ask instead of guessing. Leave it null when the
 job needs several steps or looking at the screen.
 

@@ -96,15 +96,17 @@ class Container:
     guard: Any = None  # RemoteGuard: PIN and lock for remote control
     emergency: Any = None  # EmergencyContacts (encrypted)
     running: asyncio.Task[Any] | None = None  # the task being worked on now (any channel can stop it)
+    scheduler: Any = None  # delta.scheduler.service.Scheduler (its loop starts in `delta run`)
 
     def warn(self, message: str) -> None:
         if message not in self.warnings:
             self.warnings.append(message)
         log.warning("delta.warning", message=message)
 
-    async def submit(self, req: TaskRequest) -> TaskResult:
+    async def submit(self, req: TaskRequest, autonomy_cap: str | None = None) -> TaskResult:
         """One heavy task at a time keeps the laptop responsive. While remote control is locked, nothing
-        asked from a remote channel (Telegram, Slack, any later one) runs at all."""
+        asked from a remote channel (Telegram, Slack, any later one) runs at all.
+        autonomy_cap (scheduled runs): this task never gets a higher permission level than this one."""
         from delta.safety.remote_guard import is_remote
 
         if self.guard is not None and self.guard.locked and is_remote(req.channel):
@@ -112,10 +114,29 @@ class Container:
             return TaskResult(req.id, "failed", self.guard.locked_message())
         async with self._task_lock:
             self.running = asyncio.current_task()
+            capped = self._cap_autonomy(autonomy_cap)
             try:
                 return await self.orchestrator.run(req)
             finally:
                 self.running = None
+                if capped is not None and self.orchestrator.executor.policy is capped:
+                    self.orchestrator.executor.policy = make_policy(self.settings)  # today's rules again
+
+    def _cap_autonomy(self, cap: str | None) -> Any:
+        """Lower the permission level for the task about to run (tasks run one at a time); never raises it."""
+        if not cap:
+            return None  # every ordinary request: nothing changes
+        from delta.scheduler.service import lower_autonomy
+
+        executor = self.orchestrator.executor
+        now = str(executor.policy.b.autonomy)
+        lower = lower_autonomy(cap, now)
+        if lower == now:
+            return None
+        settings = self.settings.model_copy(deep=True)
+        settings.boundaries.autonomy = lower  # type: ignore[assignment]
+        executor.policy = make_policy(settings)
+        return executor.policy
 
     async def start(self) -> None:
         self.lifecycle.acquire_single_instance()
@@ -137,6 +158,8 @@ class Container:
                 self.orchestrator.skills.close()
             if self.orchestrator.learning:
                 self.orchestrator.learning.close()
+            if self.scheduler is not None:
+                self.scheduler.store.close()
 
         self.lifecycle.on_shutdown("state", close_state)
         for name, closer in self.closers:
@@ -212,6 +235,9 @@ def build(settings: Settings) -> Container:
         FetchPage(),
         *(memory_tools(memory) if settings.memory.enabled else []),
     ])
+    from delta.scheduler.setup import attach as attach_scheduler
+
+    scheduler, sched_ctx = attach_scheduler(settings, registry, approvals)  # scheduled tasks (delta.scheduler)
     closers: list[tuple[str, Callable[[], Awaitable[None]]]] = []
     proof = ProofRecorder(data / "runs")
     desktop_ok = _installed("pywinauto", "pyautogui", "mss")
@@ -256,6 +282,7 @@ def build(settings: Settings) -> Container:
         await events.publish("learning.added", item=item.to_dict())
 
     executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
+    sched_ctx.executor = executor
     chats.executor = executor  # each delegated reply goes through the same approval rules
     skills = SkillStore(data / "skills.db")
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
@@ -272,6 +299,8 @@ def build(settings: Settings) -> Container:
     send_file.guard = guard
     executor.guard = guard  # Remote Guard for every tool call (PIN for sensitive reads, the lock)
     approvals.guard = guard  # ...and for every approval button pressed on a phone
-    return Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
-                     Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"),
-                     live_channels=live_channels, guard=guard, emergency=emergency)
+    container = Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
+                          Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"),
+                          live_channels=live_channels, guard=guard, emergency=emergency, scheduler=scheduler)
+    scheduler.bind(container)
+    return container

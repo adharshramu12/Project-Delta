@@ -40,6 +40,7 @@ SENSITIVE = {
     "camera": "take a webcam photo", "screen": "take a screenshot", "close_app": "close an app",
     "send_file": "send a file from the PC", "keys": "change an API key", "autopilot": "turn on Autopilot",
     "unlock": "unlock sensitive actions",
+    "schedule": "create, change or turn on a scheduled task",
 }
 
 
@@ -56,6 +57,8 @@ REMOTE_PIN_TOOLS = {
     "camera_photo": "take a webcam photo", "read_file": "read a file on the PC", "send_file": "send a file from the PC",
     "read_messages": "read your messages", "run_shell": "run a command on the PC",
     "run_python": "run code on the PC",
+    # a schedule runs later, unattended: making one or turning it back on from a phone needs the PIN
+    "schedule_task": "create a scheduled task", "resume_schedule": "turn a scheduled task back on",
 }
 # Read tools that need the PIN remotely only when they look outside the allowed folders.
 REMOTE_PIN_OUTSIDE_ALLOWED = {"list_dir": "list a folder", "search_files": "search files",
