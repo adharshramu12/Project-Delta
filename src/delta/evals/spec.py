@@ -25,6 +25,11 @@
       grounding: {mode: strict}        optional: answer grounding settings (GroundingConfig; default report)
       connector: {auth: oauth, ...}    optional: a connected app (the fake notes app) set up before the task;
                                        see delta.evals.connector_fixture
+      attachments:                     optional: files sent with the request (delta.attachments), made in code
+        files: [{name: a.pdf, fixture: text_pdf, pages: [["line", ...], ...]}]   see attachment_fixtures.build
+        vision: false                  no model can see pictures (the non-vision fallback); default true
+        settings: {ocr: off}           AttachmentsConfig settings (evals turn OCR off so results never depend on
+                                       the PC's OCR languages)
       runs: 2                          optional: the same request this many times, one after another, in the
                                        same data folder (the script holds the replies for every run)
       eval_gate: true                  optional: when every check passes, each learning candidate the task
@@ -35,7 +40,8 @@
       timeout_s: 120
 
 Placeholders in request, setup, script and check: {sandbox} (the task's own folder), {site} (the local
-fixture web site), {python} (this Python), {marker} (a unique word for this run).
+fixture web site), {python} (this Python), {marker} (a unique word for this run), {attachment_1} ... (the ids
+of the task's attached files, in order).
 """
 
 from __future__ import annotations
@@ -47,7 +53,7 @@ from typing import Any
 import yaml
 
 SUITES = ("files", "documents", "browser", "apps", "memory", "selfheal", "perception", "helpers", "learning",
-          "connectors")
+          "connectors", "attachments")
 
 
 @dataclass
@@ -69,6 +75,7 @@ class EvalTask:
     learning: dict[str, Any] | None = None
     grounding: dict[str, Any] | None = None
     connector: dict[str, Any] | None = None  # connected apps: the fake notes app (delta.evals.connector_fixture)
+    attachments: dict[str, Any] | None = None  # files sent with the request (delta.attachments)
     runs: int = 1
     eval_gate: bool = False
     check_after_gate: list[dict[str, Any]] = field(default_factory=list)
@@ -100,7 +107,7 @@ def _task(raw: Any, suite: str, where: str) -> EvalTask:
     if fake is not None and not isinstance(fake, dict):
         raise SpecError(f"{where} {raw['id']}: fake_browser must be a mapping of switches")
     extra: dict[str, dict[str, Any] | None] = {}
-    for key in ("perception", "helpers", "learning", "grounding", "connector"):
+    for key in ("perception", "helpers", "learning", "grounding", "connector", "attachments"):
         value = raw.get(key)
         if value is not None and not isinstance(value, dict):
             raise SpecError(f"{where} {raw['id']}: {key} must be a mapping of settings")

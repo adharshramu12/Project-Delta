@@ -6,15 +6,16 @@
   "use strict";
   const D = window.Delta, {$, api, h, icon, btn} = D;
 
-  let current = D.pref.get("delta_chat");   // open chat id ("" = a new chat, created on the first message)
-  const taskChat = {};                         // task id -> chat id
+  let current = D.pref.get("delta_chat");  // open chat id ("" = a new chat, created on the first message)
+  const taskChat = {};  // task id -> chat id
   const unread = new Set(), busy = new Set();
   const shown = taskId => !taskChat[taskId] || taskChat[taskId] === current;
-  let chatURLs = [];                           // screenshots and previews of the open chat, freed when it closes
+  let chatURLs = [];  // screenshots and previews of the open chat, freed when it closes
   const keepURL = b => { const u = URL.createObjectURL(b); chatURLs.push(u); return u; };
   const log = $("log");
   const HERO = $("hero").cloneNode(true);
-  let usage = {tasks: 0, tokens: 0, calls: 0, secs: 0, estimate: false};
+  const NO_USAGE = () => ({tasks: 0, tokens: 0, calls: 0, secs: 0, estimate: false, fileTokens: 0});
+  let usage = NO_USAGE();
 
   const scrollEnd = el => { const near = log.scrollHeight - log.scrollTop - log.clientHeight < 160; if (near || el) log.scrollTop = log.scrollHeight; };
   function put(el) { $("hero")?.remove(); log.append(el); scrollEnd(el); return el; }
@@ -22,7 +23,21 @@
   function note(text, kind = "", ic = "info") { return put(h("div", {class: "note-line " + kind}, icon(ic), h("span", {text}))); }
 
   // ---- messages
-  function userMsg(text) { return put(h("div", {class: "msg me"}, h("div", {class: "bubble", text}))); }
+  function userMsg(text, files) {
+    const list = (files || []).filter(f => f && f.id);
+    const bubble = h("div", {class: "bubble", text});
+    if (!list.length) return put(h("div", {class: "msg me"}, bubble));
+    const row = h("div", {class: "msg-files", role: "list", "aria-label": "Attached files"}, list.map(f => fileChip(f)));
+    return put(h("div", {class: "msg me"}, h("div", {class: "me-col"}, row, bubble)));
+  }
+  // ---- attachment chips (names come from files: text only)
+  const KINDS = {image: "Picture", pdf: "PDF", docx: "Word", pptx: "PowerPoint", text: "Text"};
+  function fileChip(f, extra) {
+    const chip = h("span", {class: "achip", role: "listitem", title: f.name}, icon(f.kind === "image" ? "image" : "doc"),
+      h("span", {class: "an"}, h("b", {text: f.name || "file"}), h("small", {text: extra || [KINDS[f.kind] || "File", f.summary].filter(Boolean).join(", ")})));
+    if (f.kind === "image" && f.id) D.blob(`/api/attachments/${encodeURIComponent(f.id)}/preview`).then(b => chip.firstChild.replaceWith(h("img", {src: keepURL(b), alt: ""}))).catch(() => {});
+    return chip;
+  }
   function usageLine(r) {
     const t = r.tokens || {}, u = r.usage || {};
     // Tokens per task: reported by the AI, an estimate (labelled), or "not reported" (some CLI AIs).
@@ -32,6 +47,8 @@
       : `${D.k((t.input || 0) + (t.output || 0))} tokens`;
     const calls = u.calls || t.calls;
     const parts = [];
+    const a = u.attachments;
+    if (a && a.attachments) parts.push(`${a.attachments} file(s): ~${D.k(a.attachment_tokens_est || 0)} tokens` + (a.attachment_images ? `, ${a.attachment_images} picture(s) seen` : ""));
     if (r.provider) parts.push("via " + r.provider);
     if (r.fallback) parts.push(r.fallback);
     if (r.attempts) parts.push(r.attempts + (r.attempts === 1 ? " attempt" : " attempts"));
@@ -52,6 +69,7 @@
         h("div", {class: "answer-text"}, D.linkify(String(r.answer || ""))),
         h("div", {class: "answer-meta"}, h("span", {class: "pill " + kind, text: label}), u.parts.length ? h("span", {text: u.parts.join(" · ")}) : null))));
     usage.tasks++; usage.tokens += u.tokens; usage.calls += u.calls; usage.secs += r.wall_s || 0; usage.estimate = usage.estimate || u.estimate;
+    usage.fileTokens += ((r.usage || {}).attachments || {}).attachment_tokens_est || 0;
     renderUsage();
     if (r.checks && r.checks.length) showProof(r);
     if (live && r.status === "needs_user" && r.asked_about) showOptions(r);
@@ -62,6 +80,7 @@
     const cell = (v, l) => h("div", {class: "stat"}, h("b", {text: v}), h("small", {text: l}));
     box.replaceChildren(cell(String(usage.tasks), usage.tasks === 1 ? "answer" : "answers"),
       cell(D.k(usage.tokens) + (usage.estimate ? "*" : ""), "tokens"), cell(String(usage.calls), "AI calls"), cell(usage.secs ? D.dur(usage.secs) : "0 s", "working"));
+    if (usage.fileTokens) box.append(h("p", {class: "muted small span", text: `Attached files: about ${D.k(usage.fileTokens)} tokens.`}));
     if (usage.estimate) box.append(h("p", {class: "muted small span", text: "* includes estimates where the AI did not report its count."}));
   }
 
@@ -263,7 +282,7 @@
     r.questions.forEach((q, qi) => {
       const opts = h("div", {class: "qopts", role: q.multi ? "group" : "radiogroup", "aria-label": q.q});
       for (const o of q.options) {
-        const b = h("button", {type: "button", class: "opt", "aria-pressed": "false"}, icon(q.multi ? "circle" : "circle"), h("span", {text: o}));
+        const b = h("button", {type: "button", class: "opt", "aria-pressed": "false"}, icon("circle"), h("span", {text: o}));
         b.onclick = () => {
           if (q.multi) { picks[qi].has(o) ? picks[qi].delete(o) : picks[qi].add(o); }
           else picks[qi] = new Set([o]);
@@ -345,6 +364,7 @@
       if (ev === "task.step") { tickStep(d.task_id, d.tool); if (!(d.args && d.args.auto)) stepLine(d.task_id, "", d.tool, JSON.stringify(d.args || {}).slice(0, 140)); }
       if (ev === "task.verify") { if (d.passed) tickAll(d.task_id); stepLine(d.task_id, d.passed ? "ok" : "bad", "", (d.passed ? "Verified: " : "Not verified: ") + d.reason); }
       if (ev === "task.recovery") stepLine(d.task_id, d.ok ? "ok" : "", "", "Self-heal: " + d.line);
+      if (ev === "task.attachments") stepLine(d.task_id, "", "", `Read ${d.files} file(s) on this PC: ~${D.k(d.tokens)} tokens` + (d.full_tokens > d.tokens ? ` instead of ${D.k(d.full_tokens)}` : ""));
       if (ev === "task.grounding" && ((d.unverified || []).length || (d.contradicted || []).length))
         stepLine(d.task_id, d.contradicted.length ? "bad" : "", "", "Answer check: " + (d.contradicted.length ? "not true: " + d.contradicted.join(", ") : "not confirmed: " + d.unverified.join(", ")));
       if (ev === "chat.replied") note(`Replied to ${d.person} on ${d.app}: \u201c${d.text}\u201d`, "ok", "send");
@@ -381,7 +401,7 @@
     chatURLs = [];
     for (const id of Object.keys(runs)) delete runs[id];
     active = ""; renderProgress();
-    usage = {tasks: 0, tokens: 0, calls: 0, secs: 0, estimate: false}; renderUsage();
+    usage = NO_USAGE(); renderUsage();
   }
   function titleBar(t) {
     if (t !== undefined) titleBar.t = t;
@@ -397,6 +417,7 @@
   }
   function newChat() {
     freeChat(); setCurrent(""); showHero(); D.go("chat"); $("text").focus(); refreshChats();
+    if (files.length) clearFiles();
   }
   async function openChat(id) {
     if (D.view !== "chat") D.go("chat");
@@ -408,7 +429,7 @@
     log.replaceChildren();
     if (!data.messages.length) showHero();
     for (const m of data.messages) {
-      if (m.role === "user") userMsg(m.text);
+      if (m.role === "user") userMsg(m.text, (m.meta || {}).attachments);
       else renderAnswer({...m.meta, answer: m.text}, false);
     }
     const last = data.messages[data.messages.length - 1];
@@ -474,15 +495,23 @@
   }
 
   // ---- sending
+  const failed = text => put(h("div", {class: "msg delta failed"}, h("span", {class: "avatar"}, icon("logo")), h("div", {class: "answer"}, h("div", {class: "answer-text", text}))));
   $("send").onsubmit = async e => {
-    e.preventDefault(); const text = $("text").value.trim(); if (!text) return;
+    e.preventDefault(); const text = $("text").value.trim();
+    if (files.some(f => f.state === "loading")) { D.toast({title: "Still reading your files", kind: "warn"}); return; }
+    const ready = files.filter(f => f.state === "ready");
+    if (!text && !ready.length) return;
     if (D.view !== "chat") D.go("chat");
-    $("text").value = ""; grow(); userMsg(text);
+    $("text").value = ""; grow();
+    const sent = userMsg(text, ready.map(f => f.att));
+    const ids = ready.map(f => f.att.id);
+    clearFiles();
     const sentFrom = current;
-    const started = await api("/api/tasks", {method: "POST", body: JSON.stringify({text, chat_id: current})})
-      .catch(err => { put(h("div", {class: "msg delta failed"}, h("span", {class: "avatar"}, icon("logo")), h("div", {class: "answer"}, h("div", {class: "answer-text", text: "Could not reach Delta. " + D.plain(err)})))); return null; });
+    const started = await api("/api/tasks", {method: "POST", body: JSON.stringify({text, chat_id: current, attachments: ids})})
+      .catch(err => { failed("Could not reach Delta. " + D.plain(err)); return null; });
+    if (started && started.text && !text) { const b = sent.querySelector(".bubble"); if (b) b.textContent = started.text; }
     if (!started || !started.task_id) {
-      if (started && started.detail) put(h("div", {class: "msg delta failed"}, h("span", {class: "avatar"}, icon("logo")), h("div", {class: "answer"}, h("div", {class: "answer-text", text: D.detail(started)}))));
+      if (started && started.detail) failed(D.detail(started));
       return;
     }
     taskChat[started.task_id] = started.chat_id; busy.add(started.chat_id);
@@ -501,6 +530,42 @@
     };
     D.hydrate(log);
   }
+
+  // ---- attach (button, drop, paste): uploaded and read at once, so the chip says what was found
+  let files = [];
+  function renderFiles() { $("attachlist").hidden = !files.length; $("attachlist").replaceChildren(...files.map(f => f.el)); }
+  function clearFiles() { files = []; renderFiles(); }
+  function chipFor(f, file) {
+    const chip = f.att ? fileChip(f.att) : fileChip({name: file.name, kind: file.type.startsWith("image/") ? "image" : ""}, f.error || "Reading on this PC");
+    chip.classList.toggle("loading", !f.att && !f.error); chip.classList.toggle("bad", !!f.error);
+    chip.append(h("button", {type: "button", class: "icon-btn xs", "aria-label": "Remove " + file.name, onclick: () => {
+      files = files.filter(x => x !== f); renderFiles();
+      if (f.att) api(`/api/attachments/${encodeURIComponent(f.att.id)}`, {method: "DELETE"}).catch(() => {});
+    }}, icon("x")));
+    return f.el = chip;
+  }
+  async function addFiles(list) {
+    for (const file of [...list]) {
+      if (files.length >= 5) { D.toast({title: "Up to 5 files per message", kind: "warn"}); break; }
+      const f = {state: "loading"}; chipFor(f, file); files.push(f); renderFiles();
+      try {
+        const r = await fetch("/api/attachments?name=" + encodeURIComponent(file.name || "picture.png"), {method: "PUT", body: file, headers: {"Authorization": "Bearer " + D.token, "Content-Type": "application/octet-stream"}});
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(D.detail(data) || "Delta could not take that file.");
+        f.att = data.attachment; f.state = "ready";
+        if (f.att.kind === "image" && !data.can_see_pictures) f.att.summary += ", text only";
+      } catch (err) { f.state = "error"; f.error = err.message || "Delta could not take that file."; }
+      const old = f.el; old.replaceWith(chipFor(f, file));
+    }
+  }
+  $("attachbtn").onclick = () => $("attachinput").click();
+  $("attachinput").onchange = () => { addFiles($("attachinput").files); $("attachinput").value = ""; };
+  $("text").addEventListener("paste", e => { const l = e.clipboardData && e.clipboardData.files; if (l && l.length) { e.preventDefault(); addFiles(l); } });
+  const zone = document.querySelector(".chat-main"), drop = on => $("composer").classList.toggle("dropping", on);
+  const dragged = e => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+  zone.addEventListener("dragover", e => { if (dragged(e)) { e.preventDefault(); drop(true); } });
+  zone.addEventListener("dragleave", e => { if (!zone.contains(e.relatedTarget)) drop(false); });
+  zone.addEventListener("drop", e => { if (!dragged(e)) return; e.preventDefault(); drop(false); addFiles(e.dataTransfer.files); });
 
   // ---- wiring
   $("bell").onclick = openApprovals;

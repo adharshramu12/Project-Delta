@@ -55,6 +55,13 @@ class BrowserIn(BaseModel):
     orange_cursor: bool | None = None
 
 
+class AttachmentsIn(BaseModel):
+    vision: str | None = Field(default=None, max_length=60)          # auto | off | one of llm.providers
+    vision_model: str | None = Field(default=None, max_length=200)
+    max_mb: float | None = Field(default=None, ge=1, le=200)
+    retention_days: float | None = Field(default=None, ge=0, le=3650)
+
+
 class SigninIn(BaseModel):
     url: str = Field(default="", max_length=2000)
 
@@ -65,6 +72,7 @@ class SettingsIn(BaseModel):
     memory: MemoryIn | None = None
     save_dir: str | None = Field(default=None, max_length=300)
     addons_enabled: list[str] | None = None
+    attachments: AttachmentsIn | None = None
 
 
 def _clean(items: list[str]) -> list[str]:
@@ -94,7 +102,13 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
             "addons": {"available": available_addons(), "enabled": s.addons.enabled},
             "keys": {k: {"label": KEY_INFO[k], "set": v} for k, v in keys.items()},
             "always_protected": [*ALWAYS_DENIED, str(s.data_dir)],
+            "attachments": {**s.attachments.model_dump(), "providers": sorted(s.llm.providers),
+                            "can_see_pictures": _can_see()},
         }
+
+    def _can_see() -> bool:
+        svc = getattr(c.orchestrator, "attachments", None)
+        return bool(svc is not None and svc.can_see())
 
     @app.put("/api/settings", dependencies=[Depends(auth)])
     async def put_settings(body: SettingsIn) -> dict[str, Any]:
@@ -158,6 +172,16 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
                 raise HTTPException(400, f"Unknown add-on(s): {', '.join(sorted(unknown))}")
             restart = sorted(body.addons_enabled) != sorted(s.addons.enabled)
             changes["addons"] = {"enabled": body.addons_enabled}
+        if body.attachments:
+            att = body.attachments.model_dump(exclude_none=True)
+            if "vision" in att:
+                att["vision"] = att["vision"].strip() or "auto"
+                if att["vision"] not in ("auto", "off", *s.llm.providers):
+                    raise HTTPException(400, "Pictures: choose auto, off, or one of your AI providers.")
+            if "vision_model" in att:
+                att["vision_model"] = att["vision_model"].strip()
+            if att != {k: getattr(s.attachments, k) for k in att}:
+                changes["attachments"] = att
         if not changes:
             return {"ok": True, "restart_needed": False, **({"browser_note": browser_note} if browser_note else {})}
 
@@ -184,6 +208,16 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
                 cursor.enabled = s.browser.orange_cursor
                 if not cursor.enabled:
                     cursor.restore()
+        if "attachments" in changes:
+            for k, v in changes["attachments"].items():
+                setattr(s.attachments, k, v)
+            if (svc := getattr(c.orchestrator, "attachments", None)) is not None:
+                from delta.bootstrap import pictures_router
+
+                svc.vision_router = pictures_router(s)  # the pictures-only model, if one is named
+                svc.store.max_mb = s.attachments.max_mb
+                svc.store.max_bytes = int(s.attachments.max_mb * 1024 * 1024)
+                svc.store.retention_days = s.attachments.retention_days
         c.orchestrator.executor.policy = make_policy(s)  # next action uses the new rules
         c.audit.record("settings.changed", sections=sorted(changes))
         return {"ok": True, "restart_needed": restart, "save_dir_resolved": str(save_dir(s.files, create=False)),

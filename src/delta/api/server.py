@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+from delta.attachments.kinds import DEFAULT_REQUEST
 from delta.bootstrap import Container
 from delta.core.state import TASK_CRASHED, TaskRequest, TaskResult
 from delta.safety.approvals import ApprovalRequest
@@ -79,8 +80,9 @@ def same_token(given: str | None, token: str) -> bool:
 
 
 class TaskIn(BaseModel):
-    text: str
+    text: str = ""
     chat_id: str = ""  # empty: a new chat is started
+    attachments: list[str] = Field(default_factory=list, max_length=10)  # ids from PUT /api/attachments
 
 
 class ChatPatch(BaseModel):
@@ -203,16 +205,40 @@ def create_app(c: Container, token: str) -> FastAPI:
         chats = c.chats
         chat_id = body.chat_id
         history = ""
+        files = _attached(body.attachments, chat_id)
+        text = body.text.strip() or (DEFAULT_REQUEST if files else "")
+        if not text:
+            raise HTTPException(400, "Type a message or attach a file.")
         if chats is not None:
             try:
                 if not chat_id or chats.get(chat_id) is None:
                     chat_id = chats.create().id
                 history = chats.context_for(chat_id)  # before this message is added
-                chats.add(chat_id, "user", body.text)
+                files = [c.orchestrator.attachments.store.move(a, chat_id) for a in files]
+                chats.add(chat_id, "user", text, {"attachments": [a.public() for a in files]} if files else None)
             except VaultUnavailableError as e:  # never stored unencrypted: say why instead of a bare 500
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from e
-        req = TaskRequest(body.text, channel="api", chat_id=chat_id, history=history)
-        return launch(req, chat_id)
+        req = TaskRequest(text, channel="api", chat_id=chat_id, history=history, attachments=[a.id for a in files])
+        return launch(req, chat_id) | ({"text": text} if files and not body.text.strip() else {})
+
+    def _attached(ids: list[str], chat_id: str) -> list[Any]:
+        """The files named in a message: uploaded here (not yet sent, or in this same chat), still on disk."""
+        if not ids:
+            return []
+        svc = getattr(c.orchestrator, "attachments", None)
+        if svc is None:
+            raise HTTPException(503, "Attachments are switched off in Delta's settings (attachments.enabled).")
+        if len(ids) > svc.cfg.max_files_per_message:
+            raise HTTPException(400, f"Attach at most {svc.cfg.max_files_per_message} files to one message.")
+        from delta.attachments.store import UNSENT, folder_for
+
+        found = []
+        for i in dict.fromkeys(ids):
+            att = svc.store.get(i)
+            if att is None or att.folder not in (UNSENT, folder_for(chat_id)):
+                raise HTTPException(400, "An attached file is no longer available. Attach it again.")
+            found.append(att)
+        return found
 
     def launch(req: TaskRequest, chat_id: str, autonomy_cap: str | None = None) -> dict[str, str]:
         """Run a request in the background like a typed message (a new one, or a resumed task)."""
@@ -293,7 +319,10 @@ def create_app(c: Container, token: str) -> FastAPI:
         for r in list(results.values()):  # deleting a chat stops its work too
             if r.get("chat_id") == chat_id and r.get("status") == "running" and (t := by_id.get(r["task_id"])):
                 t.cancel()
-        return {"ok": _chats().delete(chat_id)}
+        ok = _chats().delete(chat_id)
+        if ok and (svc := getattr(c.orchestrator, "attachments", None)) is not None:
+            svc.store.delete_chat(chat_id)  # its attached files go with it
+        return {"ok": ok}
 
     @app.post("/api/tasks/{task_id}/cancel", dependencies=[Depends(auth)])
     async def cancel_task(task_id: str) -> dict[str, bool]:
@@ -441,7 +470,10 @@ def create_app(c: Container, token: str) -> FastAPI:
     register_setup(app, c, auth)
     register_settings(app, c, auth)
     register_apps(app, c, auth)
+    from delta.api.attachments_routes import register as register_attachments
     from delta.api.documents_routes import register as register_documents
+
+    register_attachments(app, c, auth)  # files and pictures in the chat (delta.attachments)
 
     register_documents(app, c, auth)
 

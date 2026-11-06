@@ -53,6 +53,8 @@ asks before anything risky, and **checks the result of every task it works on be
 - Asks **tick-box questions** instead of guessing, in the app and in Telegram
 - **Remembers** your preferences locally and **learns your workflows** as reusable skills
 - Voice notes in, answers out
+- Pictures, PDFs, Word and PowerPoint files in the chat or on Telegram, read on your PC first. See
+  [Pictures and documents in the chat](#pictures-and-documents-in-the-chat)
 
 ## The dashboard
 
@@ -344,6 +346,23 @@ again" or "Closed a cookie banner ('Reject all') and tried again".
     cheap_steps: [observe]
     fallbacks: []       # e.g. [nim]: only on rate limit / outage / quota
   ```
+
+## Pictures and documents in the chat
+
+Send Delta a picture, a PDF, a Word file (.docx), a PowerPoint (.pptx) or a text file (.txt, .md, .csv) with your
+request: press the paper clip, drop the file on the chat or paste a picture in the dashboard, or send it on
+Telegram with a caption. Ask "summarise this", "what does page 3 say?" or "what is wrong in this screenshot?".
+
+- **Read on your PC first:** Delta's own PDF, Word and PowerPoint readers (no new dependencies) and Windows OCR
+  for pictures and scanned pages. Only a short extract with page or slide numbers goes to the AI, which asks for
+  more pages only when it needs them. A 20-page PDF costs about 1,100 to 1,500 tokens instead of about 15,800.
+- **Pictures only when they matter:** a photo or chart goes to a model that can see, made small and sent in low
+  detail where possible. Choose which AI looks at pictures in Settings, Attachments; your main AI does not change.
+- **Safe by default:** what a file says is treated like a web page (it cannot quietly trigger a send or a delete),
+  memories from it are labelled as from an attachment, macros and embedded objects never run, 20 MB per file,
+  files removed after 30 days. The usage line shows the attachment tokens.
+
+Formats, limits, costs, settings and tradeoffs: [docs/ATTACHMENTS.md](docs/ATTACHMENTS.md).
 
 ## Seeing the screen: marks, OCR and parallel helpers
 

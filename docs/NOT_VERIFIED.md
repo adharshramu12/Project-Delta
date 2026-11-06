@@ -65,6 +65,19 @@ saying what you found (it worked, or how it failed) is very welcome.
 - The live eval reports in `evals/reports` were run by hand on the author's PC with a real model; the CI
   eval run uses a scripted model and proves the harness and the agent loop, not a model's skill.
 
+## Attachments
+
+- **Windows PDF rendering** (`winpdf.py`, Windows.Data.Pdf through Windows PowerShell 5.1) for scanned pages and
+  protected PDFs on a real PC. Unit tests replace it with a fake renderer; the rendering itself did not run on a
+  user's PC.
+- **Windows OCR on attachments**: reading attached pictures and rendered PDF pages with the OCR built into
+  Windows, with real phone photos and scans, and the "text only" path when no OCR language is installed.
+- **Real Telegram downloads**: photos, documents and albums from a real phone through the Bot API, including files
+  near the 20 MB limit. Tests use a fake Telegram.
+- **Real vision providers with low detail**: that OpenAI-compatible providers accept the low-detail request and
+  bill about 85 tokens, and how other providers count a downscaled picture. The token figures in the docs are
+  estimates from the providers' published rules, not measured bills.
+
 ## Resource use
 
 - Idle use measured on Linux (the service with no task, every default on): about 70 MB of memory, 3 threads,

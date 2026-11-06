@@ -346,6 +346,27 @@ class PerceptionConfig(BaseModel):
     cache: bool = True
 
 
+class AttachmentsConfig(BaseModel):
+    """Files and pictures the user sends in the dashboard chat or on Telegram (delta.attachments). Added later:
+    older settings files load with these defaults. Text is read on this PC first; only a compact extract goes to
+    the AI, and a picture goes to a vision model only when the picture itself matters."""
+    enabled: bool = True
+    max_mb: float = Field(default=20, ge=1, le=200)           # one file; Telegram bots can download 20 MB at most
+    max_pages: int = Field(default=300, ge=1, le=5000)        # PDF pages / slides / Word parts read at most
+    max_files_per_message: int = Field(default=5, ge=1, le=10)
+    retention_days: float = Field(default=30, ge=0)           # uploaded files older than this are removed (0 = keep)
+    prompt_chars: int = Field(default=6000, ge=1000, le=60000)  # extract sent with the request, all files together
+    read_chars: int = Field(default=8000, ge=1000, le=60000)    # one read_attachment answer at most
+    cache_mb: float = Field(default=50, ge=1, le=2000)        # extracts kept by file hash, so repeats cost nothing
+    # Pictures: auto = any model on your route that can see; off = never send a picture (text from OCR only);
+    # or the name of one of your providers (llm.providers) used for pictures only.
+    vision: str = "auto"
+    vision_model: str = ""   # with a named provider: the model id it uses for pictures only ("" = its own vision model)
+    image_max_side: int = Field(default=1024, ge=256, le=2048)  # longest side of a picture sent to a model
+    image_detail: Literal["auto", "low", "high"] = "auto"  # auto: low detail for plain photos, more for charts
+    ocr: Literal["auto", "off"] = "auto"                    # Windows OCR for pictures and scanned pages
+
+
 class HelpersConfig(BaseModel):
     """Parallel read-only helpers (delta.helpers): for a task that needs several independent lookups, the
     planner may hand them to up to `max_helpers` helpers that run at the same time. Helpers can only search the
@@ -426,6 +447,7 @@ class Settings(BaseModel):
     router: RouterConfig = Field(default_factory=RouterConfig)
     undo: UndoConfig = Field(default_factory=UndoConfig)
     perception: PerceptionConfig = Field(default_factory=PerceptionConfig)
+    attachments: AttachmentsConfig = Field(default_factory=AttachmentsConfig)
     helpers: HelpersConfig = Field(default_factory=HelpersConfig)
     learning: LearningConfig = Field(default_factory=LearningConfig)
     grounding: GroundingConfig = Field(default_factory=GroundingConfig)

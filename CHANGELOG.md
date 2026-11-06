@@ -7,6 +7,17 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Attachments**: send pictures (JPG, PNG, WebP, GIF), PDF, Word (.docx), PowerPoint (.pptx) and text files
+  (.txt, .md, .csv) in the dashboard chat (paper clip, drag and drop, paste) or on Telegram (photo or file with a
+  caption, albums as one request). Read on the PC first with a standard-library PDF reader and an OOXML reader
+  with hardened XML parsing, Windows OCR for pictures and scanned pages, and Windows' PDF engine to render scanned
+  pages. Only a compact extract with page or slide numbers goes with the request; the AI reads more with
+  `read_attachment` and looks at a picture with `look_at_attachment` only when the picture matters. Opt-in
+  picture-only vision route (`attachments.vision`, `vision_model`); default providers and routing are unchanged.
+  File content is outside content (taint rule and ExfilGuard apply) and memories from it have the origin
+  `attachment`. 20 MB per file, 5 per message, removed after 30 days; extracts cached by file hash. The usage
+  line, task progress and chat usage box show attachment tokens. New `attachments` settings section and a
+  Settings, Attachments panel. See [docs/ATTACHMENTS.md](docs/ATTACHMENTS.md).
 - **Connected apps (MCP)**: connect Notion, GitHub, Atlassian, Linear, Slack, Sentry, Stripe, Gmail, Google
   Drive and Calendar, Asana, Vercel, Supabase, Hugging Face, Figma (desktop) and custom MCP servers from the
   dashboard's Apps page, `delta apps` or Telegram `/connect` (PIN), then ask Delta to work in them. A curated,

@@ -193,6 +193,23 @@ perception:
   ocr: auto                   # Windows' built-in OCR for apps with no accessibility tree | off
   cache: true                 # do not send an unchanged screen or window again
 
+# Files and pictures you send in the chat or on Telegram (images, PDF, Word, PowerPoint, text). Text is read on
+# this PC first and only a short extract goes to the AI; a picture is sent only when the picture itself matters.
+attachments:
+  enabled: true
+  max_mb: 20                  # one file (Telegram bots can download 20 MB at most)
+  max_pages: 300              # PDF pages, slides or Word parts read at most
+  max_files_per_message: 5
+  retention_days: 30          # uploaded files are removed after this many days (0 = keep)
+  prompt_chars: 6000          # extract sent with your request (about 1,500 tokens); the AI reads more by page
+  read_chars: 8000            # one "read more" answer at most
+  cache_mb: 50                # extracts kept by file hash, so asking again about a file costs nothing
+  vision: auto                # auto | off | the name of one of your providers, used for pictures only
+  vision_model: ""            # with a named provider: its model for pictures ("" = its own vision model)
+  image_max_side: 1024        # pictures are made this small (pixels) before they are sent
+  image_detail: auto          # auto | low | high
+  ocr: auto                   # Windows OCR for pictures and scanned pages | off
+
 # Parallel read-only helpers: OFF by default (it adds a few lines to every planner request). When on, the
 # planner may split independent lookups between helpers that can only search, read pages and read files in
 # your allowed folders. They can never click, type, write, send or use your own browser.

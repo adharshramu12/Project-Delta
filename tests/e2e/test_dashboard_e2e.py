@@ -95,3 +95,43 @@ async def test_dashboard_renders_every_view(mgr, dashboard):
     base, token = dashboard
     page = await mgr.page()
     await asyncio.wait_for(check_dashboard(page, base, token), timeout=120)
+
+
+async def attach_and_send(page: Any, base: str, token: str, folder: Path) -> None:
+    """Attach a picture and a PDF with the file picker, see them read on this PC, send them with a message, and see
+    them in the sent message. No script error and no Content-Security-Policy violation on the way."""
+    from delta.evals import attachment_fixtures as fixtures
+
+    problems: list[str] = []
+    page.on("pageerror", lambda e: problems.append(f"script error: {e}"))
+    page.on("console", lambda m: problems.append(f"console: {m.text}")
+            if m.type == "error" and "Content Security Policy" in m.text else None)
+    picture, pdf = folder / "chart.png", folder / "report.pdf"
+    picture.write_bytes(fixtures.png(640, 400, "Sales 2026"))
+    pdf.write_bytes(fixtures.text_pdf([["Water report"], ["Budget 4 lakh"]]))
+    await page.goto(f"{base}/#token={token}")
+    await page.wait_for_selector(".nav-item[data-go='chat'][aria-current='page']", timeout=15000)
+    with contextlib.suppress(Exception):
+        await page.wait_for_selector("#setup[open]", timeout=5000)
+        await page.click("#wclose")
+    await page.set_input_files("#attachinput", [str(picture), str(pdf)])
+    await page.wait_for_function(
+        "() => document.querySelectorAll('#attachlist .achip').length === 2"
+        " && !document.querySelector('#attachlist .achip.loading')", timeout=20000)
+    chips = await page.locator("#attachlist .achip").all_inner_texts()
+    assert any("chart.png" in t and "Picture, 640x400" in t for t in chips), chips
+    assert any("report.pdf" in t and "2 pages" in t for t in chips), chips
+    assert await page.locator("#attachlist .achip.bad").count() == 0
+    await page.wait_for_selector("#attachlist .achip img", timeout=10000)  # the picture's preview (a blob: URL)
+    await page.fill("#text", "What do these show?")
+    await page.click("#sendbtn")
+    await page.wait_for_selector(".msg.me .msg-files .achip", timeout=10000)
+    assert await page.locator(".msg.me .msg-files .achip").count() == 2
+    assert await page.locator("#attachlist").is_hidden()
+    assert not problems, problems
+
+
+async def test_attaching_files_in_the_dashboard(mgr, dashboard, tmp_path):
+    base, token = dashboard
+    page = await mgr.page()
+    await asyncio.wait_for(attach_and_send(page, base, token, tmp_path), timeout=120)

@@ -55,13 +55,22 @@ HELP = (
     "/lock - lock all remote control now (only the PC can unlock it)\n"
     "/status - PC health and AIs available\n"
     "/help - this list\n\n"
-    "🎙 You can also just <b>send a voice note</b>: Telugu, Hindi or English."
+    "🎙 You can also just <b>send a voice note</b>: Telugu, Hindi or English.\n"
+    "<b>Send a photo or a file</b> (PDF, Word, PowerPoint, text) with a caption saying what you want, for example "
+    "\"summarise this\" or \"what is wrong in this screenshot?\""
 )
 
 # Pairing codes: no look-alike characters (0/O, 1/I/L), so they are easy to read off the screen and type.
 PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 PAIR_LENGTH = 8  # 31^8, about 8.5e11 codes
 PAIR_MAX_FAILS = 5  # wrong tries before the code is dropped (a new one must be made on the PC)
+ALBUM_WAIT_S = 1.5  # photos sent together arrive one by one: wait this long for the rest of an album
+
+
+def _known_ext(name: str) -> bool:
+    from delta.attachments.kinds import IMAGE_EXT, TEXT_EXT
+
+    return Path(name).suffix.lower() in {*IMAGE_EXT, *TEXT_EXT, ".pdf", ".docx", ".pptx"}
 
 
 class TelegramChannel(PCMenu):
@@ -106,6 +115,10 @@ class TelegramChannel(PCMenu):
         self.app.add_handler(CallbackQueryHandler(self._on_form, pattern=r"^f[qd]:"))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
+        # Photos and files (pictures, PDF, Word, PowerPoint, text), with or without a caption (delta.attachments)
+        self.app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, self._on_file))
+        self._albums: dict[str, dict[str, Any]] = {}  # media_group_id -> photos of one album, sent as one request
+        self._album_tasks: set[asyncio.Task[None]] = set()
         self.app.add_handler(CallbackQueryHandler(self._on_button, pattern=r"^appr:"))
         from delta.channels.telegram_tasks import attach as attach_tasks
 
@@ -539,6 +552,104 @@ class TelegramChannel(PCMenu):
         await update.message.reply_text(f"🎙 I heard: {text}")
         await self._run(update, str(user.id), text)
 
+    # --- photos and files (delta.attachments) ---------------------------------------------------------------
+    def _attachments(self) -> Any:
+        return getattr(getattr(self.c, "orchestrator", None), "attachments", None)
+
+    async def _on_file(self, update: Any, ctx: Any) -> None:
+        """A photo or a document. Downloaded straight to disk (never into memory), checked, read on this PC, then
+        done like a typed request with the caption as the task. Same rules as any phone request: only paired users,
+        nothing while remote control is locked, and the PIN rules apply to whatever the task then does."""
+        from delta.attachments.kinds import DEFAULT_REQUEST
+
+        user = update.effective_user
+        message = update.message
+        if not is_allowed(user.id, self.allowed):
+            log.warning("telegram.rejected_file", user=user.id)
+            return
+        uid = str(user.id)
+        self._pending_pin.pop(uid, None)  # a file is never a PIN or a key
+        self._awaiting_key.pop(uid, None)
+        if await self._locked(message.reply_text):
+            return
+        svc = self._attachments()
+        if svc is None:
+            await message.reply_text("Files are switched off in Delta's settings, so I can't read this one.")
+            return
+        caption = (message.caption or "").strip()
+        group = getattr(message, "media_group_id", None)
+        try:
+            att = await self._download(message, svc, uid)
+        except ValueError as e:  # AttachmentError: plain words
+            await message.reply_text(str(e))
+            return
+        except Exception as e:
+            log.warning("telegram.file_failed", error=str(e)[:200])
+            await message.reply_text("I couldn't get that file from Telegram. Please send it again.")
+            return
+        self.c.audit.record("attachment.added", id=att.id, kind=att.kind, size=att.size, via="telegram", user=uid)
+        if group:  # an album: wait a moment for the rest, then one request for all of them
+            album = self._albums.setdefault(str(group), {"files": [], "caption": "", "update": update})
+            album["files"].append(att)
+            album["caption"] = album["caption"] or caption
+            if len(album["files"]) == 1:
+                task = asyncio.create_task(self._album_done(str(group), uid))
+                self._album_tasks.add(task)  # keep a reference until it is done
+                task.add_done_callback(self._album_tasks.discard)
+            return
+        await self._run(update, uid, caption or DEFAULT_REQUEST, [att])
+
+    async def _album_done(self, group: str, uid: str) -> None:
+        from delta.attachments.kinds import DEFAULT_REQUEST
+
+        await asyncio.sleep(ALBUM_WAIT_S)
+        album = self._albums.pop(group, None)
+        if not album:
+            return
+        svc = self._attachments()
+        files = album["files"][: svc.cfg.max_files_per_message] if svc else album["files"]
+        if len(album["files"]) > len(files):
+            await album["update"].message.reply_text(f"I'll look at the first {len(files)} files of that album.")
+        await self._run(album["update"], uid, album["caption"] or DEFAULT_REQUEST, files)
+
+    async def _download(self, message: Any, svc: Any, uid: str) -> Any:
+        """The file into a temporary file (checked against the size limit first), then into the store."""
+        import tempfile
+
+        from delta.attachments.kinds import TELEGRAM_MAX_MB, AttachmentError, safe_name, too_big
+
+        limit_mb = min(float(svc.cfg.max_mb), float(TELEGRAM_MAX_MB))
+        if message.photo:
+            sizes = sorted(message.photo, key=lambda p: (p.width or 0) * (p.height or 0))
+            # the biggest size up to 2560 px is plenty for OCR and is downscaled again before any model sees it
+            fitting = [p for p in sizes if max(p.width or 0, p.height or 0) <= 2560]
+            media, name = (fitting or sizes)[-1], f"photo-{message.message_id}.jpg"
+        else:
+            media = message.document
+            name = safe_name(media.file_name or f"file-{message.message_id}", "file")
+            if not _known_ext(name):  # say why before downloading anything
+                from delta.attachments.kinds import SUPPORTED, detect
+
+                detect(b"?", name)  # raises with the plain words for that kind of file
+                raise AttachmentError(f"Delta can't read that kind of file. It reads {SUPPORTED}.")
+        size = int(getattr(media, "file_size", 0) or 0)
+        if size > limit_mb * 1048576:
+            raise AttachmentError(too_big(size, limit_mb) + (" Telegram bots can only download files up to 20 MB."
+                                                              if limit_mb >= TELEGRAM_MAX_MB else ""))
+        await message.chat.send_action("typing")
+        tg_file = await media.get_file()
+        fd, tmp = tempfile.mkstemp(prefix="delta-tg-", suffix=".part")
+        import os
+
+        os.close(fd)
+        try:
+            await tg_file.download_to_drive(custom_path=tmp)
+            att, _ = await svc.ingest_file(Path(tmp), name, self._chat(uid), "telegram")
+            return att
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+
     def _chat(self, uid: str) -> str:
         """This person's Telegram conversation (with memory, also in the dashboard sidebar)."""
         chats = getattr(self.c, "chats", None)
@@ -548,9 +659,10 @@ class TelegramChannel(PCMenu):
         found = next((ch for ch in chats.list(title) if ch.title == title), None)
         return (found or chats.create(title)).id
 
-    async def _run(self, update: Any, uid: str, text: str) -> None:
+    async def _run(self, update: Any, uid: str, text: str, attachments: list[Any] | None = None) -> None:
         """Do what was asked. The chat's recent turns go along, so an answer like "the second one" means
-        something; a question comes back with tap buttons for its choices."""
+        something; a question comes back with tap buttons for its choices. `attachments`: files the user sent
+        (delta.attachments.store.Attachment), already saved in this chat's folder."""
         message = update.message or update.callback_query.message
         await message.chat.send_action("typing")
         from delta.system.notify import notify
@@ -559,15 +671,20 @@ class TelegramChannel(PCMenu):
         from delta.system.vault import VaultUnavailableError
 
         chats, chat_id, history = getattr(self.c, "chats", None), "", ""
+        files = list(attachments or [])
         try:
             chat_id = self._chat(uid)
             history = chats.context_for(chat_id) if chats and chat_id else ""
+            if files and chat_id and (svc := self._attachments()) is not None:
+                files = [svc.store.move(a, chat_id) for a in files]
             if chats and chat_id:
-                chats.add(chat_id, "user", text)
+                chats.add(chat_id, "user", text, {"attachments": [a.public() for a in files], "channel": self.name}
+                          if files else None)
         except VaultUnavailableError as e:  # never stored unencrypted: tell the owner why, do nothing else
             await message.reply_text(str(e))
             return
-        res = await self.c.submit(TaskRequest(text, channel=self.name, user=uid, chat_id=chat_id, history=history))
+        res = await self.c.submit(TaskRequest(text, channel=self.name, user=uid, chat_id=chat_id, history=history,
+                                              attachments=[a.id for a in files]))
         if chats and chat_id:
             with contextlib.suppress(VaultUnavailableError):  # the answer is still sent below
                 chats.add(chat_id, "delta", res.answer, {"status": res.status, "provider": res.provider,

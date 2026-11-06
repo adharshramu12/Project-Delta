@@ -5,7 +5,8 @@ Trust levels
              Delta's own fixed text about its own run, in a task that read nothing from outside
   agent      Delta's own short note about a past task (kept as history, never used as an instruction)
   untrusted  it came from outside content: a web page, search results, an email or chat message, a file,
-             the screen, or a task that had read any of these and the value cannot be traced to the user
+             an attached file or picture, the screen, or a task that had read any of these and the value cannot be
+             traced to the user
 
 Untrusted items can be recalled as data (always labelled with where they came from), but can never become a
 standing instruction, a lesson or a recipe step: the stores refuse to promote them, in code.
@@ -29,18 +30,21 @@ TRUST_LEVELS = (TRUSTED, AGENT, UNTRUSTED)
 # Origins: what kind of source a memory came from.
 USER_MESSAGE, TOOL_RESULT, WEB_READ, FILE, MESSAGE, SCREEN, AGENT_NOTE, LEGACY = (
     "user_message", "tool_result", "web_read", "file", "message", "screen", "agent_note", "legacy")
-ORIGINS = (USER_MESSAGE, TOOL_RESULT, WEB_READ, FILE, MESSAGE, SCREEN, AGENT_NOTE, LEGACY)
+ATTACHMENT = "attachment"  # a file or picture the user sent in the chat (delta.attachments): what it says is not theirs
+ORIGINS = (USER_MESSAGE, TOOL_RESULT, WEB_READ, FILE, MESSAGE, SCREEN, AGENT_NOTE, LEGACY, ATTACHMENT)
 
 # The taint source (the first tool that brought outside content into the task) -> the kind of origin.
 _TAINT_ORIGIN = {
     "browser_read": WEB_READ, "fetch_page": WEB_READ, "web_search": WEB_READ, "helper_read_page": WEB_READ,
     "parallel_research": WEB_READ, "read_file": FILE, "read_messages": MESSAGE, "read_window": SCREEN,
     "look_at_screen": SCREEN, "look_with_marks": SCREEN, "read_screen_text": SCREEN,
+    "attachment": ATTACHMENT, "read_attachment": ATTACHMENT, "look_at_attachment": ATTACHMENT,
 }
 
 ORIGIN_WORDS = {
     USER_MESSAGE: "you told me", TOOL_RESULT: "a tool result", WEB_READ: "a web page", FILE: "a file",
     MESSAGE: "a message", SCREEN: "the screen", AGENT_NOTE: "Delta's note on a task", LEGACY: "older memory",
+    ATTACHMENT: "a file you attached",
 }
 
 

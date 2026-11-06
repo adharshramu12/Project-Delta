@@ -14,15 +14,22 @@ class TaskRequest:
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
     chat_id: str = ""
     history: str = ""  # short recap of this chat's recent turns (ChatStore.context_for)
+    attachments: list[str] = field(default_factory=list)  # ids of files sent with this message (delta.attachments)
+    # Filled by the orchestrator: the compact extract of those files (or a line about files sent earlier in the
+    # chat), wrapped as outside content, and plain notes for the user (e.g. "I could not see the picture itself").
+    attachment_context: str = ""
+    attachment_notes: list[str] = field(default_factory=list)
 
     @property
     def with_context(self) -> str:
         """The request as the AI should read it: earlier turns of this chat first, so follow-ups
-        like "send it to him" resolve. Instant commands and skill matching use `text` alone."""
+        like "send it to him" resolve, then any attached files' extract. Instant commands and skill matching use
+        `text` alone."""
+        files = f"\n\n{self.attachment_context}" if self.attachment_context else ""
         if not self.history:
-            return self.text
+            return self.text + files
         return (f"Earlier in this chat (for context; do not redo finished work):\n{self.history}\n\n"
-                f"Current request: {self.text}")
+                f"Current request: {self.text}{files}")
 
 
 @dataclass
