@@ -13,7 +13,7 @@ Results come back like any other answer. Anything that would change or send some
 
 ## Quickstart
 
-1. **Open Apps.** In the dashboard, press the plug button (Apps) at the top. Or on the PC: `delta apps list`.
+1. **Open Apps.** In the dashboard, open **Apps** in the sidebar. Or on the PC: `delta apps list`.
 2. **Connect.** Press **Connect** on the app (or `delta apps connect notion`). For most apps a sign-in page opens in
    your browser: sign in and allow Delta. Some apps ask for a token instead (GitHub) or for the client id of an
    OAuth app you create (Google, Slack, Asana); the card says exactly what and links to the vendor's page.

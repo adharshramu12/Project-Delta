@@ -26,6 +26,14 @@ from delta.system.logging import log
 from delta.system.vault import VaultUnavailableError
 
 STATIC = Path(__file__).parent / "static"
+# The dashboard's own files (styles and scripts), served by exact name from a list made at start-up: nothing in a
+# request is ever used as a path. Types are fixed here because Windows can map .js to text/plain in the registry.
+ASSET_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}
+ASSETS = {p.name: p for p in STATIC.iterdir() if p.suffix in ASSET_TYPES} if STATIC.is_dir() else {}
+# The dashboard runs only its own files: no inline scripts, nothing from other sites. Blob URLs are the
+# screenshots and document previews it fetched with the token; ws: is its own live connection.
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self'; "
+       "frame-src blob:; object-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
 SEND_TIMEOUT_S = 2.0  # one stalled dashboard (asleep laptop, full network buffer) must never hold up the rest
@@ -167,7 +175,17 @@ def create_app(c: Container, token: str) -> FastAPI:
     @app.get("/")
     async def index() -> FileResponse:
         # Never cached: after an update the app window otherwise kept showing the old page.
-        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
+        return FileResponse(STATIC / "index.html", headers={
+            "Cache-Control": "no-store", "Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer"})
+
+    @app.get("/ui/{name}")
+    async def ui_asset(name: str) -> FileResponse:
+        path = ASSETS.get(name)
+        if path is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no such file")
+        return FileResponse(path, media_type=ASSET_TYPES[path.suffix],
+                            headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
 
     @app.get("/favicon.ico")
     async def favicon() -> FileResponse:

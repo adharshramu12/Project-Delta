@@ -1,216 +1,189 @@
-// Tasks panel in the dashboard's right-hand drawer (delta.engine): recent tasks with filters, a run
-// timeline for each one (time, tool, short result, model, tokens, screenshot), and Resume / Discard for
-// tasks a crash or power cut interrupted. Self-heal lines ("Button moved, found it again") and an Undo button
-// for the task's file changes (delta.selfheal) are shown in the timeline. Loaded after the main script, so it uses its `api` helper and
-// `token`. Kept in its own file so the main page only needs a container and one <script> tag.
+// Tasks view (delta.engine): every task with filters and search, a timeline for each one (time, tool, short
+// result, model, tokens, screenshot), and Resume / Discard for tasks a crash or power cut interrupted. Self-heal
+// lines ("Button moved, found it again") and an Undo button for the task's file changes (delta.selfheal) are shown
+// in the timeline. Interrupted tasks are also offered in the chat when the dashboard opens.
 (() => {
+  "use strict";
+  const D = window.Delta, {api, h, icon, btn} = D;
   const box = document.getElementById("tasks");
-  if (!box || typeof api !== "function") return;
-  const style = document.createElement("style");
-  style.textContent = `
-#tasks .tfilters{display:flex;gap:6px;margin-bottom:8px}
-#tasks select,#tasks input{border:1px solid var(--line);border-radius:var(--r-sm);background:var(--paper);color:var(--ink);font:13px var(--font);padding:6px 8px}
-#tasks input{flex:1;min-width:0}
-#tasks .trow{border-bottom:1px solid var(--line);padding:8px 0;font-size:13.5px;line-height:1.45;cursor:pointer}
-#tasks .trow:last-of-type{border-bottom:0}
-#tasks .trow small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
-#tasks .trow .row{display:flex;gap:6px;margin-top:6px}
-#tasks .trow .row button{padding:4px 10px;font-size:12.5px}
-.tst{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:var(--r-pill);margin-right:6px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
-.tst.done{color:var(--ok);background:var(--ok-soft)}
-.tst.failed,.tst.cancelled{color:var(--bad);background:var(--bad-soft)}
-.tst.interrupted,.tst.waiting_user{color:var(--warn);background:var(--warn-soft)}
-.tst.acting,.tst.planning,.tst.verifying,.tst.queued{color:var(--accent,var(--ink));background:var(--accent-soft,var(--surface-2))}
-#timeline{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}
-#timeline .tl{background:var(--surface);color:var(--ink);border-radius:var(--r-md);box-shadow:var(--shadow-2);width:min(920px,calc(100% - 32px));max-height:86vh;overflow:auto;padding:18px 20px}
-#timeline .thead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
-#timeline h2{margin:0 0 4px;font-size:16px}
-#timeline .meta{color:var(--muted);font-size:12.5px}
-#timeline table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12.5px}
-#timeline th{text-align:left;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line);padding:6px 6px}
-#timeline td{border-bottom:1px solid var(--line);padding:6px 6px;vertical-align:top}
-#timeline td.res{max-width:360px;word-break:break-word}
-#timeline td.bad{color:var(--bad)}
-#timeline img{height:54px;border-radius:6px;border:1px solid var(--line)}
-#timeline .heal{margin-top:10px;font-size:13px}
-#timeline .heal div{padding:2px 0}
-#timeline .heal .ok{color:var(--ok)}
-#timeline .undo{margin-top:10px;display:flex;gap:8px;align-items:center;font-size:13px}
-#timeline .answer{margin-top:12px;white-space:pre-wrap;font-size:13.5px;background:var(--surface-2);border-radius:var(--r-sm);padding:10px 12px}`;
-  document.head.appendChild(style);
+  if (!box) return;
 
-  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-  const label = s => (s || "").replace("_", " ");
-  const when = ts => ts ? new Date(ts * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "";
+  const PAGE = 30;
+  const FILTERS = [["", "All"], ["acting,planning,verifying,queued", "Running"], ["waiting_user", "Waiting for you"], ["interrupted", "Interrupted"],
+    ["done", "Done"], ["failed", "Failed"], ["cancelled", "Cancelled"]];
+  const LABEL = {acting: "Running", planning: "Planning", verifying: "Checking", queued: "Queued", waiting_user: "Waiting for you",
+    interrupted: "Interrupted", done: "Done", failed: "Failed", cancelled: "Cancelled"};
+  const KIND = {done: "ok", failed: "danger", cancelled: "", interrupted: "warn", waiting_user: "warn", acting: "accent", planning: "accent", verifying: "accent", queued: "accent"};
+  const pill = s => h("span", {class: "pill " + (KIND[s] || ""), text: LABEL[s] || D.words(s)});
 
-  const filters = el("div", "tfilters");
-  const state = el("select");
-  for (const [v, t] of [["", "All"], ["interrupted", "Interrupted"], ["acting,planning,verifying,queued", "Running"], ["done", "Done"], ["failed", "Failed"], ["cancelled", "Cancelled"], ["waiting_user", "Waiting for you"]]) {
-    const o = el("option", "", t); o.value = v; state.appendChild(o);
+  let filter = "", offset = 0, loaded = false;
+  const tabs = h("div", {class: "seg", role: "tablist", "aria-label": "Filter tasks"});
+  for (const [v, t] of FILTERS) {
+    tabs.append(h("button", {type: "button", role: "tab", class: "seg-btn", "aria-selected": String(v === filter), dataset: {v}, onclick: () => {
+      filter = v; for (const b of tabs.children) b.setAttribute("aria-selected", String(b.dataset.v === v)); refresh();
+    }}, t));
   }
-  const q = el("input"); q.placeholder = "Search tasks";
-  filters.append(state, q);
-  const list = el("div");
-  box.append(filters, list);
+  const q = h("input", {type: "search", placeholder: "Search tasks", "aria-label": "Search tasks"});
+  const list = h("div", {class: "table-list", role: "list"});
+  const more = btn("Show more", () => load(true), "more");
+  box.append(h("div", {class: "toolbar"}, tabs, h("label", {class: "search"}, icon("search"), q)), list);
 
   async function resume(id, confirmLast, where) {
-    const r = await api(`/api/tasks/${id}/resume`, {method: "POST", body: JSON.stringify(confirmLast ? {confirm_last: confirmLast} : {})}).catch(e => ({message: e.message}));
+    const r = await api(`/api/tasks/${encodeURIComponent(id)}/resume`, {method: "POST", body: JSON.stringify(confirmLast ? {confirm_last: confirmLast} : {})}).catch(e => ({message: D.plain(e)}));
     if (r.needs_confirmation) {
-      const ask = el("div", "card");
-      ask.appendChild(el("b", "", r.message));
-      const row = el("div", "row");
-      for (const o of r.options) { const b = el("button", o.id === "done" ? "primary" : "", o.label); b.type = "button"; b.onclick = () => { ask.remove(); resume(id, o.id, where); }; row.appendChild(b); }
-      const no = el("button", "", "Not now"); no.type = "button"; no.onclick = () => ask.remove(); row.appendChild(no);
-      ask.appendChild(row); (where || list).prepend(ask);
+      const ask = h("div", {class: "card ask"}, h("b", {text: r.message}),
+        h("div", {class: "row"}, (r.options || []).map(o => btn(o.label, () => { ask.remove(); resume(id, o.id, where); }, o.id === "done" ? "primary" : "")),
+          btn("Not now", () => ask.remove())));
+      (where || list).prepend(ask);
       return;
     }
-    if (!r.ok) alert(r.message || "Could not resume.");
-    else if (where && where.dataset && where.dataset.interrupted) where.remove();
-    refresh();
-  }
-  async function discard(id) { await api(`/api/tasks/${id}/discard`, {method: "POST"}).catch(() => {}); refresh(); }
-
-  function actions(t, where) {
-    const row = el("div", "row");
-    const go = el("button", "primary", "Resume"), drop = el("button", "", "Discard");
-    go.type = drop.type = "button";
-    go.title = "Continue from the last step. Nothing that already changed something is done again without asking you.";
-    go.onclick = e => { e.stopPropagation(); go.disabled = true; resume(t.id, null, where); };
-    drop.onclick = e => { e.stopPropagation(); drop.disabled = true; discard(t.id); if (where && where !== list) where.remove(); };
-    row.append(go, drop);
-    return row;
-  }
-
-  async function refresh() {
-    const params = new URLSearchParams({limit: "30"});
-    if (state.value) params.set("state", state.value);
-    if (q.value.trim()) params.set("q", q.value.trim());
-    const r = await api("/api/tasks?" + params).catch(() => null);
-    if (!r) return;
-    list.innerHTML = "";
-    if (!r.enabled) { list.appendChild(el("div", "empty", "The task engine is switched off in settings.")); return; }
-    if (!r.tasks.length) { list.appendChild(el("div", "empty", "No tasks yet.")); return; }
-    for (const t of r.tasks) {
-      const row = el("div", "trow");
-      row.append(el("span", "tst " + t.state, label(t.state)), el("span", "", (t.text || "").slice(0, 90)));
-      row.appendChild(el("small", "", `${when(t.created)} · ${t.channel} · ${t.steps} step(s)` + (t.tokens_in + t.tokens_out ? ` · ${(t.tokens_in + t.tokens_out).toLocaleString()} tokens` : "")));
-      if (t.state === "interrupted") row.appendChild(actions(t, list));
-      row.onclick = () => openTimeline(t.id);
-      list.appendChild(row);
+    if (!r.ok) D.toast({title: "Could not resume", body: r.message || "", kind: "danger"});
+    else {
+      D.toast({title: "Resumed", body: "Delta continues from the last step. Progress shows in Chat.", kind: "ok"});
+      if (where && where.dataset && where.dataset.interrupted) where.remove();
     }
+    refresh(); D.emit("tasks:changed");
+  }
+  async function discard(id) {
+    const r = await api(`/api/tasks/${encodeURIComponent(id)}/discard`, {method: "POST"}).catch(() => null);
+    if (r && r.message) D.toast({title: r.ok ? "Discarded" : "Not discarded", body: r.message, kind: r.ok ? "info" : "warn"});
+    refresh(); D.emit("tasks:changed");
+  }
+  function actions(t, where) {
+    const go = btn("Resume", e => { e.stopPropagation(); go.disabled = true; resume(t.id, null, where); }, "primary sm");
+    go.title = "Continue from the last step. Nothing that already changed something is done again without asking you.";
+    const drop = btn("Discard", e => { e.stopPropagation(); drop.disabled = true; discard(t.id); if (where && where !== list) where.remove(); }, "sm");
+    return h("div", {class: "row"}, go, drop);
+  }
+
+  function row(t) {
+    const tokens = (t.tokens_in || 0) + (t.tokens_out || 0);
+    const meta = [D.when(t.created), t.channel, `${t.steps} ${t.steps === 1 ? "step" : "steps"}`];
+    if (tokens) meta.push(`${tokens.toLocaleString()} tokens`);
+    if (t.wall_s) meta.push(D.dur(t.wall_s));
+    const r = h("div", {class: "trow", role: "listitem"},
+      h("button", {type: "button", class: "trow-main", onclick: () => openTimeline(t.id), "aria-label": "Open steps of: " + (t.text || "task")},
+        pill(t.state), h("span", {class: "trow-text", text: (t.text || "").slice(0, 160)}), h("span", {class: "trow-meta muted", text: meta.join(" · ")}), icon("chev-right")));
+    if (t.state === "interrupted") r.append(actions(t, list));
+    return r;
+  }
+  async function load(append) {
+    if (!append) offset = 0;
+    const params = new URLSearchParams({limit: String(PAGE), offset: String(offset)});
+    if (filter) params.set("state", filter);
+    if (q.value.trim()) params.set("q", q.value.trim());
+    if (!loaded && !append) list.replaceChildren(D.skeleton(5));
+    const r = await api("/api/tasks?" + params).catch(e => ({error: e}));
+    more.remove();
+    if (r.error || !r.tasks) { if (!append) list.replaceChildren(D.failed(r.error ? D.plain(r.error) : D.detail(r) || "Tasks could not be loaded.", refresh)); return; }
+    loaded = true;
+    if (!append) list.replaceChildren();
+    if (!r.enabled) { list.append(D.empty({ic: "tasks", title: "The task engine is switched off", body: "Turn on engine.enabled in Delta's settings file to keep a history of tasks."})); return; }
+    if (!r.tasks.length && !append) {
+      list.append(filter || q.value.trim() ? D.empty({ic: "search", title: "No tasks match", body: "Try another filter or search."})
+        : D.empty({ic: "tasks", title: "No tasks yet", body: "Ask Delta to do something and it shows up here.", action: {label: "Go to Chat", fn: () => D.go("chat")}}));
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const t of r.tasks) frag.append(row(t));
+    list.append(frag);
+    offset += r.tasks.length;
+    if (r.tasks.length === PAGE) list.after(more);
+  }
+  const refresh = () => load(false);
+
+  async function badge() {
+    const r = await api("/api/tasks?state=interrupted&limit=20").catch(() => null);
+    const n = r && r.tasks ? r.tasks.length : 0;
+    const b = document.getElementById("nb_tasks"); b.hidden = !n; b.textContent = String(n); b.title = n ? `${n} interrupted` : "";
   }
 
   async function shot(taskId, name) {
     try {
-      const blob = await fetch(`/api/runs/${taskId}/${encodeURIComponent(name)}`, {headers: {"Authorization": "Bearer " + token}}).then(x => { if (!x.ok) throw 0; return x.blob(); });
-      const a = el("a"); a.href = URL.createObjectURL(blob); a.target = "_blank";
-      const img = el("img"); img.src = a.href; img.alt = name; a.appendChild(img); return a;
-    } catch { return el("span", "", name); }
+      const u = D.sheetURL(await D.blob(`/api/runs/${encodeURIComponent(taskId)}/${encodeURIComponent(name)}`));
+      return h("a", {href: u, target: "_blank", title: "Open screenshot"}, h("img", {src: u, alt: "Screenshot " + name, loading: "lazy"}));
+    } catch { return h("span", {class: "muted", text: name}); }
   }
 
   async function openTimeline(id) {
-    const d = await api(`/api/tasks/${id}/timeline`).catch(() => null);
-    if (!d || !d.task) return;
-    document.getElementById("timeline")?.remove();
-    const wrap = el("div"); wrap.id = "timeline";
-    const card = el("div", "tl");
-    const head = el("div", "thead");
-    const left = el("div");
-    const h = el("h2"); h.append(el("span", "tst " + d.task.state, label(d.task.state)), document.createTextNode((d.task.text || "").slice(0, 160)));
-    left.append(h, el("div", "meta", `${when(d.task.created)} · ${d.task.channel} · ${d.task.wall_s}s · ${(d.task.tokens_in + d.task.tokens_out).toLocaleString()} tokens · ${d.task.provider || "no AI"}` + (d.task.resumes ? ` · resumed ${d.task.resumes}x` : "")));
-    const close = el("button", "", "Close"); close.type = "button"; close.onclick = () => wrap.remove();
-    head.append(left, close);
-    card.appendChild(head);
-    if (d.task.state === "interrupted") card.appendChild(actions(d.task, card));
-    const table = el("table");
-    const tr = el("tr"); for (const c of ["Time", "Tool", "Result", "Model", "Tokens", "Screen"]) tr.appendChild(el("th", "", c));
-    table.appendChild(tr);
-    const t0 = d.task.created;
-    for (const s of d.steps) {
-      const row = el("tr");
-      row.appendChild(el("td", "", "+" + Math.max(0, s.started - t0).toFixed(1) + "s" + (s.duration_ms != null ? ` (${(s.duration_ms / 1000).toFixed(1)}s)` : "")));
-      const tool = el("td"); tool.appendChild(el("b", "", s.tool)); if (s.side_effect) tool.appendChild(el("div", "meta", "changes something"));
-      if (s.undo) tool.appendChild(el("div", "meta", "undo available"));
-      if (s.recovery) tool.appendChild(el("div", "meta", "self-heal step"));
-      if (s.failure && s.ok === false) tool.appendChild(el("div", "meta", label(s.failure)));
-      row.appendChild(tool);
-      const res = s.unconfirmed ? "started, never finished" : (!s.ran ? "not run: " : (s.ok ? "" : "failed: ")) + (s.summary || "");
-      row.appendChild(el("td", "res" + (s.ok === false || s.unconfirmed ? " bad" : ""), res.slice(0, 240)));
-      row.appendChild(el("td", "", s.model || ""));
-      row.appendChild(el("td", "", s.tokens_in + s.tokens_out ? `${s.tokens_in}/${s.tokens_out}` : ""));
-      const sc = el("td"); if (s.screenshot) shot(id, s.screenshot).then(a => sc.appendChild(a)); row.appendChild(sc);
-      table.appendChild(row);
-    }
-    if (!d.steps.length) { const r = el("tr"); const c = el("td", "", "No tool steps."); c.colSpan = 6; r.appendChild(c); table.appendChild(r); }
-    card.appendChild(table);
-    if (d.recoveries && d.recoveries.length) {
-      const heal = el("div", "heal");
-      heal.appendChild(el("b", "", "Self-heal"));
-      for (const r of d.recoveries) heal.appendChild(el("div", r.ok ? "ok" : "", "+" + Math.max(0, r.ts - t0).toFixed(1) + "s  " + r.summary));
-      card.appendChild(heal);
-    }
-    if (d.helpers && d.helpers.length) {
-      const box = el("div", "heal");
-      box.appendChild(el("b", "", "Read-only helpers"));
-      for (const h of d.helpers) {
-        const tokens = h.tokens ? `  (${h.tokens} tokens, ${h.seconds || 0}s)` : "";
-        box.appendChild(el("div", h.ok ? "ok" : "", "+" + Math.max(0, h.ts - t0).toFixed(1) + "s  " + h.summary + tokens));
-        for (const src of (h.sources || []).slice(0, 4)) box.appendChild(el("div", "meta", "    " + src));
+    const d = await api(`/api/tasks/${encodeURIComponent(id)}/timeline`).catch(() => null);
+    if (!d || !d.task) { D.toast({title: "That task's steps could not be loaded", kind: "danger"}); return; }
+    const t = d.task, t0 = t.created;
+    const at = ts => "+" + Math.max(0, ts - t0).toFixed(1) + " s";
+    D.sheet((t.text || "Task").slice(0, 120), body => {
+      body.append(h("div", {class: "tl-meta"}, pill(t.state),
+        h("span", {class: "muted", text: [D.when(t.created), t.channel, `${t.wall_s} s`, `${((t.tokens_in || 0) + (t.tokens_out || 0)).toLocaleString()} tokens`, t.provider || "no AI"].join(" · ") + (t.resumes ? ` · resumed ${t.resumes}x` : "")})));
+      if (t.text && t.text.length > 120) body.append(h("p", {text: t.text}));
+      if (t.state === "interrupted") body.append(actions(t, body));
+      // Steps: a table, a page at a time for very long runs.
+      const table = h("div", {class: "tl-steps", role: "table", "aria-label": "Steps"},
+        h("div", {class: "tl-row tl-headrow", role: "row"}, ["Time", "Tool", "Result", "Model", "Tokens", "Screen"].map(c => h("span", {role: "columnheader", text: c}))));
+      body.append(h("h3", {text: "Steps"}));
+      if (!d.steps.length) body.append(h("p", {class: "muted", text: "No tool steps."}));
+      else {
+        body.append(table);
+        D.paged(table, d.steps, s => {
+          const flags = [s.side_effect && "changes something", s.undo && "undo available", s.recovery && "self-heal step", s.failure && s.ok === false && D.words(s.failure)].filter(Boolean);
+          const res = s.unconfirmed ? "started, never finished" : (!s.ran ? "not run: " : (s.ok ? "" : "failed: ")) + (s.summary || "");
+          const sc = h("span", {role: "cell", class: "tl-shot"});
+          if (s.screenshot) shot(id, s.screenshot).then(a => sc.append(a));
+          return h("div", {class: "tl-row", role: "row"},
+            h("span", {role: "cell", class: "muted mono", text: at(s.started) + (s.duration_ms != null ? ` (${(s.duration_ms / 1000).toFixed(1)} s)` : "")}),
+            h("span", {role: "cell"}, h("code", {text: s.tool}), flags.map(f => h("small", {class: "muted", text: f}))),
+            h("span", {role: "cell", class: "tl-res" + (s.ok === false || s.unconfirmed ? " bad" : ""), text: res.slice(0, 240)}),
+            h("span", {role: "cell", class: "muted", text: s.model || ""}),
+            h("span", {role: "cell", class: "muted", text: s.tokens_in + s.tokens_out ? `${s.tokens_in}/${s.tokens_out}` : ""}), sc);
+        }, 50);
       }
-      card.appendChild(box);
-    }
-    // Memory recalled, answer grounding and learning (Batch D): one plain line each.
-    for (const [key, title] of [["memory", "Memory"], ["grounding", "Answer check"], ["learning", "Learning"]]) {
-      const lines = d[key] || [];
-      if (!lines.length) continue;
-      const box = el("div", "heal");
-      box.appendChild(el("b", "", title));
-      for (const l of lines) box.appendChild(el("div", l.ok === false ? "" : "ok", "+" + Math.max(0, l.ts - t0).toFixed(1) + "s  " + l.summary));
-      card.appendChild(box);
-    }
-    if (d.undo && (d.undo.available || d.undo.restored || (d.undo.skipped || []).length)) {
-      const row = el("div", "undo");
-      if (d.undo.available) {
-        const b = el("button", "", `Undo file changes (${d.undo.files})`); b.type = "button";
-        b.title = "Put back the files this task changed. Files in the way are kept in Delta's undo folder.";
-        b.onclick = async () => {
-          if (!confirm("Put back the files this task changed?")) return;
-          b.disabled = true;
-          const r = await api(`/api/tasks/${id}/undo`, {method: "POST"}).catch(e => ({message: e.message}));
-          alert(r.message || "Done."); openTimeline(id);
-        };
-        row.appendChild(b);
-      } else if (d.undo.restored) row.appendChild(el("span", "meta", "File changes were undone."));
-      for (const s of d.undo.skipped || []) row.appendChild(el("span", "meta", `Not undoable: ${s.path} (${s.why})`));
-      card.appendChild(row);
-    }
-    for (const c of d.checks) card.appendChild(el("div", "meta", (c.ok ? "Check passed: " : "Check failed: ") + c.summary));
-    if (d.task.answer) card.appendChild(el("div", "answer", d.task.answer));
-    wrap.appendChild(card);
-    wrap.onclick = e => { if (e.target === wrap) wrap.remove(); };
-    document.body.appendChild(wrap);
+      const section = (title, lines, line) => { if (lines && lines.length) body.append(h("h3", {text: title}), h("ul", {class: "tl-lines"}, lines.map(line))); };
+      section("Self-heal", d.recoveries, r => h("li", {class: r.ok ? "ok" : ""}, h("span", {class: "mono muted", text: at(r.ts)}), r.summary));
+      section("Read-only helpers", d.helpers, x => h("li", {class: x.ok ? "ok" : ""}, h("span", {class: "mono muted", text: at(x.ts)}),
+        x.summary + (x.tokens ? ` (${x.tokens} tokens, ${x.seconds || 0} s)` : ""), (x.sources || []).slice(0, 4).map(s => h("small", {class: "muted block", text: s}))));
+      // Memory recalled, answer grounding and learning: one plain line each.
+      for (const [key, title] of [["memory", "Memory"], ["grounding", "Answer check"], ["learning", "Learning"]])
+        section(title, d[key], l => h("li", {class: l.ok === false ? "" : "ok"}, h("span", {class: "mono muted", text: at(l.ts)}), l.summary));
+      if (d.undo && (d.undo.available || d.undo.restored || (d.undo.skipped || []).length)) {
+        const u = h("div", {class: "card"}, h("b", {text: "File changes"}));
+        if (d.undo.available) {
+          const b = btn(`Undo file changes (${d.undo.files})`, async () => {
+            if (!await D.confirm({title: "Put back the files this task changed?", body: "Files in the way are kept in Delta's undo folder.", ok: "Undo changes"})) return;
+            b.disabled = true;
+            const r = await api(`/api/tasks/${encodeURIComponent(id)}/undo`, {method: "POST"}).catch(e => ({message: D.plain(e)}));
+            D.toast({title: r.ok === false ? "Undo did not finish" : "Files put back", body: r.message || "", kind: r.ok === false ? "warn" : "ok"});
+            openTimeline(id);
+          }, "", "refresh");
+          b.title = "Put back the files this task changed. Files in the way are kept in Delta's undo folder.";
+          u.append(h("div", {class: "row"}, b));
+        } else if (d.undo.restored) u.append(h("p", {class: "muted", text: "File changes were undone."}));
+        for (const s of d.undo.skipped || []) u.append(h("p", {class: "muted small", text: `Not undoable: ${s.path} (${s.why})`}));
+        body.append(u);
+      }
+      if (d.checks && d.checks.length) section("Checks", d.checks, c => h("li", {class: c.ok ? "ok" : "bad"}, icon(c.ok ? "check" : "x"), (c.ok ? "Passed: " : "Failed: ") + c.summary));
+      if (t.answer) body.append(h("h3", {text: "Answer"}), h("div", {class: "answer-box"}, D.linkify(t.answer)));
+    });
   }
 
-  // Interrupted tasks, shown in the chat when the dashboard opens (checkInterrupted in the main page).
-  window.showInterruptedTasks = tasks => {
-    const log = document.getElementById("log");
-    if (!log) return;
+  // Interrupted tasks, shown in the chat when the dashboard opens.
+  D.showInterruptedTasks = tasks => {
     for (const t of tasks) {
-      if (document.querySelector(`[data-interrupted="${t.id}"]`)) continue;
-      const c = el("div", "checklist"); c.dataset.interrupted = t.id;
-      c.appendChild(el("div", "chead", "I was interrupted while working on this:"));
-      c.appendChild(el("div", "citem", "\u201c" + (t.text || "") + "\u201d"));
-      c.appendChild(el("div", "citem", t.steps ? `${t.steps} step(s) had run. Resume continues from there; anything that already changed something is not done again without asking you.` : "No steps had run yet."));
-      const row = actions(t, c); row.style.marginTop = "6px";
-      const view = el("button", "", "Show steps"); view.type = "button"; view.onclick = () => openTimeline(t.id); row.appendChild(view);
-      c.appendChild(row);
-      log.appendChild(c);
+      if (document.querySelector(`[data-interrupted="${CSS.escape(t.id)}"]`)) continue;
+      const c = h("div", {class: "card interrupted", dataset: {interrupted: t.id}},
+        h("div", {class: "card-top"}, icon("alert"), h("b", {text: "I was interrupted while working on this"})),
+        h("p", {text: "\u201c" + (t.text || "") + "\u201d"}),
+        h("p", {class: "muted small", text: t.steps ? `${t.steps} ${t.steps === 1 ? "step" : "steps"} had run. Resume continues from there; anything that already changed something is not done again without asking you.` : "No steps had run yet."}));
+      const r = actions(t, c);
+      r.append(btn("Show steps", () => openTimeline(t.id), "sm"));
+      c.append(r);
+      D.chat.put(c);
     }
   };
-  window.openTaskTimeline = openTimeline;
+  D.openTimeline = openTimeline;
 
-  state.onchange = refresh;
-  let timer = null; q.oninput = () => { clearTimeout(timer); timer = setTimeout(refresh, 250); };
-  refresh();
-  setInterval(() => { if (!document.hidden) refresh(); }, 15000);
+  let timer = 0;
+  q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(refresh, 250); });
+  D.on("tasks:changed", () => { badge(); if (D.view === "tasks") refresh(); });
+  D.views.tasks = {show: refresh};
+  D.every(15000, refresh, () => D.view === "tasks" && offset <= PAGE);
+  D.every(60000, badge);
+  badge();
 })();
