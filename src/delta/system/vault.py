@@ -75,6 +75,14 @@ def seal(text: str) -> str:
         if required():
             raise VaultUnavailableError(UNAVAILABLE.format(why="pywin32 is missing"))
         return text  # not Windows: no DPAPI here (developer runs)
+    return seal_strict(text)
+
+
+def seal_strict(text: str) -> str:
+    """DPAPI or an error, never the text itself: for secrets written to their own files (connected apps' tokens,
+    saved logins), where a fallback to plain text must be impossible rather than merely checked for afterwards."""
+    if not available():
+        raise VaultUnavailableError(UNAVAILABLE.format(why="pywin32 is missing"))
     import win32crypt
 
     try:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -275,3 +276,22 @@ def test_cli_refuses_plain_http_without_the_flag(tmp_path):
     rc = run_cli(None, _args(action="add", name="Old", site="http://erp.college.edu", username="u"),  # type: ignore[arg-type]
                  secret=lambda p: SECRET, out=out.append, store=store(tmp_path))
     assert rc == 1 and "plain http" in out[-1]
+
+
+def test_strict_seal_never_returns_the_text(monkeypatch):
+    """Secrets written to their own files use seal_strict: DPAPI or an error, never a plain-text fallback."""
+    from delta.system import vault
+
+    monkeypatch.setattr(vault, "available", lambda: False)
+    with pytest.raises(vault.VaultUnavailableError):
+        vault.seal_strict(SECRET)
+
+    class FakeCrypt:
+        @staticmethod
+        def CryptProtectData(data: bytes, *a: Any) -> bytes:
+            return bytes(b ^ 0x5A for b in data)
+
+    monkeypatch.setattr(vault, "available", lambda: True)
+    monkeypatch.setitem(sys.modules, "win32crypt", FakeCrypt)
+    sealed = vault.seal_strict(SECRET)
+    assert sealed.startswith(vault.PREFIX) and SECRET not in sealed
