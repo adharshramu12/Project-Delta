@@ -122,6 +122,9 @@ class McpBridge:
 
         self.stack = AsyncExitStack()
         ctx.on_shutdown(self.stack.aclose)
+        from delta.connectors.client import rotate_log
+
+        rotate_log(ctx.data_dir / "servers.log")  # servers' stderr: bounded, one older copy kept
         errlog = (ctx.data_dir / "servers.log").open("a", encoding="utf-8")
         self.stack.callback(errlog.close)
         servers: dict[str, dict[str, Any]] = ctx.config.get("servers") or {}

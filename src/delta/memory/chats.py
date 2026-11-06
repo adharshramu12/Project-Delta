@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from delta.core.intents import small_talk
+from delta.system import sqlite_safe
 from delta.system.vault import PREFIX, scrub, seal, seal_or_keep, unseal
 
 SCHEMA = """
@@ -63,7 +64,7 @@ class Chat:
 class ChatStore:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(path, check_same_thread=False)
+        self._db = sqlite_safe.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
         self._db.execute("PRAGMA journal_mode = WAL")

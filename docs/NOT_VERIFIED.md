@@ -15,6 +15,13 @@ saying what you found (it worked, or how it failed) is very welcome.
   Delta's environment there, and running Delta. Not tried on an ARM PC.
 - Finding an existing Python 3.12 through the `py` launcher and the registry (all-users installs, a per-user
   install in a custom folder), and skipping the Microsoft Store Python.
+- The installer's newer checks on a real PC: the free-space check, the TLS 1.2 switch on an older Windows 10, the
+  plain messages when `pip install uv` or `uv sync` fail behind a company proxy, and `Install Delta.cmd` opened from
+  inside the zip. Their PowerShell syntax is checked (PowerShell 7 parser), but they did not run on Windows 5.1.
+- A user folder with a non-ASCII or apostrophe name (`C:\Users\Rāj Kumar`, `C:\Users\D'Souza`): the Desktop
+  shortcut quoting is unit-tested; the full install from such a folder is not.
+- `scripts\uninstall.ps1` stopping a Delta that runs on another port and its dashboard window before removing
+  the folder.
 - `delta update` while Delta is running: the "close it first" message, `delta update --stop` closing it, and
   the installer waiting for the update command to exit before replacing files.
 
@@ -60,5 +67,10 @@ saying what you found (it worked, or how it failed) is very welcome.
 
 ## Resource use
 
+- Idle use measured on Linux (the service with no task, every default on): about 70 MB of memory, 3 threads,
+  about 0.2 CPU seconds a minute. Windows adds pywin32 and the UI Automation libraries when the desktop tools
+  first run; it has not been measured on a 4 GB dual-core laptop.
+- A local app server (npx / uvx) is stopped after 10 idle minutes (`connectors.idle_close_s`) and started again
+  on the next call: tested with the fake stdio server, not with the real Node or Python servers.
 - The "about 100 MB at rest" figure and the battery and GPU guard come from the author's own laptop, not from
   a measured set of machines.

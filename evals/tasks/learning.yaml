@@ -239,7 +239,7 @@
     plan: [{needs_tools: true, goal: read the weather, tools: [browser_open], success_criteria: ["the temperature is reported"]}]
     chat:
       - call: {tool: browser_open, args: {url: "{site}/weather.html"}}
-      - text: "DONE: It is 26 °C in Vijayawada right now (source: bbc.com)."
+      - text: "DONE: It is 61 °C in Vijayawada right now (source: bbc.com)."
   check:
     - status: done
     - answer_contains: Not confirmed
@@ -273,8 +273,8 @@
     plan: [{needs_tools: true, goal: read the weather, tools: [browser_open], success_criteria: ["the temperature is reported"]}]
     chat:
       - call: {tool: browser_open, args: {url: "{site}/weather.html"}}
-      - text: "DONE: It is 26 °C in Vijayawada right now."
-      - text: "DONE: It is 26 °C in Vijayawada right now."
+      - text: "DONE: It is 61 °C in Vijayawada right now."
+      - text: "DONE: It is 61 °C in Vijayawada right now."
   check:
     - status: failed
     - answer_contains: could not verify
