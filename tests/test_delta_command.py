@@ -233,7 +233,8 @@ def test_install_and_uninstall_keep_the_rest_of_the_path(shell, env_key, tmp_pat
     def run(*args: str) -> None:
         out = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
                               str(COMMAND), *args, "-InstallDir", str(install), "-EnvKey", env_key],
-                             capture_output=True, text=True, timeout=120, check=False)
+                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+                             check=False)
         assert out.returncode == 0, out.stderr + out.stdout
 
     run("-Action", "Install", "-NoPath")
