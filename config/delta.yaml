@@ -125,6 +125,16 @@ browser:
   prefer: auto         # auto (your Windows default browser) | chrome | edge
   orange_cursor: true  # the mouse pointer turns orange while Delta controls the mouse/keyboard
 
+# Writer and Documents: write_post, prepare_post (Delta never presses Post), make_document.
+writer:
+  enabled: true
+  output_dir: auto          # auto = your Documents\Delta folder, or any absolute path
+  page_size: A4             # A4 | Letter
+  latex: auto               # auto = use tectonic/xelatex/pdflatex only if already installed | off
+  pdf_browser: ""           # "" = the Edge/Chrome already on this PC
+  voice_file: ""            # your past posts to copy your voice ("" = <output_dir>\my-posts.txt if present)
+  substack_publication: ""  # e.g. yourname -> opens yourname.substack.com/publish/post
+
 # Simple image captchas on YOUR OWN accounts (e.g. your university portal). Off by default: every
 # captcha is handed to you. Listed hosts are read by the vision model (2 tries, then you are asked).
 # Exact host match; "*.example.in" also covers its subdomains. Add with `delta captcha allow <host>`.

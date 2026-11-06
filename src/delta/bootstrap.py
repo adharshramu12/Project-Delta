@@ -57,6 +57,10 @@ def make_policy(settings: Settings) -> PolicyEngine:
     its config dir read-only: no setting or tool can let Delta rewrite its own rules."""
     boundaries = settings.boundaries.model_copy(deep=True)
     boundaries.allowed_paths.append(str(save_dir(settings.files, create=False)))  # always allowed
+    if settings.writer.enabled:  # where make_document saves (Documents\\Delta by default)
+        from delta.addons.writer.document import documents_dir
+
+        boundaries.allowed_paths.append(str(documents_dir(settings.writer.output_dir, create=False)))
     return PolicyEngine(boundaries, protected=[settings.data_dir], read_only=[settings.config_dir])
 
 
@@ -212,6 +216,11 @@ def build(settings: Settings) -> Container:
         FetchPage(),
         *(memory_tools(memory) if settings.memory.enabled else []),
     ])
+    from delta.addons.writer import writer_tools
+
+    writer = writer_tools(router, settings.writer, events)  # [] when writer.enabled is false
+    for t in writer:
+        registry.register(t)
     closers: list[tuple[str, Callable[[], Awaitable[None]]]] = []
     proof = ProofRecorder(data / "runs")
     desktop_ok = _installed("pywinauto", "pyautogui", "mss")
@@ -255,6 +264,9 @@ def build(settings: Settings) -> Container:
 
     executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
     chats.executor = executor  # each delegated reply goes through the same approval rules
+    for t in writer:
+        if hasattr(t, "executor"):
+            t.executor = executor  # documents go back to Telegram/Slack through send_file, with every check
     skills = SkillStore(data / "skills.db")
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
                                 governor, events, audit, skills, learning, proof)

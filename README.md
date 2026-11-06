@@ -50,6 +50,40 @@ asks before anything risky, and **verifies every task before it says "done".**
 - **Remembers** your preferences locally and **learns your workflows** as reusable skills
 - Voice notes in, answers out
 
+## Writer and Documents
+
+**Posts that read like you wrote them (LinkedIn, Medium, Substack).** Ask "write a LinkedIn post about
+my capstone demo" and Delta writes it in Indian English, in your own voice, with the platform's layout:
+a short hook and 120 to 250 words of plain text for LinkedIn (at most 3 hashtags), or a title, subtitle
+and sections in Markdown (600 to 1200 words) for Medium and Substack. The rules are checked in code after
+writing, not just asked for: no em or en dashes, no emojis, no backslashes, no hashtag walls, no AI words
+("delve", "leverage", "game-changer", "in today's fast-paced world" and many more), British/Indian spelling
+(organise, colour, centre), varied sentence length and short paragraphs. If a draft breaks a rule, Delta
+fixes it or rewrites once, then tells you what is still off. To teach it your voice, put a few of your
+past posts in `Documents\Delta\my-posts.txt` (optional).
+
+**Delta never presses Post or Publish.** LinkedIn's User Agreement (section 8.2) forbids bots that create
+or share posts, and Medium and Substack have no open posting API. So `prepare_post` copies the text to your
+clipboard and opens the platform's compose page in your own browser: you paste, check and press Post. From
+Telegram you get the text in the chat instead.
+
+**Documents: PDF, Word and Markdown.** "Make my resume as PDF and Word", "turn these notes into a report",
+"write a leave letter", "make an invoice for this project". Delta writes and lays out the document from
+your content (report, letter, resume, notes, assignment, invoice, one-pager, paper): title page or not,
+headings, tables that do not split rows across pages, callouts, A4 by default, margins, fonts, header and
+"Page X of Y". Files are saved in `Documents\Delta` (setting `writer.output_dir`). Asked from Telegram, the
+file comes back to your chat (through `send_file`, so the Remote Guard PIN applies). In the app you get a
+preview and Download buttons.
+
+- **PDF needs nothing extra.** It is printed by the Microsoft Edge (or Chrome) that every Windows PC
+  already has. If neither is found, Delta saves a print-ready HTML file and says so.
+- **Word files need nothing extra** either: Delta writes the .docx itself.
+- **LaTeX is optional.** If `tectonic`, MiKTeX or TeX Live (`xelatex`/`pdflatex`) is on your PATH, maths-heavy
+  resumes, reports, papers and assignments are typeset with LaTeX (or ask for `engine: latex`). Nothing
+  changes if you do not have it.
+
+Settings (all optional) live under `writer:` in `config/delta.yaml`.
+
 ## Works with the AI you already pay for (or none at all)
 
 | How you sign in | Cost | Good for |
