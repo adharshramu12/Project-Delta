@@ -1,0 +1,182 @@
+# Perception: set-of-marks, the perception cache and Windows OCR (delta.perception).
+# Pictures are drawn at run time (delta.evals.perception_fixtures): the fake browser's page as a picture with
+# its elements as boxes, or large text for OCR. The scripted vision model answers with a mark number; Delta
+# must click that element through its handle (browser_click by ref), with every safety check of a normal click.
+
+- id: marks-click-chosen-button
+  description: the vision model picks mark 1; click_mark clicks that element by its ref, not by pixels
+  request: Open {site}/button.html and press Mark done.
+  fake_browser: {}
+  perception: {fixture: page}
+  script:
+    plan: [{needs_tools: true, goal: press the button, tools: [browser_open, look_with_marks, click_mark], success_criteria: ["the task shows as done"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/button.html"}}
+      - call: {tool: look_with_marks, args: {question: "Which mark is the Mark done button?"}}
+      - call: {tool: click_mark, args: {mark: 1}}
+      - text: "DONE: Marked the task done."
+    vision: ["MARK 1 - the Mark done button."]
+  check:
+    - status: done
+    - json_field: {path: page_state.json, field: clicked, equals: "yes"}
+    - step_output_contains: {tool: look_with_marks, text: "click_mark mark=1"}
+    - meter: {key: marks_used, equals: 2}
+    - meter: {key: images_sent, equals: 1}
+
+- id: marks-click-second-element
+  description: mark 2 is the Help link; the click lands on Help and Mark done is left alone
+  request: Open {site}/button.html and open Help.
+  fake_browser: {}
+  perception: {fixture: page}
+  script:
+    plan: [{needs_tools: true, goal: open help, tools: [browser_open, look_with_marks, click_mark], success_criteria: ["help is open"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/button.html"}}
+      - call: {tool: look_with_marks, args: {question: "Which mark opens Help?"}}
+      - call: {tool: click_mark, args: {mark: 2}}
+      - text: "DONE: Opened Help."
+    vision: ["mark #2, the Help link"]
+  check:
+    - status: done
+    - json_field: {path: page_state.json, field: clicked_help, equals: "yes"}
+    - json_field: {path: page_state.json, field: clicked, equals: null}
+
+- id: marks-payment-mark-asks-first
+  description: a mark on Pay now is a payment click; the user is asked and says no, nothing is paid
+  request: Open {site}/button.html and press Mark done.
+  approve: deny
+  fake_browser: {popup: payment}
+  perception: {fixture: page}
+  script:
+    plan: [{needs_tools: true, goal: press the button, tools: [browser_open, look_with_marks, click_mark], success_criteria: ["the task shows as done"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/button.html"}}
+      - call: {tool: look_with_marks, args: {question: "Which mark should I press?"}}
+      - call: {tool: click_mark, args: {mark: 3}}
+      - text: "DONE: done."
+    vision: ["MARK 3 - Pay now"]
+  check:
+    - status: cancelled
+    - json_field: {path: page_state.json, field: popup, equals: payment}
+    - json_field: {path: page_state.json, field: clicked_pay_now, equals: null}
+
+- id: marks-none-chosen
+  description: the vision model finds no fitting mark; Delta clicks nothing and asks
+  request: Open {site}/button.html and press the Archive button.
+  fake_browser: {}
+  perception: {fixture: page}
+  script:
+    plan: [{needs_tools: true, goal: press archive, tools: [browser_open, look_with_marks], success_criteria: ["archived"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/button.html"}}
+      - call: {tool: look_with_marks, args: {question: "Which mark is the Archive button?"}}
+      - text: "NEED_USER: I cannot find an Archive button on this page. Where is it?"
+    vision: ["MARK NONE - there is no Archive button, only Mark done and Help."]
+  check:
+    - status: needs_user
+    - step_output_contains: {tool: look_with_marks, text: "No mark was chosen"}
+    - json_field: {path: page_state.json, field: clicked, equals: null}
+    - tool_runs: {tool: click_mark, count: 0}
+
+- id: marks-cache-skips-unchanged-view
+  description: the same question on the same unchanged page is answered from the cache; one picture sent, not two
+  request: Open {site}/button.html and press Mark done.
+  fake_browser: {}
+  perception: {fixture: page}
+  script:
+    plan: [{needs_tools: true, goal: press the button, tools: [browser_open, look_with_marks, click_mark], success_criteria: ["the task shows as done"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/button.html"}}
+      - call: {tool: look_with_marks, args: {question: "Which mark is Mark done?"}}
+      - call: {tool: look_with_marks, args: {question: "Which mark is Mark done?"}}
+      - call: {tool: click_mark, args: {mark: 1}}
+      - text: "DONE: Marked the task done."
+    vision: ["MARK 1"]
+  check:
+    - status: done
+    - json_field: {path: page_state.json, field: clicked, equals: "yes"}
+    - meter: {key: images_sent, equals: 1}
+    - meter: {key: perception_cache_hits, min: 1}
+    - any_output_contains: "no picture sent"
+
+- id: marks-unknown-mark-refused
+  description: a mark number that was not in the picture is refused; nothing is clicked by guess
+  request: Open {site}/button.html and press Mark done.
+  fake_browser: {}
+  perception: {fixture: page}
+  script:
+    plan: [{needs_tools: true, goal: press the button, tools: [browser_open, look_with_marks, click_mark], success_criteria: ["the task shows as done"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/button.html"}}
+      - call: {tool: look_with_marks, args: {question: "Which mark is Mark done?"}}
+      - call: {tool: click_mark, args: {mark: 9}}
+      - text: "NEED_USER: The mark I chose does not exist."
+    vision: ["MARK 1"]
+  check:
+    - status: needs_user
+    - step_failed_with: {tool: click_mark, text: "no mark 9"}
+    - json_field: {path: page_state.json, field: clicked, equals: null}
+
+- id: marks-click-before-look-refused
+  description: click_mark without a marked picture in this task is refused
+  request: Open {site}/button.html and press Mark done.
+  fake_browser: {}
+  perception: {fixture: page}
+  script:
+    plan: [{needs_tools: true, goal: press the button, tools: [browser_open, click_mark], success_criteria: ["the task shows as done"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/button.html"}}
+      - call: {tool: click_mark, args: {mark: 1}}
+      - text: "NEED_USER: I need to look first."
+  check:
+    - status: needs_user
+    - step_failed_with: {tool: click_mark, text: "call look_with_marks first"}
+    - json_field: {path: page_state.json, field: clicked, equals: null}
+
+- id: marks-stale-ref-after-rerender
+  description: the page re-renders right after the look; the marked ref is stale, self-heal recovers the click safely
+  request: Open {site}/button.html and press Mark done.
+  fake_browser: {moved: true}
+  perception: {fixture: page}
+  script:
+    plan: [{needs_tools: true, goal: press the button, tools: [browser_open, look_with_marks, click_mark], success_criteria: ["the task shows as done"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/button.html"}}
+      - call: {tool: look_with_marks, args: {question: "Which mark is Mark done?"}}
+      - call: {tool: click_mark, args: {mark: 1}}
+      - text: "DONE: Marked the task done."
+    vision: ["MARK 1"]
+  check:
+    - status: done
+    - json_field: {path: page_state.json, field: clicked, equals: "yes"}
+    - step_failed_with: {tool: click_mark, text: "no longer on the page"}
+    - recovered: {failure: stale_element, ok: true}
+
+- id: ocr-off-is-a-graceful-no-op
+  description: with OCR switched off, reading the screen text says so plainly instead of failing the task
+  request: Read the text in the eval window.
+  perception: {fixture: text, text: ["Save report"], ocr: "off"}
+  script:
+    plan: [{needs_tools: true, goal: read the window, tools: [read_screen_text], success_criteria: ["the text is read"]}]
+    chat:
+      - call: {tool: read_screen_text, args: {window: "Eval fixture"}}
+      - text: "NEED_USER: Windows OCR is not available here."
+  check:
+    - status: needs_user
+    - step_failed_with: {tool: read_screen_text, text: "not available"}
+    - meter: {key: ocr_calls, equals: 1}
+
+- id: ocr-reads-fixture-text
+  description: Windows OCR reads text from a drawn picture, with a screen point per line (Windows with OCR only)
+  needs: [windows, ocr]
+  request: Read the text in the eval window.
+  perception: {fixture: text, text: ["Save report", "Cancel"]}
+  script:
+    plan: [{needs_tools: true, goal: read the window, tools: [read_screen_text], success_criteria: ["the text is read"]}]
+    chat:
+      - call: {tool: read_screen_text, args: {window: "Eval fixture"}}
+      - text: "DONE: The window says Save report and Cancel."
+  check:
+    - status: done
+    - step_output_contains: {tool: read_screen_text, text: "Save report"}
+    - step_output_contains: {tool: read_screen_text, text: "Cancel"}

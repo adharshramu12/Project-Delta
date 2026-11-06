@@ -11,11 +11,20 @@ The router adds every call to a plain dict of counters (ModelRouter.meter):
                    "not reported", because Delta cannot see the prompt the CLI really sent
   unreported_est   a rough size of those calls, used only by the optional token budget
 
+Perception and helper counters (Batch C), added by the tools that cause them:
+  images_sent      pictures sent to a model (look_at_screen, look_with_marks, step screenshots)
+  image_tokens_est estimated input tokens of those pictures (perception.images.image_tokens)
+  marks_used       numbered marks drawn on set-of-marks pictures
+  ocr_calls        Windows OCR reads
+  perception_cache_hits  views not sent again because they had not changed
+  helper_tokens    tokens used by parallel read-only helpers (already inside input/output above)
+
 summary() turns the counters into what the dashboard and the API show.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Any
 
@@ -52,8 +61,25 @@ def estimate_output(content: str, tool_calls: list[Any]) -> int:
     return chars // CHARS_PER_TOKEN
 
 
+PERCEPTION_KEYS = ("images_sent", "image_tokens_est", "marks_used", "ocr_calls", "perception_cache_hits",
+                   "helper_tokens", "helpers")
+
+
 def add(meter: dict[str, int], key: str, value: int) -> None:
     meter[key] = meter.get(key, 0) + int(value)
+
+
+def bump(router: Any, key: str, value: int = 1) -> None:
+    """Add to the task's meter on a router; never fails (metering must not break a tool)."""
+    meter = getattr(router, "meter", None)
+    if isinstance(meter, dict) and value:
+        with contextlib.suppress(TypeError, ValueError):
+            add(meter, key, value)
+
+
+def perception(meter: dict[str, int]) -> dict[str, int]:
+    """The perception and helper counters that are not zero (empty for a task that used none)."""
+    return {k: int(meter[k]) for k in PERCEPTION_KEYS if meter.get(k)}
 
 
 def used_for_budget(meter: dict[str, int]) -> int:
@@ -98,5 +124,8 @@ def summary(meter: dict[str, int]) -> dict[str, Any]:
             if unreported:
                 parts.append(f"{unreported} not reported")
             label += f" ({', '.join(parts)})"
-    return {"input": inp, "output": out, "cached": meter.get("cached", 0), "calls": calls,
-            "source": source, "label": label}
+    out_summary: dict[str, Any] = {"input": inp, "output": out, "cached": meter.get("cached", 0), "calls": calls,
+                                   "source": source, "label": label}
+    if extra := perception(meter):
+        out_summary["perception"] = extra
+    return out_summary

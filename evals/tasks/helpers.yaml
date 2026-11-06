@@ -1,0 +1,91 @@
+# Parallel read-only helpers (delta.helpers), turned on for these evals only (they are off by default).
+# Helpers can search the web, read pages and read files in the allowed folders; anything else is refused in
+# code. Each helper is a child task in tasks.db and a line in the parent task's timeline.
+
+- id: helpers-merge-two-answers
+  description: two independent lookups run as two helpers at the same time; both answers come back merged
+  request: What do notes-a.txt and notes-b.txt in {sandbox} say?
+  helpers: {max_helpers: 2}
+  setup:
+    files: {"notes-a.txt": "alpha 101", "notes-b.txt": "beta 202"}
+  script:
+    plan: [{needs_tools: true, goal: read both notes, tools: [read_file], success_criteria: ["both notes are reported"], research: ["What does {sandbox}/notes-a.txt say?", "What does {sandbox}/notes-b.txt say?"]}]
+    helper: ["The first note answer.", "The second note answer."]
+    chat:
+      - text: "DONE: Both notes are summarised above."
+  check:
+    - status: done
+    - step_output_contains: {tool: parallel_research, text: "[Helper 1]"}
+    - step_output_contains: {tool: parallel_research, text: "[Helper 2]"}
+    - step_output_contains: {tool: parallel_research, text: "first note answer"}
+    - step_output_contains: {tool: parallel_research, text: "second note answer"}
+    - helpers: {count: 2, ok: 2}
+    - meter: {key: helpers, equals: 2}
+
+- id: helpers-read-file-with-provenance
+  description: a helper reads a file in the allowed folder; its answer names where it came from
+  request: What is the code in {sandbox}/code.txt and in the release notes?
+  helpers: {max_helpers: 1}
+  setup:
+    files: {"code.txt": "the code is 7741"}
+  script:
+    plan: [{needs_tools: true, goal: read the code, tools: [read_file], success_criteria: ["the code is reported"], research: ["What is the code in {sandbox}/code.txt?"]}]
+    helper:
+      - call: {tool: read_file, args: {path: "{sandbox}/code.txt"}}
+      - text: "The code is 7741."
+    chat:
+      - text: "DONE: The code is 7741."
+  check:
+    - status: done
+    - step_output_contains: {tool: parallel_research, text: "The code is 7741"}
+    - step_output_contains: {tool: parallel_research, text: "Sources: read_file"}
+    - helpers: {count: 1, ok: 1}
+    - meter: {key: helper_tokens, min: 1}
+
+- id: helpers-write-attempt-refused
+  description: a helper that tries to write a file is refused by the executor's allowlist; nothing is written
+  request: Look up the note in {sandbox}.
+  helpers: {max_helpers: 1}
+  script:
+    plan: [{needs_tools: true, goal: look up, tools: [read_file], success_criteria: ["answered"], research: ["What is in {sandbox}?"]}]
+    helper:
+      - call: {tool: write_file, args: {path: "{sandbox}/pwned.txt", content: "helper wrote this"}}
+      - text: "I could not write; nothing found."
+    chat:
+      - text: "DONE: Nothing to report."
+  check:
+    - status: done
+    - file_absent: pwned.txt
+    - helpers: {count: 1, refused_min: 1}
+    - tool_runs: {tool: write_file, count: 0}
+
+- id: helpers-outside-folder-refused
+  description: a helper may read files only inside the allowed folders; a read elsewhere is refused
+  request: Look up the Python version file.
+  helpers: {max_helpers: 1}
+  script:
+    plan: [{needs_tools: true, goal: look up, tools: [read_file], success_criteria: ["answered"], research: ["What does {python} contain?"]}]
+    helper:
+      - call: {tool: read_file, args: {path: "{python}"}}
+      - text: "Not allowed to read that."
+    chat:
+      - text: "DONE: That file is outside the allowed folders."
+  check:
+    - status: done
+    - helpers: {count: 1, refused_min: 1}
+
+- id: helpers-off-by-default
+  description: with helpers off (the default) a plan's research list is ignored and no helper runs
+  request: What does {sandbox}/notes-a.txt say?
+  setup:
+    files: {"notes-a.txt": "alpha 101"}
+  script:
+    plan: [{needs_tools: true, goal: read the note, tools: [read_file], success_criteria: ["the note is reported"], research: ["a", "b"]}]
+    chat:
+      - call: {tool: read_file, args: {path: "{sandbox}/notes-a.txt"}}
+      - text: "DONE: It says alpha 101."
+  check:
+    - status: done
+    - tool_runs: {tool: parallel_research, count: 0}
+    - helpers: {count: 0}
+    - meter: {key: helper_tokens, equals: 0}

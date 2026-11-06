@@ -193,8 +193,9 @@ arguments with secrets masked, a short result, the model, tokens, time and the s
   quick tools), and every program it started is ended with all its child processes. Only processes Delta
   started for that call are touched, never your own browser or apps. Delta's own browser profile is
   restarted once per task if it stops responding.
-- **Evals.** `delta eval run` plays the 55 tasks in `evals/tasks` (files, documents, web pages on a local
-  test site, apps, memory, and self-heal drills that break things on purpose) and checks each result with a fixed rule (a file's contents, the page state, the
+- **Evals.** `delta eval run` plays the 70 tasks in `evals/tasks` (files, documents, web pages on a local
+  test site, apps, memory, self-heal drills that break things on purpose, set-of-marks and OCR on drawn
+  pictures, and read-only helpers) and checks each result with a fixed rule (a file's contents, the page state, the
   answer). By default it uses a scripted model: no keys, no internet, no cost, and that is what CI runs.
   `delta eval run --model groq` (or any provider you set up) measures a real model and costs what that
   provider charges. Reports (JSON and Markdown: success rate, tokens, time, cost estimate, each task) go to
@@ -226,7 +227,8 @@ again" or "Closed a cookie banner ('Reject all') and tried again".
   waits when the AI is rate limited, and stops to ask you on a sign-in page (it never types passwords) or
   when Windows says no. Captchas follow the existing captcha rules.
 - **Strategy ladder:** if one way of clicking keeps failing it steps down: the page structure, then Windows
-  UI Automation, then the screen picture (only if a model that can see is set up), then it asks you.
+  UI Automation, then the screen text read by Windows OCR (when Windows has it), then the screen picture (only
+  if a model that can see is set up, with numbered marks), then it asks you.
 - **Never twice:** a step that sends, deletes, buys, submits, writes or runs a command is never retried on
   its own, unless the failure proves it did not happen. Every retry passes the same permission checks and
   approvals as the first try. Attempts are capped per step and per task.
@@ -249,6 +251,39 @@ again" or "Closed a cookie banner ('Reject all') and tried again".
     cheap_steps: [observe]
     fallbacks: []       # e.g. [nim]: only on rate limit / outage / quota
   ```
+
+## Seeing the screen: marks, OCR and parallel helpers
+
+Delta reads pages and windows as text first, because that is cheap and exact. When it really has to look:
+
+- **Set-of-marks:** `look_with_marks` takes one picture of the page (Delta's own browser) or window, draws
+  numbered boxes on the clickable elements it already knows (page elements, or Windows UI Automation controls)
+  and sends it with a short legend. The model answers with a number and `click_mark` clicks **that element by
+  its handle**, not by guessing pixels. Coordinates are used only for things with no handle (OCR text). A
+  marked click on Send, Pay or Delete asks first, exactly like any other click.
+- **Fewer image tokens:** pictures are downscaled (1280 px longest side by default) and JPEG compressed; marks
+  are capped (40 per picture). The answer to the same question about an unchanged view is reused with no
+  picture sent, an unchanged step screenshot is not attached again, and an unchanged window read after an
+  action is one line (a changed one only its changed lines).
+- **Windows OCR for apps with no accessibility tree:** `read_screen_text` reads a window's text with the OCR
+  built into Windows 10 and 11 (no download), with a screen point per line, so a cheap model that cannot see
+  pictures can still act (`click_text`). On a PC without an OCR language it says so and nothing else changes.
+- **Parallel read-only helpers (off by default):** with `helpers.enabled: true` the planner may hand 2 to 4
+  independent lookups to helpers that run at the same time, each with its own token budget and time limit.
+  Helpers can only search the web, read pages (in a fresh headless browser context with no cookies) and read
+  files in your allowed folders. They can never click, type, write, send, ask you anything or use your own
+  browser, enforced in code. Each helper is a child task in the task history, and its answer comes back with
+  where it came from. Off by default because it adds a few lines to every planner request; turn it on if you
+  often ask for comparisons or several facts at once.
+- **Usage meter:** every task's usage shows pictures sent, estimated image tokens, marks drawn, OCR calls,
+  views skipped by the cache and helper tokens.
+
+```yaml
+perception: {marks: true, max_marks: 40, max_side: 1280, jpeg_quality: 60, ocr: auto, cache: true}
+helpers: {enabled: false, max_helpers: 2, token_budget: 6000, timeout_s: 60, max_steps: 4, read_page: true}
+```
+
+Screenshots stay on your PC (proof folder) except that a picture goes to the vision model you chose.
 
 ## Telegram commands
 

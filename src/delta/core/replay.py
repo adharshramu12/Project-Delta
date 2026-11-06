@@ -23,7 +23,8 @@ from delta.llm.router import ModelRouter
 from delta.llm.schemas import LLMError
 
 # Aimed by pixels or looking at the screen: not repeatable as recorded.
-NOT_REPLAYABLE = frozenset({"click_at", "do_actions", "look_at_screen", "screenshot", "scroll"})
+NOT_REPLAYABLE = frozenset({"click_at", "do_actions", "look_at_screen", "screenshot", "scroll", "look_with_marks",
+                            "click_mark", "read_screen_text", "click_text", "parallel_research"})
 # Reading steps add nothing when the calls are already known.
 OBSERVERS = frozenset({"read_window", "list_windows", "browser_read", "path_info", "list_dir", "read_file",
                        "media_status", "recall"})

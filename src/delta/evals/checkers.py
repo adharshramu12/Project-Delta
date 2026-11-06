@@ -53,6 +53,7 @@ class CheckContext:
     undo: Any = None      # UndoStore of the task (delta.selfheal.undo)
     policy: Any = None    # the task's PolicyEngine (undo restores follow it)
     task_id: str = ""
+    meter: dict[str, int] = field(default_factory=dict)  # the task's token meter, incl. perception counters
 
 
 Check = Callable[[CheckContext, Any], tuple[bool, str]]
@@ -134,7 +135,11 @@ def _json_field(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
         value: Any = json.loads(text)
         for key in str(arg["field"]).split("."):
             value = value[int(key)] if isinstance(value, list) else value[key]
-    except (ValueError, KeyError, IndexError, TypeError) as e:
+    except KeyError:
+        if arg.get("equals", "") is None:  # equals: null = the field is not there at all
+            return True, f"{arg['field']} absent"
+        return False, f"{arg['field']} not readable: KeyError"
+    except (ValueError, IndexError, TypeError) as e:
         return False, f"{arg['field']} not readable: {type(e).__name__}"
     return value == arg["equals"], f"{arg['field']} = {value!r}"
 
@@ -287,6 +292,48 @@ def _undo_restores(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
 def _undo_skipped(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
     skipped = ((ctx.timeline or {}).get("undo") or {}).get("skipped") or []
     return bool(skipped) == bool(arg), f"not undoable: {skipped}"
+
+
+@check("meter")
+def _meter(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    """A counter of the task's meter (delta.llm.usage), e.g. {key: images_sent, equals: 1} or {min: 1}."""
+    value = int(ctx.meter.get(str(arg["key"]), 0))
+    ok = True
+    if "equals" in arg:
+        ok = ok and value == int(arg["equals"])
+    if "min" in arg:
+        ok = ok and value >= int(arg["min"])
+    if "max" in arg:
+        ok = ok and value <= int(arg["max"])
+    return ok, f"{arg['key']} = {value}"
+
+
+@check("helpers")
+def _helpers(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    """Read-only helpers in the timeline, and their child tasks in tasks.db:
+    {count: 2, ok: 2, refused_min: 1}."""
+    rows = list((ctx.timeline or {}).get("helpers") or [])
+    ok_count = sum(1 for r in rows if r.get("ok"))
+    refused = sum(int(r.get("refused") or 0) for r in rows)
+    children = 0
+    if ctx.tasks_db is not None and ctx.tasks_db.exists():
+        import sqlite3
+
+        con = sqlite3.connect(ctx.tasks_db)
+        try:
+            ids = [str(r.get("child")) for r in rows]
+            children = sum(1 for i in ids if con.execute("SELECT 1 FROM tasks WHERE id=? AND channel='helper'",
+                                                          (i,)).fetchone())
+        finally:
+            con.close()
+    good = True
+    if "count" in arg:
+        good = good and len(rows) == int(arg["count"]) and children == len(rows)
+    if "ok" in arg:
+        good = good and ok_count == int(arg["ok"])
+    if "refused_min" in arg:
+        good = good and refused >= int(arg["refused_min"])
+    return good, f"{len(rows)} helper(s), {ok_count} answered, {refused} refused, {children} child task(s)"
 
 
 def run_checks(ctx: CheckContext, checks: list[dict[str, Any]]) -> list[dict[str, Any]]:

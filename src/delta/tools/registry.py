@@ -131,7 +131,8 @@ class ToolRegistry:
 # or learned trust says. In-page browser steps (click, fill, press) stay free: they only act on the
 # page already open, which is how Deep Research and form filling work.
 UNTRUSTED_SOURCES = {"browser_read", "fetch_page", "web_search", "read_messages", "read_file",
-                     "read_window", "look_at_screen"}
+                     "read_window", "look_at_screen", "look_with_marks", "read_screen_text", "helper_read_page",
+                     "parallel_research"}
 GUARDED_RISKS = {Risk.EXTERNAL, Risk.DESTRUCTIVE}
 ALWAYS_GUARDED = {"run_shell", "run_python", "remember", "send_file", "send_message", "chat_for_me"}
 IN_PAGE = {"browser_click", "browser_fill", "browser_press"}
@@ -152,6 +153,9 @@ def needs_taint_check(tool_name: str, risk: str, autonomy: str = "") -> bool:
 NEVER_FOR_TASK = {"run_shell", "run_python", "remember"}
 # ...nor anything that cannot be undone or is hard-blocked anyway.
 NEVER_FOR_TASK_RISKS = {Risk.DESTRUCTIVE, Risk.SYSTEM}
+# Alias tools (click_mark, click_text) name an element the agent saw; the executor resolves them into the
+# ordinary call that acts on it, which then passes every check below as if the model had asked for it.
+_RESOLVING: ContextVar[bool] = ContextVar("delta_tool_resolving", default=False)
 # The step number of the call being executed, so its end event pairs with its start (task engine).
 _STEP: ContextVar[dict[str, Any] | None] = ContextVar("delta_tool_step", default=None)
 
@@ -235,6 +239,15 @@ class ToolExecutor:
                 return item
         return None
 
+    def taint(self, task_id: str, source: str) -> None:
+        """Mark a task as having read outside content (e.g. results merged back from read-only helpers)."""
+        if task_id and task_id not in self._tainted:
+            self._tainted[task_id] = source
+            self.audit.record("taint", task=task_id, source=source)
+
+    def tainted_by(self, task_id: str) -> str | None:
+        return self._tainted.get(task_id) if task_id else None
+
     def forget_task(self, task_id: str) -> None:
         self._refused.pop(task_id, None)
         self._tainted.pop(task_id, None)
@@ -313,6 +326,8 @@ class ToolExecutor:
             args: BaseModel = tool.Args.model_validate(raw_args)
         except ValidationError as e:
             return ToolResult(False, f"invalid arguments for {name}: {e.errors(include_url=False)}")
+        if callable(getattr(tool, "resolve", None)):
+            return await self._resolve_alias(tool, args, name, task_id)
 
         decision = self.policy.evaluate(tool, args)
         autonomy = str(self.policy.b.autonomy)
@@ -390,6 +405,38 @@ class ToolExecutor:
                                   {"user_denied": outcome.by != "timeout", "denied_action": summary})
 
         return await self._run(tool, args, name, task_id)
+
+    async def _resolve_alias(self, tool: Tool, args: BaseModel, name: str, task_id: str) -> ToolResult:
+        """click_mark / click_text: find the element, then run the ordinary call that acts on it through every
+        check (policy, approvals, Remote Guard, ExfilGuard, taint, repeat check). The alias itself can only be
+        refused here (denied tool, remote lock); it can never make the real call less checked."""
+        decision = self.policy.evaluate(tool, args)
+        if decision.verdict == Verdict.DENY:
+            return ToolResult(False, f"BLOCKED by policy: {decision.reason}. Do not retry this action; "
+                                     "find another way or tell the user.")
+        if refusal := self._remote_refusal(tool, args):
+            return ToolResult(False, f"BLOCKED: {refusal} Do not try another way; tell the user exactly this.",
+                              {"needs_pin": True})
+        if _RESOLVING.get():
+            return ToolResult(False, f"{name} cannot resolve to another alias tool")
+        token = _RESOLVING.set(True)
+        try:
+            try:
+                target = await tool.resolve(args)  # type: ignore[attr-defined]
+            except Exception as e:
+                log.exception("tool.resolve_failed", tool=name)
+                return ToolResult(False, f"{name}: could not find the element ({type(e).__name__}: {e})")
+            if isinstance(target, str):
+                return ToolResult(False, target)
+            real, real_args = target
+            real_tool = self.registry.get(real)
+            if real_tool is None or callable(getattr(real_tool, "resolve", None)):
+                return ToolResult(False, f"{name}: '{real}' is not available on this PC")
+            self.audit.record("tool.resolved", task=task_id, tool=name, to=real, args=real_args)
+            result = await self._execute(real, real_args, task_id)
+        finally:
+            _RESOLVING.reset(token)
+        return ToolResult(result.ok, result.output, {**result.evidence, "resolved_to": real, "via": name})
 
     def _remote_refusal(self, tool: Tool, args: BaseModel) -> str | None:
         """Remote Guard, for every tool: a request from a phone channel needs the PIN for sensitive reads

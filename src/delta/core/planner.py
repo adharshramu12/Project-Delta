@@ -95,14 +95,27 @@ What you know about the user:
 {memory}"""
 
 
+# Added to the planner prompt only when parallel read-only helpers are on (helpers.enabled, off by default),
+# so with the default settings the planner request is exactly as before.
+HELPERS_NOTE = """
+
+PARALLEL LOOKUPS (optional): when the request needs 2 or more INDEPENDENT facts from the web or from files
+(prices on two sites, facts about several people, two documents to summarise), you may add
+"research": ["<one self-contained question>", ...] with at most {n} questions. Read-only helpers look them up
+at the same time before the agent starts. Leave it out for anything else, and always for one simple lookup."""
+
+
 async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memory: str, name: str,
-                    skills: list[Skill] | None = None, environment: str = "") -> Plan:
+                    skills: list[Skill] | None = None, environment: str = "", helpers: int = 0) -> Plan:
     skills = skills or []
+    system = PLANNER_PROMPT.format(
+        name=name, credit=CREDIT, tools=", ".join(tool_names), memory=memory or "(nothing yet)",
+        environment=environment,
+        skills="\n".join(s.prompt_line() for s in skills) or "(none yet)")
+    if helpers > 0:
+        system += HELPERS_NOTE.format(n=helpers)
     resp = await router.complete(
-        [{"role": "system", "content": PLANNER_PROMPT.format(
-            name=name, credit=CREDIT, tools=", ".join(tool_names), memory=memory or "(nothing yet)",
-            environment=environment,
-            skills="\n".join(s.prompt_line() for s in skills) or "(none yet)")},
+        [{"role": "system", "content": system},
          {"role": "user", "content": text}],
         task="plan", json_mode=True)
     try:
@@ -132,4 +145,10 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
         plan.needs_tools = True
     if plan.needs_tools and not plan.success_criteria:
         plan.success_criteria = [f"The request is fulfilled: {text}"]
+    research = data.get("research")
+    if helpers > 0 and plan.needs_tools and not plan.direct and isinstance(research, list):
+        found = [" ".join(str(q).split())[:300] for q in research if isinstance(q, str) and str(q).strip()]
+        plan.research = list(dict.fromkeys(found))[:helpers]
+        if len(plan.research) < min(2, helpers):  # one lookup is no faster in a helper: the agent does it
+            plan.research = []
     return plan

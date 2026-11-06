@@ -49,6 +49,8 @@ A rung that cannot prove its result hands over to the next one **with what it al
 | `tools/*` | typed tools (pydantic args) that declare risk, paths, domains, apps |
 | `tools/registry.py` | `ToolExecutor`: strict args → policy → approval → run → audit. The only way a tool runs |
 | `tools/browser.py` | Delta's own browser profile (Playwright over CDP): numbered element refs, act-and-observe listings, settle waits driven by network and DOM events |
+| `perception/*` | set-of-marks pictures and legends, mark handles, image token tuning, Windows OCR, the perception cache; tools `look_with_marks`, `click_mark`, `read_screen_text`, `click_text` |
+| `helpers/*` | opt-in parallel read-only helpers: the read-only executor (allowlist in code), the supervisor, `parallel_research` |
 | `tools/snapshot.py` | after an action on the same page, only the changed elements (`+` new, `~` changed, `-` gone); full listing after a navigation, every 8 actions, or when the diff is not smaller |
 | `llm/usage.py` | per-task token meter: reported usage, an estimate (labelled) when an API gives none, "not reported" for CLI providers |
 | `tools/user_browser.py` | the user's own signed-in Chrome/Edge through UI Automation: read, click (real pointer for web menus), fill (Shift+Enter newlines, paste for long text) |
@@ -151,6 +153,76 @@ tool result (failed) ──► taxonomy.classify ──► refusal? (BLOCKED, RE
 - **Test-only hooks:** `ToolExecutor.faults` (`inject.py`) and the fake browser (`delta/evals/fakebrowser.py`)
   are set only by the eval runner and tests, never from settings.
 
+## Perception pipeline
+
+`delta/perception/` is how Delta sees when text is not enough. Text stays first: page listings, window reads and
+the browser's snapshot diffs. Pictures are the fallback.
+
+```
+look_with_marks(question, window?)
+  capture ── Delta's own browser has a page (BrowserHub kind "private") ──► sources.browser_capture
+     │            viewport screenshot + every numbered element (data-delta-ref) with its box: handle = ref
+     │
+     └──── otherwise (Windows) ──► sources.desktop_capture: PrintWindow + UI Automation clickable elements
+                                     handle = the UIA element itself
+              fewer than 2 elements? ──► ocr.WindowsOcr (Windows.Media.Ocr via Windows PowerShell): text lines
+                                     handle = none, a box (coordinate fallback only)
+  marks.mark_up: drop off-picture, tiny and duplicate boxes, on-screen first, cap (perception.max_marks);
+     downscale (perception.max_side), draw numbered boxes, legend "3 button \"Save\""
+  cache: same picture + legend + question in this task ──► reuse the answer, nothing sent
+  vision model (route "vision"): "MARK <n>" ──► marks.BOOK keeps the marks per task
+click_mark(n) ──► ToolExecutor._resolve_alias ──► browser_click {ref} | click_element {name, handle} | click_at {x, y,
+     expect} ──► the ordinary checks (policy, approvals, Remote Guard, ExfilGuard, taint, repeat check) ──► run
+```
+
+- **Alias tools.** `click_mark` and `click_text` define `resolve(args)`; the executor refuses them only for a
+  denied tool or Remote Guard, then runs the resolved call through `_execute` (one level, never another alias). The
+  result carries `resolved_to`, which the agent loop uses to observe the page or window afterwards. `click_mark`'s
+  risk is its label's risk, so self-heal and the engine judge it like the click itself.
+- **Hidden handles.** `ClickElementArgs.handle` and `ClickAtArgs.expect` are `SkipJsonSchema` fields: not in the
+  tool spec the model sees. `handle` is used only while the marked UIA element still has the marked name;
+  `expect` can only raise a coordinate click's risk.
+- **Tokens.** `images.image_tokens` estimates the provider tile rule (85 + 170 per 512 px tile after fitting the
+  short side to 768 px); marked pictures default to 1280 px and JPEG quality 60. `look_at_screen` and step
+  screenshots are counted the same way.
+- **Perception cache** (`cache.py`, per task, in memory): a 64 px greyscale fingerprint per view. An unchanged step
+  screenshot is not attached again (the newest one is already in the conversation). After a desktop action, the
+  AFTER `read_window` is one line when unchanged, or "+"/"-" lines, but only against a full read sent in the tool
+  result right before (which `compact_history` always keeps whole); the next read is full again.
+- **OCR** (`ocr.py`): probed once on first use (`TryCreateFromUserProfileLanguages`), never at start-up; the picture
+  is written to a temporary PNG, read, and deleted; the PowerShell process is tracked by the watchdog. `perception.ocr:
+  off`, a non-Windows PC or no OCR language make every OCR call a no-op that says so.
+- **Strategy ladder.** `selfheal/strategy.py` now has an OCR rung: web `dom -> uia -> ocr -> vision -> ask`, desktop
+  `uia -> ocr -> vision -> ask`. OCR is used only when `Healer.can_ocr()` (OCR works and `click_text` exists), the
+  click steps down to `click_text` (deterministic, no AI). The vision hint names `look_with_marks` / `click_mark`
+  when set-of-marks is available, else `look_at_screen` / `click_at` as before.
+- **Meter.** `llm/usage.py` counts `images_sent`, `image_tokens_est`, `marks_used`, `ocr_calls`,
+  `perception_cache_hits`, `helpers` and `helper_tokens`; `usage.summary` adds them as `perception` when non-zero.
+
+## Parallel read-only helpers
+
+`delta/helpers/` (opt-in: `helpers.enabled`, default off). With it on, `bootstrap.attach_perception` registers
+`parallel_research` and `helper_read_page`, and the planner prompt gets `HELPERS_NOTE`, which lets the plan carry
+`"research": [...]` (2 to `max_helpers` independent questions; 1 when `max_helpers` is 1). With it off nothing is
+registered and the planner prompt is byte-for-byte the old one, so simple tasks cost exactly what they did.
+
+```
+plan.research ──► executor.execute("parallel_research") ──► HelperSupervisor.run(parent, questions)
+                    asyncio.gather: one HelperResult per question, each under asyncio.wait_for(timeout_s)
+                    each: router.complete_api_only(task "helper", no CLI providers) <= max_steps calls,
+                          stops at token_budget, tools = ReadOnlyExecutor.specs()
+                    ReadOnlyExecutor: allowlist + READ risk + allowed folders (real path) + forbidden modules,
+                          then an inner ToolExecutor with _NeverAsk approvals sharing policy, audit,
+                          Remote Guard, ExfilGuard and watchdog
+                 ◄── merge(): "HELPER RESULTS" (outside content), one block per helper with Sources
+TaskEngine.helper(parent, child, data): child row "<parent>.h<n>", channel "helper", created final;
+  a "helper_read" event per source; a "helper" event in the parent ──► timeline["helpers"], dashboard, `delta tasks show`
+```
+
+The merged text goes into the agent's conversation as a user message, the step is recorded like any other, and
+`parallel_research` is an untrusted source, so the task is tainted from then on. The agent can also call
+`parallel_research` itself when it is registered.
+
 ## Durable task engine
 
 `delta/engine/` keeps every task as a state machine in `tasks.db` (SQLite, WAL, standard library only) next to
@@ -216,8 +288,9 @@ the running service when there is one.
 
 ## Evals
 
-`delta/evals/` runs the task specs in `evals/tasks/*.yaml` (40 tasks: files, documents, web pages on a local
-fixture site, apps, memory) through the real orchestrator, tools, policy, approvals and task engine, each in
+`delta/evals/` runs the task specs in `evals/tasks/*.yaml` (70 tasks: files, documents, web pages on a local
+fixture site, apps, memory, self-heal, perception on pictures drawn at run time by `evals/perception_fixtures.py`,
+and read-only helpers) through the real orchestrator, tools, policy, approvals and task engine, each in
 its own sandbox and data folder. Every task has deterministic checks (`evals/checkers.py`: file contents, JSON
 fields, the fixture site's recorded page state, memory, steps, leftover processes, redaction of `tasks.db`).
 The scripted model (`evals/scripted.py`) replays each task's `script` so the suite runs with no keys and no
@@ -255,6 +328,9 @@ pulsing dot while it works and a green dot when an answer is waiting.
 | expert know-how in every prompt | playbooks are added only to requests that need them |
 | typing long text key by key | pasted in one go (the user's clipboard is restored) |
 | big screenshots | one window only, 1024 px for steps, 1280 px for the final proof |
+| a vision model guessing pixel positions | set-of-marks: numbered boxes on known elements, the answer is a number, the click uses the element's handle; pictures capped at 1280 px and 40 marks |
+| the same screen sent twice | perception cache: unchanged step screenshots are not re-attached, the same question on an unchanged marked view reuses the answer, unchanged window reads after an action are one line |
+| apps with no accessibility tree needing a vision model | Windows OCR text lines with screen points: a cheap text-only model can act (`read_screen_text`, `click_text`) |
 | invisible cost | every answer shows AI calls, tokens (reported, estimate, or "not reported" for CLI AIs) and wall time; also in `GET /api/tasks/{id}` (`usage`, `wall_s`) and the run's `run.json` |
 | a runaway task | optional `agent.token_budget` (default 0 = off): past it, Delta pauses and asks "Keep going / Stop here" |
 | the whole page listing after every browser action | on the same page only the changes are sent (`browser.snapshot_diffs`, on by default; `browser.full_snapshot_every`, default 8) |

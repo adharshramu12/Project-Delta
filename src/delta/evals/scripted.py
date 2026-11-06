@@ -2,9 +2,10 @@
 in CI with no keys, no network and no cost. It tests the harness, the checkers and Delta's own agent loop,
 tools, policy and task engine, not a model's judgment (that is what real-model runs are for).
 
-Per model job (plan, chat, verify, vision), replies are used in order:
+Per model job (plan, chat, verify, vision, helper), replies are used in order:
   plan / verify:  a mapping (sent as JSON) or a string
-  chat:           {call: {tool, args}} | {calls: [{tool, args}, ...]} | {text: "DONE: ..."} | a string
+  chat / helper:  {call: {tool, args}} | {calls: [{tool, args}, ...]} | {text: "DONE: ..."} | a string
+  vision:         a string (e.g. "MARK 2 - the Save button")
   any job:        {error: rate_limit | too_large | bad_tool_call | unreachable, retry_after_s: 0} raises that
                   model error once (failure injection for the self-heal evals)
 When a job's replies run out: chat says "DONE: (script finished)", verify passes, plan fails the task.
@@ -51,7 +52,7 @@ class ScriptedProvider:
         if "error" in reply:  # an injected model failure (rate limit, too large, ...)
             raise LLMError(f"{self.name}: scripted {reply['error']}", kind=str(reply["error"]),
                            retry_after_s=float(reply.get("retry_after_s", 0) or 0) or None)
-        if task != "chat" or not ({"call", "calls", "text"} & reply.keys()):
+        if task not in ("chat", "helper") or not ({"call", "calls", "text"} & reply.keys()):
             return self._done(LLMResponse(content=json.dumps(reply)))
         if "text" in reply:
             return self._done(LLMResponse(content=str(reply["text"])))

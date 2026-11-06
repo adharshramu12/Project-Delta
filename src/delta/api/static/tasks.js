@@ -149,6 +149,16 @@
       for (const r of d.recoveries) heal.appendChild(el("div", r.ok ? "ok" : "", "+" + Math.max(0, r.ts - t0).toFixed(1) + "s  " + r.summary));
       card.appendChild(heal);
     }
+    if (d.helpers && d.helpers.length) {
+      const box = el("div", "heal");
+      box.appendChild(el("b", "", "Read-only helpers"));
+      for (const h of d.helpers) {
+        const tokens = h.tokens ? `  (${h.tokens} tokens, ${h.seconds || 0}s)` : "";
+        box.appendChild(el("div", h.ok ? "ok" : "", "+" + Math.max(0, h.ts - t0).toFixed(1) + "s  " + h.summary + tokens));
+        for (const src of (h.sources || []).slice(0, 4)) box.appendChild(el("div", "meta", "    " + src));
+      }
+      card.appendChild(box);
+    }
     if (d.undo && (d.undo.available || d.undo.restored || (d.undo.skipped || []).length)) {
       const row = el("div", "undo");
       if (d.undo.available) {
