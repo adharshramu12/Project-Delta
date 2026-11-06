@@ -4,6 +4,22 @@ All notable changes to Delta are listed here. The format follows [Keep a Changel
 and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The version lives in one place,
 `pyproject.toml`; `delta --version` reads it from there.
 
+## Unreleased
+
+### Added
+- **Connected apps (MCP)**: connect Notion, GitHub, Atlassian, Linear, Slack, Sentry, Stripe, Gmail, Google
+  Drive and Calendar, Asana, Vercel, Supabase, Hugging Face, Figma (desktop) and custom MCP servers from the
+  dashboard's Apps page, `delta apps` or Telegram `/connect` (PIN), then ask Delta to work in them. A curated,
+  versioned catalog (`config/mcp_catalog.yaml`) checked against each vendor's docs; OAuth 2.1 with PKCE, discovery
+  and dynamic client registration; tokens sealed with DPAPI (refused without it); Streamable HTTP with SSE
+  fallback and stdio servers with pinned versions; lazy tool loading (`find_app_tool` / `use_app_tool`);
+  per-tool risk and switches; time limits, read-only retries and a circuit breaker; 16 scripted evals. Works
+  without the optional `mcp` extra. See [docs/APPS.md](docs/APPS.md).
+
+### Changed
+- Telegram `/apps` now shows your connected apps; the list of open windows moved to `/windows` (a button under
+  `/apps` opens it too).
+
 ## 0.2.0 - Unreleased
 
 Not tagged yet. Everything merged after 0.1.0 (pull requests #9 to #23) plus the production hygiene batch.

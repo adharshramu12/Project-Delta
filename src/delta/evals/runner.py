@@ -209,11 +209,12 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     apps = {"evalmarker": AppEntry(command=Path(sys.executable).name, aliases=["eval marker"])}
     lcfg = {k: v for k, v in (task.learning or {}).items() if k in LearningConfig.model_fields}
     gcfg = {k: v for k, v in (task.grounding or {}).items() if k in GroundingConfig.model_fields}
+    autonomy = str((task.connector or {}).get("autonomy", "ask-risky"))
     settings = Settings(agent=AgentConfig(max_steps=12, max_attempts=2, approval_timeout_s=30),
                         selfheal=SelfHealConfig(max_backoff_s=0.2), learning=LearningConfig(**lcfg),
                         grounding=GroundingConfig(**gcfg),
                         memory=MemoryConfig(auto_extract=True, learn_skills=False), data_dir=data, apps=apps,
-                        boundaries=Boundaries(allowed_paths=[str(sandbox)]),
+                        boundaries=Boundaries(allowed_paths=[str(sandbox)], autonomy=autonomy),  # type: ignore[arg-type]
                         writer=WriterConfig(output_dir=str(sandbox), latex="off"))
     router = router_factory.make(task, values)
     events = EventBus()
@@ -228,8 +229,10 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     audit = AuditLog(data / "audit.jsonl")
     approvals = ApprovalBroker(timeout_s=30)
     decision = task.approve == "approve"
+    asked: list[Any] = []
 
     async def present(req: Any) -> None:
+        asked.append(req)
         asyncio.get_running_loop().call_soon(approvals.resolve, req.id, decision, "eval")
 
     approvals.add_presenter("eval", present)
@@ -259,6 +262,12 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         browser = browser_mod.BrowserManager(data)
         tools += browser_mod.browser_tools(browser)
     registry = ToolRegistry(tools)
+    connector = None
+    if task.connector is not None:  # a connected app: the fake notes app through Delta's real connector code
+        from delta.evals import connector_fixture
+
+        connector = await connector_fixture.start(fill(task.connector, values), data, registry, audit)
+        connector.asked = asked
     learning_store, skill_store = _learning_stores(task, data, values)
     executor = ToolExecutor(registry, PolicyEngine(settings.boundaries, protected=[data]), approvals, audit)
     from delta.memory.tools import wire_memory_tools
@@ -287,6 +296,9 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         orch.gate = gate
         orch.lessons = LessonBook(learning_store, gate) if settings.learning.lessons else None
     orch.perception = perception
+    if connector is not None:
+        orch.connectors = connector.tools
+        executor.guard = connector.guard
     if task.helpers is not None:  # parallel read-only helpers, on for this eval
         from delta.config import HelpersConfig
         from delta.helpers.supervisor import HelperSupervisor
@@ -301,7 +313,8 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     if settings.selfheal.enabled:
         orch.healer = Healer(settings.selfheal, executor, events, can_see=lambda: False, settle_s=0.05)
         orch.healer.engine = engine
-    req = TaskRequest(fill(task.request, values), channel="api")
+    channel = connector.channel if connector is not None else "api"
+    req = TaskRequest(fill(task.request, values), channel=channel, user="5" if channel != "api" else "")
     started = time.monotonic()
     try:
         for _ in range(task.runs - 1):  # earlier runs of a repeated task: same data folder, same script
@@ -321,13 +334,18 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     except Exception as e:
         out.status, out.error, steps = "error", f"{type(e).__name__}: {e}", []
     out.seconds = round(time.monotonic() - started, 2)
+    if connector is not None:
+        from delta.evals import connector_fixture
+
+        await connector_fixture.finish(connector)
     out.cost_usd = cost_of(out.provider or "scripted", out.tokens_in, out.tokens_out)
     meter = dict(getattr(router, "meter", {}) or {})
     ctx = CheckContext(sandbox=sandbox, status=out.status, answer=out.answer, steps=steps, meter=meter,
                        page_state=site.snapshot(), memories=[m.content for m in memory.list()],
                        tasks_db=data / "tasks.db", timeline=engine.timeline(req.id), undo=undo,
                        policy=executor.policy, task_id=req.id, request=req.text, memory_store=memory,
-                       learning=learning_store, skills=skill_store, gate=gate)
+                       learning=learning_store, skills=skill_store, gate=gate, connector=connector,
+                       registry=registry)
     out.checks = await asyncio.to_thread(run_checks, ctx, fill(task.check, values))
     out.passed = bool(out.checks) and all(c["passed"] for c in out.checks)
     if task.eval_gate and gate is not None:
@@ -342,6 +360,9 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     if browser is not None:
         with contextlib.suppress(Exception):
             await browser.close()
+    if connector is not None:
+        with contextlib.suppress(Exception):
+            await connector.close()
     memory.close()
     store.close()
     for extra in (learning_store, skill_store):

@@ -162,6 +162,19 @@ def ensure_desktop_shortcut(folder: Path) -> Path | None:
     return link if link.exists() else None
 
 
+class ConnectorsConfig(BaseModel):
+    """Connected apps (delta.connectors): apps that publish an MCP server, connected from the dashboard (Apps),
+    `delta apps` or Telegram /connect. Added in 0.3: older settings files load unchanged."""
+    enabled: bool = True
+    catalog: str = ""              # "" = config/mcp_catalog.yaml
+    call_timeout_s: float = Field(default=60.0, ge=5, le=600)
+    connect_timeout_s: float = Field(default=30.0, ge=5, le=300)
+    read_retries: int = Field(default=2, ge=0, le=5)      # only read tools, only transient failures
+    breaker_failures: int = Field(default=3, ge=1, le=20)  # failures in a row before an app is left alone
+    breaker_cooldown_s: float = Field(default=60.0, ge=5, le=3600)
+    sign_in_timeout_s: float = Field(default=300.0, ge=30, le=1800)
+
+
 class AddonsConfig(BaseModel):
     enabled: list[str] = Field(default_factory=list)  # nothing runs unless listed here
     config: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -394,6 +407,7 @@ class Settings(BaseModel):
     api: ApiConfig = Field(default_factory=ApiConfig)
     files: FilesConfig = Field(default_factory=FilesConfig)
     addons: AddonsConfig = Field(default_factory=AddonsConfig)
+    connectors: ConnectorsConfig = Field(default_factory=ConnectorsConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     captcha: CaptchaConfig = Field(default_factory=CaptchaConfig)
     writer: WriterConfig = Field(default_factory=WriterConfig)

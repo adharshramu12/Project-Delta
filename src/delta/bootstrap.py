@@ -103,6 +103,7 @@ class Container:
     running: asyncio.Task[Any] | None = None  # the task being worked on now (any channel can stop it)
     scheduler: Any = None  # delta.scheduler.service.Scheduler (its loop starts in `delta run`)
     browsers: Any = None  # delta.tools.browser_switch.BrowserHub: which browser each task uses
+    connectors: Any = None  # delta.connectors.tools.AppTools: connected apps (its .manager connects them)
 
     @property
     def engine(self) -> Any:
@@ -420,6 +421,11 @@ def build(settings: Settings) -> Container:
     async def on_learned(item: Learned) -> None:
         await events.publish("learning.added", item=item.to_dict())
 
+    from delta.connectors.setup import attach as attach_connectors
+
+    connectors = attach_connectors(settings, registry, audit)  # connected apps; nothing connects at start-up
+    if connectors is not None:
+        closers.append(("connectors", connectors.manager.close))
     executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
     # `remember` labels what a task that read outside content saves as untrusted (delta.memory.provenance)
     wire_memory_tools([found for n in registry.names() if (found := registry.get(n)) is not None], executor)
@@ -432,6 +438,7 @@ def build(settings: Settings) -> Container:
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
                                 governor, events, audit, skills, learning, proof)
     orchestrator.browsers = browsers  # pins each task to its browser (switches apply at the next task)
+    orchestrator.connectors = connectors
 
     async def on_health(a: Assessment) -> None:
         await events.publish("governor.health", health=a.health.name, reasons=a.reasons)
@@ -452,6 +459,6 @@ def build(settings: Settings) -> Container:
     container = Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
                           Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"),
                           live_channels=live_channels, guard=guard, emergency=emergency, scheduler=scheduler,
-                          browsers=browsers)
+                          browsers=browsers, connectors=connectors)
     scheduler.bind(container)
     return container

@@ -23,6 +23,8 @@
         promote_after_runs: 3          LearningConfig settings
         skills: [{name, when_to_use, procedure, tools, recipe: {steps, slots}}]   saved as proven skills
       grounding: {mode: strict}        optional: answer grounding settings (GroundingConfig; default report)
+      connector: {auth: oauth, ...}    optional: a connected app (the fake notes app) set up before the task;
+                                       see delta.evals.connector_fixture
       runs: 2                          optional: the same request this many times, one after another, in the
                                        same data folder (the script holds the replies for every run)
       eval_gate: true                  optional: when every check passes, each learning candidate the task
@@ -44,7 +46,8 @@ from typing import Any
 
 import yaml
 
-SUITES = ("files", "documents", "browser", "apps", "memory", "selfheal", "perception", "helpers", "learning")
+SUITES = ("files", "documents", "browser", "apps", "memory", "selfheal", "perception", "helpers", "learning",
+          "connectors")
 
 
 @dataclass
@@ -65,6 +68,7 @@ class EvalTask:
     helpers: dict[str, Any] | None = None
     learning: dict[str, Any] | None = None
     grounding: dict[str, Any] | None = None
+    connector: dict[str, Any] | None = None  # connected apps: the fake notes app (delta.evals.connector_fixture)
     runs: int = 1
     eval_gate: bool = False
     check_after_gate: list[dict[str, Any]] = field(default_factory=list)
@@ -96,7 +100,7 @@ def _task(raw: Any, suite: str, where: str) -> EvalTask:
     if fake is not None and not isinstance(fake, dict):
         raise SpecError(f"{where} {raw['id']}: fake_browser must be a mapping of switches")
     extra: dict[str, dict[str, Any] | None] = {}
-    for key in ("perception", "helpers", "learning", "grounding"):
+    for key in ("perception", "helpers", "learning", "grounding", "connector"):
         value = raw.get(key)
         if value is not None and not isinstance(value, dict):
             raise SpecError(f"{where} {raw['id']}: {key} must be a mapping of settings")

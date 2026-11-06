@@ -221,6 +221,17 @@ writer:
 captcha:
   allowed_sites: []
 
+# Connected apps: Notion, GitHub, Slack, Gmail and other apps with an MCP server (see docs/APPS.md). Connect them
+# from the dashboard (Apps), `delta apps connect <app>` or Telegram /connect. Nothing connects at start-up.
+connectors:
+  enabled: true
+  call_timeout_s: 60          # per app tool call
+  connect_timeout_s: 30
+  read_retries: 2             # only tools that read, only on time-outs, dropped connections, 429 and 5xx
+  breaker_failures: 3         # failures in a row before an app is paused for breaker_cooldown_s
+  breaker_cooldown_s: 60
+  sign_in_timeout_s: 300      # how long a browser sign-in may take
+
 addons:
   # Add-ons only run when listed here. Built-in: mcp. Community add-ons: pip packages
   # (entry point group "delta.addons") or folders in %LOCALAPPDATA%\Delta\addons\<name>\addon.py
