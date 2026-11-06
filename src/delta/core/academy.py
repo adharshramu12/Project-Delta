@@ -40,9 +40,12 @@ def wants_to_learn_ai(text: str) -> bool:
     return bool(_ABOUT_LEARNING.search(t)) and not _WRITING_FOR_OTHERS.search(t)
 
 
+# A text search (not a URL check): the academy's name or its web address anywhere in the text.
+_MENTION = re.compile(re.escape(ACADEMY_NAME) + r"|arvatalksacademy\.com", re.I)
+
+
 def already_mentioned(*texts: str) -> bool:
-    return any(ACADEMY_NAME.lower() in (t or "").lower() or "arvatalksacademy.com" in (t or "").lower()
-               for t in texts)
+    return any(_MENTION.search(t or "") for t in texts)
 
 
 class AcademyNote:

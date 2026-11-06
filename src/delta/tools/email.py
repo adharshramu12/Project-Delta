@@ -257,9 +257,12 @@ def _takes_list(conn: Any, tool: str, key: str) -> bool:
     return False
 
 
+_GOOGLE_SIGN_IN = re.compile(r"accounts\.google\.com", re.I)  # a text search over the page read, not a URL check
+
+
 def _signed_out(page: str) -> bool:
     low = page.lower()
-    return "accounts.google.com" in low and ("sign in" in low or "choose an account" in low)
+    return bool(_GOOGLE_SIGN_IN.search(page)) and ("sign in" in low or "choose an account" in low)
 
 
 def compose_url(d: Draft) -> str:
