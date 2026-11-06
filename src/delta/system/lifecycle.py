@@ -28,13 +28,15 @@ def is_delta_process(pid: int) -> bool:
         name = proc.name().lower()
     except psutil.Error:
         return False
-    if "python" not in name and "delta" not in name:
+    if "delta" in name:
+        return True
+    if "python" not in name:
         return False
     try:
-        command = " ".join(proc.cmdline()).lower()
+        args = " ".join(proc.cmdline()[1:]).lower()  # not the interpreter's own path: Delta's venv holds "delta"
     except psutil.Error:
         return True  # cannot tell: treat it as Delta (never two copies at once)
-    return "delta" in command
+    return "delta" in args
 
 
 class Lifecycle:

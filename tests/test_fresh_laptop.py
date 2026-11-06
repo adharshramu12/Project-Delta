@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import sqlite3
 import subprocess
 import sys
@@ -405,13 +404,14 @@ async def test_a_telegram_token_must_look_like_one_before_it_is_sent(monkeypatch
 def test_emoji_pattern_matches_exactly_what_it_did_before():
     from delta.addons.writer.rules import EMOJI
 
-    before = re.compile("[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\U00002B00-\U00002BFF"
-                        "\U0000FE0F\U0000200D\U000020E3\U0001F1E6-\U0001F1FF\U00002190-\U000021FF"
-                        "\U00002300-\U000023FF\U00003030\U0000303D\U00003297\U00003299\U000024C2"
-                        "\U000025A0-\U000025FF]")
+    # The old character class, as code point ranges (overlaps included, as it was written before).
+    before = [(0x1F000, 0x1FAFF), (0x2600, 0x27BF), (0x1F900, 0x1F9FF), (0x2B00, 0x2BFF), (0xFE0F, 0xFE0F),
+              (0x200D, 0x200D), (0x20E3, 0x20E3), (0x1F1E6, 0x1F1FF), (0x2190, 0x21FF), (0x2300, 0x23FF),
+              (0x3030, 0x3030), (0x303D, 0x303D), (0x3297, 0x3297), (0x3299, 0x3299), (0x24C2, 0x24C2),
+              (0x25A0, 0x25FF)]
     for cp in range(0x2000, 0x20000):
-        ch = chr(cp)
-        assert bool(EMOJI.match(ch)) == bool(before.match(ch)), hex(cp)
+        was = any(lo <= cp <= hi for lo, hi in before)
+        assert bool(EMOJI.match(chr(cp))) == was, hex(cp)
 
 
 def test_trailing_schedule_words_are_cut_in_linear_time():

@@ -190,13 +190,15 @@ async def test_true_answer_passes_without_a_footnote(tmp_path):
 async def test_unverified_claims_are_footnoted_in_report_mode_and_fail_in_strict(tmp_path):
     readme = tmp_path / "readme.txt"
     readme.write_text("Temperature: 31 C", encoding="utf-8")
+    # 61: never a day, hour or minute. The grounding corpus holds the current time, so "26" passed as backed by the
+    # clock whenever the test ran at hh:26 (or on the 26th).
     script = {"plan": [js({"needs_tools": True, "goal": "x", "tools": ["read_file"], "success_criteria": ["t"]})],
-              "chat": [call("read_file", path=str(readme)), text("DONE: It is 26 °C.")], "verify": [PASS]}
+              "chat": [call("read_file", path=str(readme)), text("DONE: It is 61 °C.")], "verify": [PASS]}
     orch, _ = make(tmp_path, script)
     r = await orch.run(TaskRequest(f"what temperature does {readme} say"))
     assert r.status == "done" and "Not confirmed" in r.answer and r.tokens["unverified_claims"] == 1
-    strict_script = {**script, "chat": [call("read_file", path=str(readme)), text("DONE: It is 26 °C."),
-                                        text("DONE: It is 26 °C.")]}
+    strict_script = {**script, "chat": [call("read_file", path=str(readme)), text("DONE: It is 61 °C."),
+                                        text("DONE: It is 61 °C.")]}
     (tmp_path / "s").mkdir(exist_ok=True)
     orch2, _ = make(tmp_path / "s", strict_script, mode="strict")
     r2 = await orch2.run(TaskRequest(f"what temperature does {readme} say"))
