@@ -175,7 +175,7 @@ click_mark(n) ──► ToolExecutor._resolve_alias ──► browser_click {ref
      expect} ──► the ordinary checks (policy, approvals, Remote Guard, ExfilGuard, taint, repeat check) ──► run
 ```
 
-- **Alias tools.** `click_mark` and `click_text` define `resolve(args)`; the executor refuses them only for a
+- **Alias tools.** `click_mark` and `click_text` set `is_alias = True` and define `resolve_target(args)`; the executor refuses them only for a
   denied tool or Remote Guard, then runs the resolved call through `_execute` (one level, never another alias). The
   result carries `resolved_to`, which the agent loop uses to observe the page or window afterwards. `click_mark`'s
   risk is its label's risk, so self-heal and the engine judge it like the click itself.

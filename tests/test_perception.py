@@ -376,8 +376,8 @@ async def test_ocr_tools_resolve_text_to_a_coordinate_click_that_keeps_the_risk(
     assert read.ok and '"Send now" at (138,205)' in read.output
     tool = ClickText(p)
     assert tool.risk_for(tool.Args(text="Send")) == Risk.EXTERNAL
-    assert await tool.resolve(tool.Args(text="send")) == ("click_at", {"x": 120, "y": 205, "expect": "Send"})
-    assert "no text 'Archive'" in str(await tool.resolve(tool.Args(text="Archive")))
+    assert await tool.resolve_target(tool.Args(text="send")) == ("click_at", {"x": 120, "y": 205, "expect": "Send"})
+    assert "no text 'Archive'" in str(await tool.resolve_target(tool.Args(text="Archive")))
     assert router.meter["ocr_calls"] == 3
 
 
@@ -492,3 +492,24 @@ async def test_orchestrator_does_not_resend_an_unchanged_screenshot(tmp_path: Pa
     assert not orch._same_picture("t", "Notepad", b64)
     assert orch._same_picture("t", "Notepad", b64)
     assert orch.router.meter.get("perception_cache_hits") == 1
+
+
+class _HasOwnResolve(Tool[_Args]):
+    """Like OpenApp: a tool with its own unrelated resolve() method is NOT an alias."""
+    name = "open_thing"
+    description = "test"
+    risk = Risk.READ
+    Args = _Args
+
+    def resolve(self, name: str) -> str:
+        return name.strip()
+
+    async def run(self, args: _Args) -> ToolResult:
+        return ToolResult(True, f"ran {self.resolve(args.name)}")
+
+
+async def test_only_tools_marked_as_alias_are_resolved(tmp_path: Path) -> None:
+    ex = ToolExecutor(ToolRegistry([_HasOwnResolve()]), PolicyEngine(Boundaries(allowed_paths=[str(tmp_path)])),
+                      ApprovalBroker(timeout_s=1), AuditLog(tmp_path / "audit.jsonl"))
+    r = await ex.execute("open_thing", {"name": " notepad "}, task_id="t")
+    assert r.ok and r.output == "ran notepad" and "resolved_to" not in r.evidence

@@ -326,7 +326,7 @@ class ToolExecutor:
             args: BaseModel = tool.Args.model_validate(raw_args)
         except ValidationError as e:
             return ToolResult(False, f"invalid arguments for {name}: {e.errors(include_url=False)}")
-        if callable(getattr(tool, "resolve", None)):
+        if getattr(tool, "is_alias", False) is True:
             return await self._resolve_alias(tool, args, name, task_id)
 
         decision = self.policy.evaluate(tool, args)
@@ -422,7 +422,7 @@ class ToolExecutor:
         token = _RESOLVING.set(True)
         try:
             try:
-                target = await tool.resolve(args)  # type: ignore[attr-defined]
+                target = await tool.resolve_target(args)  # type: ignore[attr-defined]
             except Exception as e:
                 log.exception("tool.resolve_failed", tool=name)
                 return ToolResult(False, f"{name}: could not find the element ({type(e).__name__}: {e})")
@@ -430,7 +430,7 @@ class ToolExecutor:
                 return ToolResult(False, target)
             real, real_args = target
             real_tool = self.registry.get(real)
-            if real_tool is None or callable(getattr(real_tool, "resolve", None)):
+            if real_tool is None or getattr(real_tool, "is_alias", False) is True:
                 return ToolResult(False, f"{name}: '{real}' is not available on this PC")
             self.audit.record("tool.resolved", task=task_id, tool=name, to=real, args=real_args)
             result = await self._execute(real, real_args, task_id)

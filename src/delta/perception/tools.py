@@ -207,6 +207,7 @@ class ClickMark(Tool[ClickMarkArgs]):
                    "handle; asks first for Send, Buy, Delete and the like, as any click does).")
     risk = Risk.ACT
     Args = ClickMarkArgs
+    is_alias = True  # the ToolExecutor resolves it (resolve_target) into the real click and checks that
 
     def __init__(self, p: Perception) -> None:
         self.p = p
@@ -226,7 +227,7 @@ class ClickMark(Tool[ClickMarkArgs]):
         mark = marks.marks.get(args.mark) if marks is not None else None
         return f"click mark {args.mark}" + (f" ('{mark.label[:60]}')" if mark is not None and mark.label else "")
 
-    async def resolve(self, args: ClickMarkArgs) -> tuple[str, dict[str, Any]] | str:
+    async def resolve_target(self, args: ClickMarkArgs) -> tuple[str, dict[str, Any]] | str:
         task_id = task_id_now()
         marks = BOOK.get(task_id)
         if marks is None:
@@ -303,6 +304,7 @@ class ClickText(Tool[ClickTextArgs]):
     description = "Click visible text found by OCR (apps with no readable controls). Asks first for Send, Buy, Delete."
     risk = Risk.ACT
     Args = ClickTextArgs
+    is_alias = True  # the ToolExecutor resolves it (resolve_target) into a click_at and checks that
 
     def __init__(self, p: Perception) -> None:
         self.p = p
@@ -316,7 +318,7 @@ class ClickText(Tool[ClickTextArgs]):
     def summary(self, args: ClickTextArgs) -> str:
         return f"click the text '{args.text}'" + (f" in {args.window}" if args.window else "")
 
-    async def resolve(self, args: ClickTextArgs) -> tuple[str, dict[str, Any]] | str:
+    async def resolve_target(self, args: ClickTextArgs) -> tuple[str, dict[str, Any]] | str:
         cap, lines = await _ocr_window(self.p, args.window)
         if not lines and not self.p.ocr.available():
             return "Windows OCR is not available on this PC; use click_element or look_at_screen"
