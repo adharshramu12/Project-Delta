@@ -137,9 +137,9 @@ async def test_real_own_browser_through_ui_automation(portal: PortalSite, tmp_pa
             url = await asyncio.wait_for(driver.top_url(), 20)
         except Exception as e:
             pytest.skip(f"the browser's page is not readable through UI Automation here ({type(e).__name__})")
-        if not url.startswith(portal.url):
-            pytest.skip(f"UI Automation did not show the portal page (it read {url[:60]!r}): a first-run screen or "
-                        "no interactive desktop on this machine")
+        if "://" not in url:
+            pytest.skip("the page's address is not readable through UI Automation on this machine")
+        # A first-run page (edge://welcome-new-device/) may be in front: sign_in opens the saved login page itself.
         svc, asked = make_service(tmp_path, portal)
         result = await asyncio.wait_for(svc.sign_in_own("Fixture ERP", driver), 120)
         assert result.ok, result.message

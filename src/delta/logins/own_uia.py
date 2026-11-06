@@ -65,10 +65,12 @@ class UIAOwnDriver:
         return None
 
     def _selected_tab(self, w: Any) -> str:
+        from delta.tools.user_browser_actions import _in_page
+
         with contextlib.suppress(Exception):
             for t in w.descendants(control_type="TabItem"):
                 with contextlib.suppress(Exception):
-                    if t.iface_selection_item.CurrentIsSelected:
+                    if t.iface_selection_item.CurrentIsSelected and not _in_page(t):  # the browser's tab strip
                         return ".".join(str(x) for x in t.element_info.runtime_id)
         return ""  # no tab strip seen: the window binding and the origin checks still hold
 
@@ -141,15 +143,22 @@ class UIAOwnDriver:
             cr.TreeFilter = u.iuia.ControlViewCondition
             top = doc.element_info.element.BuildUpdatedCache(cr)
             edit, document = dll.UIA_EditControlTypeId, dll.UIA_DocumentControlTypeId
+            value_id = dll.UIA_ValueValuePropertyId
+
+            def value(el: Any) -> str:
+                with contextlib.suppress(Exception):
+                    return str(el.GetCachedPropertyValue(value_id) or "")
+                return ""
+
             out: list[FieldRef] = []
             plain: list[FieldRef] = []  # text boxes without a telling name, in page order
-            stack: list[tuple[Any, str]] = [(top, str(top.CachedValueValue or ""))]
+            stack: list[tuple[Any, str]] = [(top, value(top))]
             seen = 0
             while stack and seen < MAX_NODES:
                 el, url = stack.pop()
                 seen += 1
                 if el.CachedControlType == document and el is not top:
-                    url = str(el.CachedValueValue or "")
+                    url = value(el)
                 if el.CachedControlType == edit and not el.CachedIsOffscreen and el.CachedIsEnabled:
                     name = str(el.CachedName or "")
                     kind = classify(name, bool(el.CachedIsPassword))
