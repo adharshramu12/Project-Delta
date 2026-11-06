@@ -153,6 +153,28 @@ anywhere also stops Slack.
 **Recommended for every user:** turn on Telegram's **Two-Step Verification**, and set a **Delta PIN**
 (Settings → Remote security). Delta reminds you when pairing.
 
+### Scheduled tasks
+
+A schedule runs later, with nobody watching, so it gets no extra powers:
+
+- **Same gate as a typed request.** Every scheduled run goes through the ToolExecutor: policy, approvals,
+  prompt-injection containment, the safety floor and Remote Guard all apply unchanged.
+- **Made from a phone, runs as that phone.** A schedule created from Telegram or Slack runs as that remote user:
+  sensitive tools (screen, camera, files, commands, messages) need the PIN, which is normally not unlocked at
+  run time, so they are refused; while remote control is locked the run is refused. "Run now" asked from a
+  phone runs as the phone even for a schedule made on the PC.
+- **PIN to create or turn on from a phone.** `schedule_task` and `resume_schedule` are in Remote Guard's PIN list,
+  checked before anything is shown or saved. Pausing, listing and deleting need no PIN (they only reduce what
+  will run).
+- **Confirmed before saving.** The parsed schedule and its next run are shown in plain words and saved only after
+  a yes, at every permission level. A learned "trust" cannot skip this.
+- **Approvals during an unattended run** go to every approval channel (Telegram buttons when paired, the
+  dashboard) and an unanswered one times out to "no".
+- **Never a higher permission level.** Each schedule stores the level it was made under; a run uses the lower of
+  that and today's level. Changing Delta to Autopilot later does not give old schedules Autopilot.
+- **Quiet hours** hold scheduled tasks until they end (reminders, which only send a message, still arrive).
+- `schedules.db` sits in Delta's protected data folder: no tool can read or change it.
+
 ### What is *not* protected (honestly)
 
 - **Telegram bot chats are not end-to-end encrypted.** Messages travel encrypted, but Telegram's servers can
@@ -167,6 +189,10 @@ anywhere also stops Slack.
 - **Clicks in a `do_actions` batch** are judged by what is on screen before the batch starts, so a click on a
   menu item the batch itself opens is judged by what was under that point before the menu appeared.
 - **Cloud AI providers** see the requests sent to them. Use a local model (LM Studio, Ollama) for private work.
+- **Scheduled task text is stored as plain text** in `schedules.db` (unlike memory, which is encrypted), so do
+  not put secrets in a schedule. It sits in Delta's data folder, readable by your Windows account.
+- **If you raise the permission level while a scheduled task is running**, that run follows your new level
+  from then on: a change you make yourself is not treated as the schedule raising it.
 
 ## Reporting a vulnerability
 

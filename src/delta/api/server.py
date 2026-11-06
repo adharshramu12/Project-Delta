@@ -88,7 +88,7 @@ def _result_json(r: TaskResult) -> dict[str, Any]:
     return {"task_id": r.task_id, "status": r.status, "answer": r.answer, "attempts": r.attempts,
             "provider": r.provider, "steps": [{"tool": s.tool, "ok": s.ok} for s in r.steps],
             "checks": v.checks if v else [], "seen_screen": bool(v and v.screenshot), "tokens": r.tokens,
-            "fallback": r.fallback,
+            "usage": r.usage, "wall_s": r.wall_s, "fallback": r.fallback,
             "options": r.options, "questions": r.questions, "asked_about": r.asked_about}
 
 
@@ -310,6 +310,7 @@ def create_app(c: Container, token: str) -> FastAPI:
         return {"ok": True}
 
     from delta.api.apps_routes import register as register_apps
+    from delta.api.schedule_routes import register as register_schedules
     from delta.api.settings_routes import register as register_settings
     from delta.api.setup_routes import register as register_setup
 
@@ -319,6 +320,8 @@ def create_app(c: Container, token: str) -> FastAPI:
     from delta.api.documents_routes import register as register_documents
 
     register_documents(app, c, auth)
+
+    register_schedules(app, c, auth)
 
     @app.get("/api/runs/unfinished", dependencies=[Depends(auth)])
     async def unfinished_run() -> dict[str, Any]:

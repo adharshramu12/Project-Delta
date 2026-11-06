@@ -58,6 +58,9 @@ is just "HH:MM" when no day is given, so the meeting keeps its own day).
 "write a LinkedIn/Medium/Substack post about X" -> write_post (show the text; Delta never publishes:
 prepare_post only copies it and opens the compose page for the user to press Post);
 "make a PDF/Word report, resume, letter, notes, assignment or invoice" -> make_document.
+"every day at 9 am check my attendance" / "remind me at 6 pm to call Ravi" / "every Monday 10 am ..." ->
+schedule_task with text = the user's own words (it confirms the parsed time with the user before saving);
+"what's scheduled" -> list_schedules; "pause/delete my attendance check" -> pause_schedule / delete_schedule.
 If the person or app is not clear, ask instead of guessing. Leave it null when the
 job needs several steps or looking at the screen.
 

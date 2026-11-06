@@ -5,6 +5,7 @@
   delta secrets set|delete|list [name]
   delta audit verify
   delta captcha allow|remove|list [host]
+  delta schedule add|list|pause|resume|remove|run [text | id]
 """
 
 from __future__ import annotations
@@ -174,6 +175,9 @@ def main() -> None:
     cp.add_argument("action", choices=["allow", "remove", "list"])
     cp.add_argument("host", nargs="?")
     sub.add_parser("update", help="update Delta to the newest version (keeps your data)")
+    from delta.scheduler.cli import add_parser as add_schedule_parser
+
+    add_schedule_parser(sub)
     args = parser.parse_args()
 
     if args.cmd == "doctor":
@@ -182,6 +186,10 @@ def main() -> None:
         sys.exit(_update())
     if args.cmd == "secrets":
         sys.exit(_secrets(args.action, args.name))
+    if args.cmd == "schedule":
+        from delta.scheduler.cli import run_cli
+
+        sys.exit(run_cli(load_settings(), args))
     if args.cmd == "captcha":
         from delta.tools.captcha import manage_allowlist
 

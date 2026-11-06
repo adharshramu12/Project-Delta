@@ -27,7 +27,7 @@ asks before anything risky, and **verifies every task before it says "done".**
 | ✅ **Verified, not hopeful** | Plan → act → **check the result against clear goals** → retry or tell you honestly what failed. |
 | 🤝 **A partner, not a chatbot** | Warm and honest in your own tone. It reads the mood, corrects you kindly when you're wrong, and says clearly what it can and can't do. |
 | 🪶 **Light on your laptop** | ~100 MB in the background, near-zero CPU at rest, **no GPU** unless you choose a local model. **Shutdown** stops everything. |
-| 🪙 **Careful with tokens** | Greetings cost 0 tokens. A chat reply and what Delta learns from it come from **one** AI call. Each step sends only the tools it needs. |
+| 🪙 **Careful with tokens** | Greetings cost 0 tokens. A chat reply and what Delta learns from it come from **one** AI call. Each step sends only the tools it needs, and a browser step on the same page sends only what changed. Every answer shows its tokens and time; you can set a per-task token limit. |
 
 ## What Delta can do
 
@@ -116,6 +116,41 @@ pick your AI, set permissions, and pair your Telegram in 3 steps.
 `delta update` gets the newest version. `scripts\uninstall.ps1` removes Delta (your chats and
 memory stay unless you add `-RemoveData`).
 
+## Scheduled tasks and reminders
+
+Tell Delta when, in plain words, from the app, Telegram or a terminal:
+
+- *"every day at 9 am check my attendance on the ERP"*
+- *"remind me at 6 pm to call Ravi"* (a reminder only sends the message: no AI, no tokens)
+- *"every Monday 10 am summarise my Downloads folder"*
+- *"every 30 minutes check my mail"*, *"tomorrow at 7:30 am open Zoom"*, *"in 20 minutes remind me to stretch"*,
+  or a cron line: *"cron 0 9 \* \* 1-5 check the ERP"*
+
+Delta shows what it understood and the next run time ("Every day at 9:00 AM: check my attendance on the ERP.
+Next run: Sat 7 Nov 2026, 9:00 AM") and saves it only after your OK. The result comes back to the chat you
+asked from (Telegram, Slack, or the app's **Scheduled tasks** chat with a Windows notification); a failure
+comes back with the reason.
+
+- **Manage them** in the app's right-hand panel (**Schedules**: next run, last result, pause, resume, run now,
+  delete, and a box to add one), by asking ("what's scheduled?", "pause the attendance check"), or from a
+  terminal: `delta schedule add "every day at 9 am ..."`, `delta schedule list`, `pause`, `resume`, `remove`,
+  `run`.
+- **Runs only while Delta is on** (the app or `delta run`). If the PC was off or asleep, a run that is at most
+  1 hour late runs once when it wakes; an older one is noted as missed and the schedule carries on.
+- **Same safety as a typed request**: every action asks for approval the same way, an approval nobody answers
+  counts as "no", quiet hours hold scheduled tasks until they end, and a schedule never gets a higher permission
+  level than when it was made. Making or turning on a schedule from your phone needs your PIN.
+- Settings (optional, in `config/delta.yaml` or your settings file):
+
+  ```yaml
+  scheduler:
+    enabled: true
+    grace_minutes: 60     # how late a missed run may still run
+    max_concurrent: 1     # scheduled AI tasks at once
+    history_limit: 50     # past runs kept per schedule
+    timezone: ""          # e.g. "Asia/Kolkata"; empty = this PC's time zone
+  ```
+
 ## Telegram commands
 
 | Command | What it does |
@@ -128,6 +163,7 @@ memory stay unless you add `-RemoveData`).
 | `/volume` `/brightness` `/theme` | Sound, screen brightness, Windows light/dark |
 | `/apps` | Open apps; tap to close one |
 | `/lock` `/unlock` | Lock remote control now / enter your PIN |
+| *"every day at 9 am check my attendance"* | A scheduled task; the result comes back here (making one needs your PIN) |
 | *"I'm not well, message Ravi now"* | 🆘 Emergency alert to your saved contacts (WhatsApp message or call) |
 | `/stop` `/status` `/help` | Stop a task, PC health and AIs, all commands |
 
