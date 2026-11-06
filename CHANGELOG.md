@@ -54,6 +54,16 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 - A Telegram message shown as a Windows notification could run PowerShell (`$(...)` in the text) before any PIN
   check. The notification text is now passed to Windows as data only.
 
+### Fixed
+- In a normal PowerShell, `delta update` (and every other `delta` command the README shows) said "delta is not
+  recognized": Delta lives in its own environment and Python is installed without touching the Path. The installer
+  now adds a `delta` command (`%LOCALAPPDATA%\Programs\Delta\bin\delta.cmd`) and puts that folder on your own
+  account's Path (never the PC-wide one; nothing is added twice; `-NoPath` and `-NoShortcuts` leave it alone), tells
+  open programs that the Path changed, and says "Open a new PowerShell window to use the delta command." The Start
+  menu gets **Update Delta** (in a Delta folder), which runs `delta update --stop`. An update keeps `bin` in place.
+  `scripts\uninstall.ps1` takes the folder off the Path and removes **Update Delta**. The README gives two fallbacks:
+  the install line again (updates in place, keeps your data) and Delta's Python by its full path.
+
 ### Fixed (fresh-laptop audit)
 - A damaged `memory.db`, `chats.db`, `learning.db`, `skills.db`, `schedules.db` or `tasks.db` (power cut, full disk)
   stopped Delta from starting. The damaged file is now kept as `<name>.damaged-<date>` and a new one is opened, with

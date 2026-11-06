@@ -1,4 +1,5 @@
-# Removes Delta: stops it, deletes the app folder and its Desktop/Start-menu icons.
+# Removes Delta: stops it, deletes the app folder, its Desktop/Start-menu icons (and "Update Delta") and takes the
+# delta command off your Path.
 # Your data (%LOCALAPPDATA%\Delta: chats, memory, settings) is kept unless you pass -RemoveData.
 # Saved keys live in Windows Credential Manager under "delta"; they are removed with -RemoveData too.
 param(
@@ -28,8 +29,23 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
 Start-Sleep -Seconds 1
 
 foreach ($lnk in @((Join-Path ([Environment]::GetFolderPath("Desktop")) "Delta.lnk"),
-                   (Join-Path ([Environment]::GetFolderPath("Programs")) "Delta.lnk"))) {
+                   (Join-Path ([Environment]::GetFolderPath("Programs")) "Delta.lnk"),
+                   (Join-Path ([Environment]::GetFolderPath("Programs")) "Delta\Update Delta.lnk"))) {
     if (Test-Path $lnk) { Remove-Item $lnk -Force; Write-Host "removed $lnk" }
+}
+$menu = Join-Path ([Environment]::GetFolderPath("Programs")) "Delta"
+if ((Test-Path $menu -PathType Container) -and -not (Get-ChildItem $menu -Force)) { Remove-Item $menu -Force }
+
+# The delta command: its folder (bin) comes off your account's Path. The script is read before the folder goes.
+$command = Join-Path $PSScriptRoot "delta_command.ps1"
+if (-not (Test-Path $command)) { $command = Join-Path $InstallDir "scripts\delta_command.ps1" }
+if (Test-Path $command) {
+    try {
+        $removed = & $command -Action Uninstall -InstallDir $InstallDir | Select-Object -Last 1
+        if ($removed -and $removed.PathRemoved) { Write-Host "removed the delta command from your Path" }
+    } catch {
+        Write-Host "Could not take the delta command off your Path: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 if (Test-Path $InstallDir) {
     try { Remove-Item $InstallDir -Recurse -Force -ErrorAction Stop; Write-Host "removed $InstallDir" }
