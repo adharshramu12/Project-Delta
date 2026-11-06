@@ -175,6 +175,23 @@ A schedule runs later, with nobody watching, so it gets no extra powers:
 - **Quiet hours** hold scheduled tasks until they end (reminders, which only send a message, still arrive).
 - `schedules.db` sits in Delta's protected data folder: no tool can read or change it.
 
+### Task log and crash resume
+
+- **The step log never holds secrets.** `tasks.db` keeps each step's arguments only after redaction: values under
+  secret-named keys (password, token, api_key, pin, cookie, card number, ...) and anything shaped like a key or
+  token (`sk-...`, `ghp_...`, `xoxb-...`, a Telegram bot token, a JWT, a bearer header, a private key block,
+  `access_token=` in an address) are masked, and long values are cut. Resume compares steps by a hash of their
+  arguments, so the arguments themselves are never stored. The request text and answers are stored with the
+  same masking. `tasks.db` is in Delta's protected data folder: no tool can read or change it.
+- **Resume never replays side effects.** Delta does not re-run recorded tool calls. A resumed task is told what
+  already happened, and any call identical to a step that already wrote, sent, deleted, ran code or a command is
+  asked to a human first, at every permission level, without "Allow for this task" and without learned trust.
+  If Delta stopped in the middle of such a step, you are asked whether it happened before anything runs.
+- **Nothing resumes on its own**, and a resume from a phone needs the PIN, is refused while remote control is
+  locked, and never runs above the permission level the task started with.
+- **The watchdog only ends what Delta started** for the call it stopped (matched by process id and start time):
+  never your own browser, apps you opened, or other programs.
+
 ### What is *not* protected (honestly)
 
 - **Telegram bot chats are not end-to-end encrypted.** Messages travel encrypted, but Telegram's servers can
@@ -191,6 +208,8 @@ A schedule runs later, with nobody watching, so it gets no extra powers:
 - **Cloud AI providers** see the requests sent to them. Use a local model (LM Studio, Ollama) for private work.
 - **Scheduled task text is stored as plain text** in `schedules.db` (unlike memory, which is encrypted), so do
   not put secrets in a schedule. It sits in Delta's data folder, readable by your Windows account.
+- **The step log is plain text** in `tasks.db` (redacted as above, not encrypted like memory). File names, page
+  addresses and short results of your tasks are in it for 30 days by default (`engine.retention_days`).
 - **If you raise the permission level while a scheduled task is running**, that run follows your new level
   from then on: a change you make yourself is not treated as the schedule raising it.
 

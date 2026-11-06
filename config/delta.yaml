@@ -128,6 +128,16 @@ browser:
   snapshot_diffs: true      # delta-profile: on the same page, send the AI only what changed
   full_snapshot_every: 8    # ...with a full page listing at least this often
 
+# Durable task engine: task states and each step's log in tasks.db (secrets masked), crash resume with
+# Resume / Discard (never automatic), and a watchdog that stops a hanging tool and every program it started.
+engine:
+  enabled: true
+  retention_days: 30          # finished tasks older than this are removed
+  max_mb: 50                  # tasks.db above this: the oldest finished tasks go first
+  max_events_per_task: 2000
+  default_tool_timeout_s: 600 # per tool call; 0 = no limit
+  tool_timeouts: {}           # per tool, e.g. {web_search: 60, make_document: 900}
+
 # Writer and Documents: write_post, prepare_post (Delta never presses Post), make_document.
 writer:
   enabled: true

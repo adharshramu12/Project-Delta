@@ -367,6 +367,8 @@ WEBSITE = re.compile(r"https?://|www\.|\b[\w-]+\.(com|org|net|in|io|ai|dev|app)\
 
 
 class Orchestrator:
+    engine: Any = None  # TaskEngine (delta.engine), set by bootstrap: task states in tasks.db. None = not recorded
+
     def __init__(self, settings: Settings, router: ModelRouter, executor: ToolExecutor,
                  memory: MemoryStore | None, governor: Governor | None, events: EventBus,
                  audit: AuditLog, skills: SkillStore | None = None,
@@ -418,6 +420,8 @@ class Orchestrator:
             # Stopped by the user: close the run record and tell the UI, then let the cancel finish.
             self.audit.record("task.end", task=req.id, status="cancelled", attempts=0)
             self._finish_proof(TaskResult(req.id, "cancelled", "Stopped by the user."))
+            if self.engine is not None:
+                self.engine.finish(req.id, TaskResult(req.id, "cancelled", "Stopped by the user."), req)
             with contextlib.suppress(Exception):
                 await self.events.publish("task.finished", task_id=req.id, status="cancelled", answer="Stopped.")
             raise
@@ -438,6 +442,8 @@ class Orchestrator:
         result.wall_s = round(time.monotonic() - started, 2)
         result.fallback = self.router.fallback_note()
         self._finish_proof(result)
+        if self.engine is not None:  # the task's final state in tasks.db (never raises)
+            self.engine.finish(req.id, result, req)
         self.audit.record("task.end", task=req.id, status=result.status, attempts=result.attempts)
         try:
             await self.events.publish("task.finished", task_id=req.id, status=result.status, answer=result.answer)
@@ -450,6 +456,8 @@ class Orchestrator:
         return result
 
     async def _run(self, req: TaskRequest) -> TaskResult:
+        if self.engine is not None:  # queued -> planning; tool steps move it to acting (delta.engine)
+            self.engine.begin(req, str(self.executor.policy.b.autonomy))
         if reply := small_talk(req.text, self.s.agent.owner_name):  # "hi", "thanks": 0 tokens, instant
             return TaskResult(req.id, "done", reply, fast=True)
         # Never guess what only the user can decide (e.g. a meeting's day/time): ask first, 0 tokens.
@@ -526,6 +534,8 @@ class Orchestrator:
             final = final.removeprefix(DONE).strip()
             await self._fresh_media_status(req.id, steps)
             shot, target = await self._final_screenshot(steps)  # saved as proof either way
+            if self.engine is not None:
+                self.engine.verifying(req.id)
             verification = await verify(self.router, req.with_context, plan, steps, final,
                                         None if read_page_last(steps) else shot, target)
             await self.events.publish("task.verify", task_id=req.id, attempt=attempt,
@@ -577,6 +587,8 @@ class Orchestrator:
                 verification = Verification(True, f"replayed skill '{skill.name}'", [], [], False)
             elif all(s.ok for s in steps) and steps:
                 shot, target = await self._final_screenshot(steps)
+                if self.engine is not None:
+                    self.engine.verifying(req.id)
                 verification = await verify(self.router, req.text, plan, steps, "", shot, target)
             else:
                 verification = Verification(False, "a replayed step failed")

@@ -16,6 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from delta.system import proctree
 from delta.tools.base import Risk, Tool, ToolResult
 
 # Windows PowerShell 5.1 can call the WinRT media API directly, so nothing extra is installed.
@@ -61,6 +62,7 @@ async def _powershell(script: str, timeout_s: float = 20) -> str:
         "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    proctree.track(getattr(proc, "pid", None))  # ended with its children if the watchdog stops this call
     out, _ = await asyncio.wait_for(proc.communicate(), timeout_s)
     return out.decode("utf-8", "replace").strip()
 

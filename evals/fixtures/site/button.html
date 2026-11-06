@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Task board</title></head>
+<body>
+  <h1>Task board</h1>
+  <p id="status">Task is open</p>
+  <button type="button" id="mark" onclick="markDone()">Mark done</button>
+  <script>
+    function markDone() {
+      fetch('/api/mark?clicked=yes').then(() => { document.getElementById('status').textContent = 'Task is done'; });
+    }
+  </script>
+</body></html>

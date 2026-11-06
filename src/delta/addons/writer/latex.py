@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 from delta.addons.writer.document import MATH, Block, Doc
+from delta.system import proctree
 
 ENGINES = ("tectonic", "xelatex", "pdflatex")
 COMPILE_TIMEOUT_S = 120
@@ -198,6 +199,7 @@ async def compile_latex(tex: str, out: Path, engine: tuple[str, str] | None = No
             proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(work), env=env, stdin=asyncio.subprocess.DEVNULL,
                                                         stdout=asyncio.subprocess.PIPE,
                                                         stderr=asyncio.subprocess.STDOUT, creationflags=flags)
+            proctree.track(getattr(proc, "pid", None))
             try:
                 output, _ = await asyncio.wait_for(proc.communicate(), timeout_s)
             except TimeoutError:

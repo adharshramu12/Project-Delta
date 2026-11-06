@@ -151,6 +151,43 @@ comes back with the reason.
     timezone: ""          # e.g. "Asia/Kolkata"; empty = this PC's time zone
   ```
 
+## Task history, crash resume and evals
+
+Every task Delta works on is recorded in `tasks.db` in Delta's data folder: its state (queued, planning,
+acting, waiting for you, verifying, done, failed, cancelled or interrupted) and each step it took (tool,
+arguments with secrets masked, a short result, the model, tokens, time and the screenshot, if any).
+
+- **See what happened.** The app's right-hand panel has **Tasks**: filter by state or search, then click a
+  task for its run timeline. From a terminal: `delta tasks`, `delta tasks show <id>`.
+- **Crash resume, always your choice.** If Delta, Windows or the power stops in the middle of a task, the
+  task is marked *interrupted* on the next start and shown with **Resume** and **Discard** (in the app, with
+  `delta tasks`, and as a Telegram message when you asked from Telegram). Delta never resumes on its own.
+  Resume continues from the last step: steps that already changed something (wrote, sent, deleted, ran a
+  command) are never run again without your yes, and if Delta was cut off in the middle of such a step it
+  asks you first whether it happened. From your phone, Resume needs your PIN (`/unlock`) and never gets a
+  higher permission level than the task started with.
+- **Watchdog.** A tool call that hangs is stopped after its time limit (10 minutes by default, less for
+  quick tools), and every program it started is ended with all its child processes. Only processes Delta
+  started for that call are touched, never your own browser or apps. Delta's own browser profile is
+  restarted once per task if it stops responding.
+- **Evals.** `delta eval run` plays the 40 tasks in `evals/tasks` (files, documents, web pages on a local
+  test site, apps, memory) and checks each result with a fixed rule (a file's contents, the page state, the
+  answer). By default it uses a scripted model: no keys, no internet, no cost, and that is what CI runs.
+  `delta eval run --model groq` (or any provider you set up) measures a real model and costs what that
+  provider charges. Reports (JSON and Markdown: success rate, tokens, time, cost estimate, each task) go to
+  `%LOCALAPPDATA%\Delta\evals`.
+- Settings (optional, in `config/delta.yaml` or your settings file):
+
+  ```yaml
+  engine:
+    enabled: true               # false = tasks run exactly as before, nothing is recorded
+    retention_days: 30          # finished tasks older than this are removed
+    max_mb: 50                  # tasks.db above this: oldest finished tasks go first
+    max_events_per_task: 2000
+    default_tool_timeout_s: 600 # watchdog limit per tool call (0 = none)
+    tool_timeouts: {}           # per tool, e.g. {web_search: 60}
+  ```
+
 ## Telegram commands
 
 | Command | What it does |
@@ -165,6 +202,7 @@ comes back with the reason.
 | `/lock` `/unlock` | Lock remote control now / enter your PIN |
 | *"every day at 9 am check my attendance"* | A scheduled task; the result comes back here (making one needs your PIN) |
 | *"I'm not well, message Ravi now"* | 🆘 Emergency alert to your saved contacts (WhatsApp message or call) |
+| `/tasks` | Recent tasks; Resume or Discard one that was interrupted (Resume needs your PIN) |
 | `/stop` `/status` `/help` | Stop a task, PC health and AIs, all commands |
 
 ## Safety by design

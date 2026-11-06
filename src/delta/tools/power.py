@@ -19,6 +19,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from delta.safety.policy import norm_path
+from delta.system import proctree
 from delta.tools.base import Risk, Tool, ToolResult
 
 TEXT_LIMIT = 2_000_000  # files bigger than this are skipped by search (logs, databases)
@@ -178,11 +179,16 @@ class RunPython(Tool[PythonArgs]):
         proc = await asyncio.create_subprocess_exec(
             sys.executable, "-I", str(script), cwd=cwd, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        proctree.track(getattr(proc, "pid", None))
         try:
             out, err = await asyncio.wait_for(proc.communicate(), args.timeout_s)
         except TimeoutError:
-            proc.kill()
-            return ToolResult(False, f"timed out after {args.timeout_s}s", {"exit_code": None})
+            killed = await asyncio.to_thread(proctree.kill_process, proc)  # the script and all it started
+            return ToolResult(False, f"timed out after {args.timeout_s}s; stopped it and {max(killed - 1, 0)} "
+                                     "process(es) it started", {"exit_code": None, "killed": killed})
+        except asyncio.CancelledError:
+            await asyncio.to_thread(proctree.kill_process, proc)
+            raise
         text = out.decode("utf-8", "replace")
         if err:
             text += "\n[stderr]\n" + err.decode("utf-8", "replace")

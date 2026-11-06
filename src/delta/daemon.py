@@ -400,6 +400,11 @@ async def run(open_ui: bool = False) -> int:
                                            log_config=None))
     serve = asyncio.create_task(server.serve(), name="api")
     channels = await _start_channels(c)
+    if "telegram" in c.live_channels and c.engine is not None:  # tasks a crash cut off: ask, never auto-resume
+        from delta.channels.telegram_tasks import announce_interrupted
+
+        with contextlib.suppress(Exception):
+            await announce_interrupted(c)
     if c.scheduler is not None:  # scheduled tasks: after the channels, so results can reach the phone
         await c.scheduler.start()
         c.lifecycle.on_shutdown("scheduler", c.scheduler.stop)

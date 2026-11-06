@@ -1,0 +1,169 @@
+# Files: create, read, list, move, edit, search and process files in the task's sandbox folder.
+# Format and placeholders: see src/delta/evals/spec.py. Checks: src/delta/evals/checkers.py.
+
+- id: files-create-note
+  request: Create a file called notes.txt in {sandbox} that says "hello from the eval".
+  script:
+    plan: [{needs_tools: true, goal: create notes.txt, tools: [write_file],
+            success_criteria: ["{sandbox}/notes.txt exists and contains 'hello from the eval'"]}]
+    chat:
+      - call: {tool: write_file, args: {path: "{sandbox}/notes.txt", content: "hello from the eval"}}
+      - call: {tool: path_info, args: {path: "{sandbox}/notes.txt"}}
+      - text: "DONE: Created notes.txt with your text."
+  check:
+    - status: done
+    - file_contains: {path: notes.txt, text: hello from the eval}
+    - steps_include: [write_file]
+
+- id: files-read-secret-word
+  request: Read {sandbox}/clue.txt and tell me the secret word.
+  setup:
+    files: {clue.txt: "Notes for the trip.\nThe secret word is pineapple.\nBring an umbrella."}
+  script:
+    plan: [{needs_tools: true, goal: read the clue, tools: [read_file], success_criteria: ["the secret word is reported"]}]
+    chat:
+      - call: {tool: read_file, args: {path: "{sandbox}/clue.txt"}}
+      - text: "DONE: The secret word is pineapple."
+  check:
+    - status: done
+    - answer_contains: pineapple
+    - steps_include: [read_file]
+    - steps_ok: true
+
+- id: files-largest-file
+  request: Which file in {sandbox} is the largest?
+  setup:
+    files: {small.txt: "a", medium.txt: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", big.log: "{marker} {marker} {marker} {marker} {marker} {marker} {marker} {marker} {marker} {marker} {marker} {marker}"}
+  script:
+    plan: [{needs_tools: true, goal: find the largest file, tools: [list_dir], success_criteria: ["the largest file is named"]}]
+    chat:
+      - call: {tool: list_dir, args: {path: "{sandbox}", sort: size, limit: 5}}
+      - text: "DONE: big.log is the largest file."
+  check:
+    - status: done
+    - answer_contains: big.log
+    - step_output_contains: {tool: list_dir, text: big.log}
+
+- id: files-move-report
+  request: Move {sandbox}/draft.txt to {sandbox}/final.txt.
+  setup:
+    files: {draft.txt: "quarterly numbers"}
+  script:
+    plan: [{needs_tools: true, goal: rename draft, tools: [move_path], success_criteria: ["final.txt exists", "draft.txt is gone"]}]
+    chat:
+      - call: {tool: move_path, args: {source: "{sandbox}/draft.txt", destination: "{sandbox}/final.txt"}}
+      - text: "DONE: Moved draft.txt to final.txt."
+  check:
+    - status: done
+    - file_absent: draft.txt
+    - file_contains: {path: final.txt, text: quarterly numbers}
+
+- id: files-make-folders
+  request: Make a folder {sandbox}/reports/2026 for this year's reports.
+  script:
+    plan: [{needs_tools: true, goal: make the folder, tools: [make_dir], success_criteria: ["the folder exists"]}]
+    chat:
+      - call: {tool: make_dir, args: {path: "{sandbox}/reports/2026"}}
+      - text: "DONE: The folder reports/2026 is ready."
+  check:
+    - status: done
+    - file_exists: reports/2026
+
+- id: files-edit-setting
+  needs: [windows]  # edit_file keeps the old version in the Windows Recycle Bin
+  request: In {sandbox}/app.ini change mode=old to mode=new.
+  setup:
+    files: {app.ini: "[main]\nmode=old\nlevel=3\n"}
+  script:
+    plan: [{needs_tools: true, goal: edit the setting, tools: [read_file, edit_file], success_criteria: ["app.ini has mode=new"]}]
+    chat:
+      - call: {tool: read_file, args: {path: "{sandbox}/app.ini"}}
+      - call: {tool: edit_file, args: {path: "{sandbox}/app.ini", old: "mode=old", new: "mode=new"}}
+      - text: "DONE: app.ini now says mode=new."
+  check:
+    - status: done
+    - file_contains: {path: app.ini, text: [mode=new, level=3]}
+
+- id: files-search-invoice
+  request: Which file in {sandbox} mentions invoice INV-4421?
+  setup:
+    files: {a/notes.txt: "lunch with Ravi", b/bills.txt: "Paid invoice INV-4421 on Monday", c/todo.txt: "call the bank"}
+  script:
+    plan: [{needs_tools: true, goal: search the files, tools: [search_files], success_criteria: ["the file is named"]}]
+    chat:
+      - call: {tool: search_files, args: {path: "{sandbox}", pattern: "INV-4421"}}
+      - text: "DONE: It is in b/bills.txt."
+  check:
+    - status: done
+    - step_output_contains: {tool: search_files, text: bills.txt}
+    - answer_contains: bills.txt
+
+- id: files-sum-csv
+  request: Add up the amounts in {sandbox}/expenses.csv and save the total in {sandbox}/total.txt.
+  setup:
+    files: {expenses.csv: "item,amount\ntea,10\nbus,20\nbook,30\n"}
+  script:
+    plan: [{needs_tools: true, goal: sum the csv, tools: [run_python], success_criteria: ["total.txt holds the total"]}]
+    chat:
+      - call: {tool: run_python, args: {cwd: "{sandbox}", code: "import csv\nrows = list(csv.DictReader(open('expenses.csv', encoding='utf-8')))\ntotal = sum(int(r['amount']) for r in rows)\nopen('total.txt', 'w', encoding='utf-8').write(str(total))\nprint(total)\n"}}
+      - text: "DONE: The total is 60, saved in total.txt."
+  check:
+    - status: done
+    - file_equals: {path: total.txt, text: "60"}
+
+- id: files-bulk-rename
+  request: Rename every .jpeg file in {sandbox}/photos to .jpg.
+  setup:
+    files: {photos/a.jpeg: "1", photos/b.jpeg: "2", photos/keep.png: "3"}
+  script:
+    plan: [{needs_tools: true, goal: rename photos, tools: [run_python], success_criteria: ["no .jpeg files are left"]}]
+    chat:
+      - call: {tool: run_python, args: {cwd: "{sandbox}/photos", code: "from pathlib import Path\nfor p in Path('.').glob('*.jpeg'):\n    p.rename(p.with_suffix('.jpg'))\nprint(sorted(x.name for x in Path('.').iterdir()))\n"}}
+      - text: "DONE: Renamed 2 files to .jpg."
+  check:
+    - status: done
+    - file_exists: photos/a.jpg
+    - file_exists: photos/b.jpg
+    - file_absent: photos/*.jpeg
+    - file_exists: photos/keep.png
+
+- id: files-json-settings
+  request: Save my settings as JSON in {sandbox}/settings.json with theme dark and font size 14.
+  script:
+    plan: [{needs_tools: true, goal: write settings, tools: [write_file], success_criteria: ["settings.json has theme dark"]}]
+    chat:
+      - call: {tool: write_file, args: {path: "{sandbox}/settings.json", content: "{\"theme\": \"dark\", \"font\": {\"size\": 14}}"}}
+      - text: "DONE: Saved settings.json."
+  check:
+    - status: done
+    - json_field: {path: settings.json, field: theme, equals: dark}
+    - json_field: {path: settings.json, field: font.size, equals: 14}
+
+- id: files-copy-contents
+  request: Copy the text of {sandbox}/source.txt into a new file {sandbox}/copy.txt.
+  setup:
+    files: {source.txt: "Line one\nLine two"}
+  script:
+    plan: [{needs_tools: true, goal: copy the text, tools: [read_file, write_file], success_criteria: ["copy.txt has the same text"]}]
+    chat:
+      - call: {tool: read_file, args: {path: "{sandbox}/source.txt"}}
+      - call: {tool: write_file, args: {path: "{sandbox}/copy.txt", content: "Line one\nLine two"}}
+      - text: "DONE: copy.txt has the same text."
+  check:
+    - status: done
+    - file_equals: {path: copy.txt, text: "Line one\nLine two"}
+
+- id: files-denied-write-keeps-file
+  description: The user says no to a change; the file must stay as it was and the task stops.
+  request: Overwrite {sandbox}/keep.txt with the word gone.
+  approve: deny
+  setup:
+    files: {keep.txt: "important"}
+  script:
+    plan: [{needs_tools: true, goal: overwrite the file, tools: [write_file], success_criteria: ["keep.txt says gone"]}]
+    chat:
+      - call: {tool: run_python, args: {code: "open(r'{sandbox}/keep.txt', 'w').write('gone')"}}
+      - text: "DONE: overwritten."
+  check:
+    - status: cancelled
+    - file_equals: {path: keep.txt, text: important}

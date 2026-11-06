@@ -14,6 +14,7 @@ import re
 
 from pydantic import BaseModel, Field
 
+from delta.system import proctree
 from delta.tools.base import Risk, Tool, ToolResult
 
 SYSTEM_PATTERNS = [
@@ -106,11 +107,17 @@ class RunShell(Tool[ShellArgs]):
             "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", args.command,
             cwd=args.cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
+        proctree.track(getattr(proc, "pid", None))
         try:
             out, err = await asyncio.wait_for(proc.communicate(), args.timeout_s)
         except TimeoutError:
-            proc.kill()
-            return ToolResult(False, f"timed out after {args.timeout_s}s", {"exit_code": None})
+            # The whole tree: a command's own children (Start-Process, a script) must not outlive it.
+            killed = await asyncio.to_thread(proctree.kill_process, proc)
+            return ToolResult(False, f"timed out after {args.timeout_s}s; stopped it and {max(killed - 1, 0)} "
+                                     "process(es) it started", {"exit_code": None, "killed": killed})
+        except asyncio.CancelledError:  # the user pressed Stop
+            await asyncio.to_thread(proctree.kill_process, proc)
+            raise
         text = out.decode(errors="replace")
         if err:
             text += "\n[stderr]\n" + err.decode(errors="replace")
