@@ -208,6 +208,66 @@ class SchedulerConfig(BaseModel):
     timezone: str = ""  # IANA name like "Asia/Kolkata"; empty = this PC's own time zone
 
 
+class EngineConfig(BaseModel):
+    """Durable task engine (delta.engine): task states, the step log, crash resume and the tool watchdog.
+    Added later: older settings files load unchanged and get these defaults."""
+    enabled: bool = True  # off = tasks run exactly as before, nothing is written to tasks.db
+    retention_days: float = Field(default=30, ge=0)  # finished tasks older than this are removed (0 = keep)
+    max_mb: float = Field(default=50, ge=0)  # tasks.db above this: oldest finished tasks go first (0 = no cap)
+    max_events_per_task: int = Field(default=2000, ge=10, le=100_000)
+    # Watchdog: seconds one tool call may take before it is stopped (with every process it started).
+    # 0 = no limit. A tool's own timeout_s argument (run_shell, run_python) is honoured plus a grace period.
+    default_tool_timeout_s: float = Field(default=600, ge=0)
+    tool_timeouts: dict[str, float] = Field(default_factory=dict)  # per tool name, e.g. {"web_search": 60}
+
+
+class SelfHealConfig(BaseModel):
+    """Self-heal (delta.selfheal): when a step fails, Delta classifies why and tries a fixed, safe recovery
+    (re-read the page, wait and retry once, close a harmless banner, restart its own browser, back off on a
+    busy AI) before asking the model or the user. Added later: older settings files load with these defaults.
+    Every retry still goes through the same policy and approvals as the first try."""
+    enabled: bool = True
+    max_per_step: int = Field(default=2, ge=0, le=5)    # recovery attempts for one failed step
+    max_per_task: int = Field(default=6, ge=0, le=50)   # recovery attempts in one task, all steps together
+    # Close known harmless banners (cookie notices, "not now" prompts) when they block a click. Never on
+    # payment, permission, sign-in or security dialogs, and never by accepting anything.
+    dismiss_benign_popups: bool = True
+    # Strategy ladder: after this many failures of one kind of UI action, step down a rung
+    # (page structure -> Windows UI Automation -> screen vision -> ask you).
+    strategy_after: int = Field(default=2, ge=1, le=10)
+    max_backoff_s: float = Field(default=30, ge=0, le=300)  # longest wait when the AI service is busy
+
+
+def _observe_only() -> list[Literal["observe", "act"]]:
+    return ["observe"]
+
+
+class RouterConfig(BaseModel):
+    """Opt-in model ladder and failover (delta.llm.ladder). Both are OFF by default: with the defaults the
+    router behaves exactly as before (same providers, same routes, same CLI providers)."""
+    # Cheaper models of YOUR OWN configured providers (names from llm.providers), cheapest first. Simple
+    # observation steps start on the first one; after `escalate_after` failed steps Delta moves up the
+    # ladder and finally to your normal route. Planning and verification always use your normal route.
+    ladder: list[str] = Field(default_factory=list)
+    escalate_after: int = Field(default=2, ge=1, le=10)
+    # Step types that may start on the cheapest model: "observe" (reading after a read-only step) and/or
+    # "act" (any other agent step).
+    cheap_steps: list[Literal["observe", "act"]] = Field(default_factory=_observe_only)
+    # Extra providers (names from llm.providers) tried ONLY when every provider on the normal route failed
+    # because of a rate limit, an outage or a used-up quota. Never a provider you did not list here.
+    fallbacks: list[str] = Field(default_factory=list)
+
+
+class UndoConfig(BaseModel):
+    """Undo for file changes (delta.selfheal.undo): before Delta changes, moves or recycles a file inside
+    your allowed folders it keeps a copy in <data folder>/undo/<task id>/, so `delta undo <task id>`, the
+    dashboard or Telegram (with your PIN) can put it back."""
+    enabled: bool = True
+    max_file_mb: float = Field(default=25, ge=0)    # bigger files are not copied (you are told); 0 = no copies
+    max_task_mb: float = Field(default=200, ge=0)   # copies kept for one task at most
+    retention_days: float = Field(default=7, ge=0)  # older undo copies are removed (0 = keep)
+
+
 Autonomy = Literal["ask-everything", "ask-risky", "trusted", "autopilot"]
 
 
@@ -242,6 +302,10 @@ class Settings(BaseModel):
     captcha: CaptchaConfig = Field(default_factory=CaptchaConfig)
     writer: WriterConfig = Field(default_factory=WriterConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    engine: EngineConfig = Field(default_factory=EngineConfig)
+    selfheal: SelfHealConfig = Field(default_factory=SelfHealConfig)
+    router: RouterConfig = Field(default_factory=RouterConfig)
+    undo: UndoConfig = Field(default_factory=UndoConfig)
     boundaries: Boundaries = Field(default_factory=Boundaries)
     apps: dict[str, AppEntry] = Field(default_factory=dict)
     config_dir: Path = REPO_ROOT / "config"

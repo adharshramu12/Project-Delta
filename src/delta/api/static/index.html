@@ -493,6 +493,7 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
     <div class="dhead"><h2>Activity</h2><button class="iconbtn" id="mute" title="Approval sound on" aria-label="Approval sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg></button></div>
     <div><h3>Approvals</h3><div id="approvals"><div class="empty">Nothing waiting.</div></div></div>
     <div><h3>Schedules</h3><div id="schedules"></div></div>
+    <div><h3>Tasks</h3><div id="tasks"></div></div>
     <div><h3>Delta learned</h3><div id="learned"></div></div>
     <div><h3>Learned skills <span id="skillcount" class="count"></span></h3><div id="skills"></div></div>
     <div><h3>Memory</h3><div id="memory"></div>
@@ -563,6 +564,9 @@ function renderApproval(a) {
 // A task Delta was doing when it (or the PC) stopped: offer to resume. Never resumed silently:
 // a half-done task may already have sent something.
 async function checkInterrupted() {
+  // The task engine knows every interrupted task (tasks.js shows them with Resume / Discard).
+  const t = await api("/api/tasks?state=interrupted&limit=5").catch(() => null);
+  if (t && t.enabled && t.tasks.length && window.showInterruptedTasks) { window.showInterruptedTasks(t.tasks); return; }
   const u = await api("/api/runs/unfinished").catch(() => null); const run = u && u.run; if (!run) return;
   const done = (run.steps || []).filter(s => s.ok).map(s => s.tool);
   const box = document.createElement("div"); box.className = "checklist";
@@ -835,6 +839,7 @@ function connect() {
       if (m.event === "task.plan" && d.plan.needs_tools) showChecklist(d.task_id, d.plan);
       if (m.event === "task.step") { tickStep(d.task_id, d.tool); if (!(d.args && d.args.auto)) add("step", "· " + d.tool + " " + JSON.stringify(d.args).slice(0, 140)); }
       if (m.event === "task.verify" && d.passed) tickAll(d.task_id);
+      if (m.event === "task.recovery") add("step " + (d.ok ? "ok" : ""), "· self-heal: " + d.line);
       if (m.event === "chat.replied") add("step ok", `💬 replied to ${d.person} on ${d.app}: “${d.text}”`);
       if (m.event === "chat.skipped") add("step", `💬 you skipped a reply to ${d.person}: “${d.text}”`);
       if (m.event === "chat.handoff") { add("step bad", `✋ stopped chatting with ${d.person} (${d.app}): ${d.reason}. Please reply yourself.`); if (window.Notification && Notification.permission === "granted") new Notification(`Delta: ${d.person} needs you`, {body: d.reason}); }
@@ -1363,5 +1368,6 @@ setInterval(() => { if (!document.hidden) refreshStatus(); }, 5000);
 
 </script>
 <script src="/schedules.js"></script>
+<script src="/tasks.js"></script>
 </body>
 </html>

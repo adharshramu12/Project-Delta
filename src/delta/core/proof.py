@@ -34,7 +34,8 @@ class ProofRecorder:
         self.dir = self.root / task_id
         self._prune()  # before this run exists, and it skips the current run anyway
         self.dir.mkdir(parents=True, exist_ok=True)
-        self._n = 0
+        # A resumed task keeps its folder: number new pictures after the ones already there.
+        self._n = len(list(self.dir.glob("*.jpg")))
         (self.dir / "request.txt").write_text(request, encoding="utf-8")
 
     def save_image(self, b64_jpeg: str, label: str) -> str | None:

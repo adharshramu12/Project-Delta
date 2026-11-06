@@ -1,0 +1,89 @@
+# Documents: make_document (Markdown and Word), plus documents written with ordinary file tools.
+# The writer saves into the task's sandbox (WriterConfig.output_dir) in evals.
+
+- id: doc-meeting-notes-md
+  request: Make Markdown meeting notes titled "Eval Sync" from these points - budget approved, launch on Friday.
+  script:
+    plan: [{needs_tools: true, goal: make notes, tools: [make_document], success_criteria: ["a Markdown file of the notes exists"]}]
+    chat:
+      - call: {tool: make_document, args: {kind: notes, title: Eval Sync, formats: [md], write_for_me: false,
+                                           content: "# Eval Sync\n\n- Budget approved\n- Launch on Friday\n"}}
+      - text: "DONE: Made Eval Sync notes."
+  check:
+    - status: done
+    - file_contains: {path: "*.md", text: [Budget approved, Launch on Friday]}
+
+- id: doc-report-docx
+  request: Make a Word report titled "Water Use 2026" saying use fell by 12 percent.
+  script:
+    plan: [{needs_tools: true, goal: make a report, tools: [make_document], success_criteria: ["a .docx report exists"]}]
+    chat:
+      - call: {tool: make_document, args: {kind: report, title: Water Use 2026, formats: [docx], write_for_me: false,
+                                           content: "# Water Use 2026\n\nWater use fell by 12 percent this year.\n"}}
+      - text: "DONE: Made the Word report."
+  check:
+    - status: done
+    - file_exists: "*.docx"
+    - steps_ok: true
+
+- id: doc-letter-md-and-docx
+  request: Write a short leave letter to my manager as Markdown and Word.
+  script:
+    plan: [{needs_tools: true, goal: make a letter, tools: [make_document], success_criteria: ["md and docx exist"]}]
+    chat:
+      - call: {tool: make_document, args: {kind: letter, title: Leave Request, formats: [md, docx], write_for_me: false,
+                                           content: "Dear Manager,\n\nI request leave on 20 November for a family function.\n\nRegards,\nAsha\n"}}
+      - text: "DONE: Made the letter in both formats."
+  check:
+    - status: done
+    - file_exists: "*.docx"
+    - file_contains: {path: "*.md", text: 20 November}
+
+- id: doc-invoice-table
+  request: Make a Markdown invoice for 3 notebooks at 120 rupees each.
+  script:
+    plan: [{needs_tools: true, goal: make an invoice, tools: [make_document], success_criteria: ["invoice has a Total"]}]
+    chat:
+      - call: {tool: make_document, args: {kind: invoice, title: Invoice 7, formats: [md], write_for_me: false,
+                                           content: "| Item | Qty | Rate | Amount |\n|---|---|---|---|\n| Notebook | 3 | 120 | 360 |\n| Total | | | 360 |\n"}}
+      - text: "DONE: Invoice made, total 360."
+  check:
+    - status: done
+    - file_contains: {path: "*.md", text: [Notebook, "360"]}
+
+- id: doc-weekly-report-file
+  request: Write a weekly report in {sandbox}/weekly.md with a heading and three bullet points.
+  script:
+    plan: [{needs_tools: true, goal: write the report, tools: [write_file], success_criteria: ["weekly.md has a heading and bullets"]}]
+    chat:
+      - call: {tool: write_file, args: {path: "{sandbox}/weekly.md", content: "# Weekly report\n\n- Shipped the engine\n- Fixed two bugs\n- Wrote the docs\n"}}
+      - text: "DONE: Wrote weekly.md."
+  check:
+    - status: done
+    - file_contains: {path: weekly.md, text: ["# Weekly report", "- Shipped the engine"]}
+
+- id: doc-csv-to-markdown-table
+  request: Turn {sandbox}/marks.csv into a Markdown table in {sandbox}/marks.md.
+  setup:
+    files: {marks.csv: "name,marks\nAsha,91\nRavi,84\n"}
+  script:
+    plan: [{needs_tools: true, goal: convert csv, tools: [run_python], success_criteria: ["marks.md has a table"]}]
+    chat:
+      - call: {tool: run_python, args: {cwd: "{sandbox}", code: "import csv\nrows = list(csv.reader(open('marks.csv', encoding='utf-8')))\nout = ['| ' + ' | '.join(rows[0]) + ' |', '|' + '---|' * len(rows[0])]\nout += ['| ' + ' | '.join(r) + ' |' for r in rows[1:]]\nopen('marks.md', 'w', encoding='utf-8').write('\\n'.join(out) + '\\n')\nprint(len(rows) - 1, 'rows')\n"}}
+      - text: "DONE: marks.md has the table."
+  check:
+    - status: done
+    - file_contains: {path: marks.md, text: ["| name | marks |", "| Asha | 91 |"]}
+
+- id: doc-append-to-journal
+  request: Add a line "Day 2 went well" to my journal {sandbox}/journal.txt.
+  setup:
+    files: {journal.txt: "Day 1 started\n"}
+  script:
+    plan: [{needs_tools: true, goal: append to journal, tools: [write_file], success_criteria: ["journal has both lines"]}]
+    chat:
+      - call: {tool: write_file, args: {path: "{sandbox}/journal.txt", content: "Day 2 went well\n", append: true}}
+      - text: "DONE: Added the line."
+  check:
+    - status: done
+    - file_contains: {path: journal.txt, text: [Day 1 started, Day 2 went well]}

@@ -196,6 +196,69 @@ A schedule runs later, with nobody watching, so it gets no extra powers:
 - **Quiet hours** hold scheduled tasks until they end (reminders, which only send a message, still arrive).
 - `schedules.db` sits in Delta's protected data folder: no tool can read or change it.
 
+### Task log and crash resume
+
+- **The step log never holds secrets.** `tasks.db` keeps each step's arguments only after redaction: values under
+  secret-named keys (password, token, api_key, pin, cookie, card number, ...) and anything shaped like a key or
+  token (`sk-...`, `ghp_...`, `xoxb-...`, a Telegram bot token, a JWT, a bearer header, a private key block,
+  `access_token=` in an address) are masked, and long values are cut. Resume compares steps by a hash of their
+  arguments, so the arguments themselves are never stored. The request text and answers are stored with the
+  same masking. `tasks.db` is in Delta's protected data folder: no tool can read or change it.
+- **Resume never replays side effects.** Delta does not re-run recorded tool calls. A resumed task is told what
+  already happened, and any call identical to a step that already wrote, sent, deleted, ran code or a command is
+  asked to a human first, at every permission level, without "Allow for this task" and without learned trust.
+  If Delta stopped in the middle of such a step, you are asked whether it happened before anything runs.
+- **Nothing resumes on its own**, and a resume from a phone needs the PIN, is refused while remote control is
+  locked, and never runs above the permission level the task started with.
+- **The watchdog only ends what Delta started** for the call it stopped (matched by process id and start time):
+  never your own browser, apps you opened, or other programs.
+
+### What self-heal may do on its own
+
+Self-heal (`delta/selfheal/`) recovers from ordinary breakdowns without an AI call. It is bounded on purpose.
+
+**It may, automatically:**
+
+- re-read the page or window, wait for it to settle, and try a failed **read-only or non-changing** step once
+  more (clicking an ordinary link or button, reading, opening a page);
+- retry a step that would change something **only** when the failure proves it never happened (the element was
+  gone or had moved, so the tool returned before acting);
+- close a harmless banner that blocks a click (cookie notice, newsletter or "get the app" prompt) with a
+  **Reject all / Not now / No thanks / Close** button, only when the policy allows that click without asking;
+- reopen the page after the watchdog restarted Delta's **own** browser profile;
+- step down to Windows UI Automation for the same click or fill, if that action reads or acts without
+  changing anything;
+- wait and ask a rate-limited AI service again (bounded wait, capped per task), and, only if you listed them in
+  `router.fallbacks`, use those providers when your normal ones are rate limited, down or out of quota.
+
+**It never:**
+
+- retries a step that sends, deletes, buys, submits, writes a file or runs a shell command or code, unless the
+  failure proves it did not happen (and shell, code, messaging and file tools are never retried at all);
+- works around a refusal: BLOCKED, REFUSED, DENIED, the user's "no", Remote Guard, or the user taking over the
+  mouse end recovery for that step;
+- skips policy or approvals: every retry and every recovery action goes through the same gate as the first try
+  (policy incl. Autopilot rules, approvals, Remote Guard, ExfilGuard, taint, the resume repeat check);
+- clicks "Accept", "Agree" or "Allow", or touches payment, password, permission, sign-in, security or
+  verification dialogs;
+- solves or bypasses a captcha: captchas go to the existing captcha rules (reCAPTCHA, hCaptcha and Cloudflare
+  Turnstile always go to you);
+- types a password: on a sign-in page it stops and asks you to sign in yourself;
+- keeps trying when Windows refuses access: it stops and reports;
+- switches to a provider you did not list, or changes your routes, main AI or CLI providers.
+
+Attempts are capped per step (`selfheal.max_per_step`, default 2) and per task (`selfheal.max_per_task`,
+default 6). Every recovery is one line in the run timeline and in the audit trail of the steps it ran.
+
+**Undo** keeps copies only of files inside your allowed folders, in Delta's protected data folder
+(`undo/<task id>/`), for `undo.retention_days` (default 7). Files over `undo.max_file_mb` are not copied and the
+timeline says so. Restoring checks the current allowed folders, never deletes a file for good (anything in the way
+is moved into the undo folder), and from a phone needs the PIN and is refused while remote control is locked.
+Permanent deletes are not covered and still ask you first, as before.
+
+**Test-only failure injection** (`ToolExecutor.faults`, the fake eval browser) cannot be switched on from
+settings or any channel; only the eval runner and unit tests set it.
+
 ### What is *not* protected (honestly)
 
 - **Telegram bot chats are not end-to-end encrypted.** Messages travel encrypted, but Telegram's servers can
@@ -212,6 +275,8 @@ A schedule runs later, with nobody watching, so it gets no extra powers:
 - **Cloud AI providers** see the requests sent to them. Use a local model (LM Studio, Ollama) for private work.
 - **Scheduled task text is stored as plain text** in `schedules.db` (unlike memory, which is encrypted), so do
   not put secrets in a schedule. It sits in Delta's data folder, readable by your Windows account.
+- **The step log is plain text** in `tasks.db` (redacted as above, not encrypted like memory). File names, page
+  addresses and short results of your tasks are in it for 30 days by default (`engine.retention_days`).
 - **If you raise the permission level while a scheduled task is running**, that run follows your new level
   from then on: a change you make yourself is not treated as the schedule raising it.
 

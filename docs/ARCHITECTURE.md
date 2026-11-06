@@ -93,11 +93,140 @@ loop attempts ≤ max_attempts:
 - **Proof on disk.** `%LOCALAPPDATA%\Delta\runs\<task>\` keeps screenshots, `progress.json` (after every step), and `run.json`. The newest 30 runs are kept; pruning never deletes the run in progress or any run touched in the last 30 minutes.
 
 ## Failure handling
+- Recoverable failures are first handled by self-heal (below): a typed failure, a fixed playbook, a capped retry.
 - A task always ends with a result. Any exception in a task (not only an AI error) becomes a *failed* task with a plain message (details in the log and the audit log as `task.error`); the run record is closed, the UI is told and the one-task lock is released. A Stop is cleaned up the same way and still ends as *cancelled*.
+
+## Self-heal
+
+`delta/selfheal/` turns a failed step into a typed failure and a fixed recovery, before any AI call:
+
+```
+tool result (failed) ──► taxonomy.classify ──► refusal? (BLOCKED, REFUSED, user "no", user took the mouse) ──► stop, as before
+                              │
+                              ▼
+                     playbook_for(type) ──► caps left? (selfheal.max_per_step / max_per_task)
+                              │
+              ┌───────────────┼──────────────────────────────┐
+              ▼               ▼                              ▼
+   deterministic actions   stop and ask / report        hint for the model
+   settle, resnapshot,     (sign-in wall, Windows       (captcha -> captcha rules,
+   relocate, dismiss_popup, permission denied)          locked file being written)
+   reopen
+              │
+              ▼
+   retry once, only if retry_safe(tool, risk, type)
+              │ still failing
+              ▼
+   strategy ladder (strategy.py): dom -> uia -> vision (only with a vision model) -> ask the user
+```
+
+- **Taxonomy** (`taxonomy.py`): element_not_found, stale_element, timeout, popup_or_dialog, sign_in_wall,
+  captcha, navigation_error, app_not_responding, app_crashed, permission_denied, file_locked, model_error,
+  rate_limit, budget, unknown. Ordered text patterns over Delta's own tool messages, Playwright, Windows and
+  provider errors, plus the watchdog's evidence. Every failed step's type is stored in its `step_end` event
+  (`data.failure`); model-call failures get a `failure` event.
+- **Playbooks** (`playbooks.py`) are a table: actions, whether to retry, the timeline line for success and for
+  "tried", the model hint, and whether the task stops. The Healer (`healer.py`) runs every action as an
+  ordinary `ToolExecutor.execute` call, so policy, approvals, Remote Guard, ExfilGuard, taint and the resume
+  repeat check apply exactly as to the model's calls. Recovery steps are recorded like any other step.
+- **Never twice:** `retry_safe` refuses every tool in `ALWAYS_SIDE_EFFECT` (shell, code, messaging, file
+  changes) and any step whose risk is above `act`, unless the failure is `stale_element` or
+  `element_not_found` (the tool found no target and returned before acting).
+- **Strategy ladder** (`strategy.py`): `FAMILIES` (web: dom, uia, vision, ask; desktop: uia, vision, ask),
+  `TOOL_RUNGS` and `STEP_DOWN` translations (`browser_click` -> `click_element`, `browser_fill` -> `set_field`,
+  never for a submit). A step-down runs only actions of risk read/act; the rung that worked is logged.
+- **Model side** (`Orchestrator._complete_with_recovery`): too-large requests are trimmed, broken tool calls
+  re-asked, and a request every provider rate limited waits (bounded by `selfheal.max_backoff_s`) and is asked
+  again once or twice; each is a timeline line.
+- **Opt-in model ladder** (`delta/llm/ladder.py`): with `router.ladder` set, observe steps (right after
+  read-only calls that worked) try the cheapest listed provider first via `ModelRouter.complete(prefer=...)`;
+  after `escalate_after` failed steps the task moves up and stays up. `router.fallbacks` are walked only after
+  every route provider failed with an outage-type error (`taxonomy.is_outage`). Both default to empty, which
+  leaves `ModelRouter` exactly as before. `ModelRouter.model_calls` counts calls per provider for the meter.
+- **Undo** (`undo.py`): `ToolExecutor._run` calls `UndoStore.before` right before `write_file`, `edit_file`,
+  `move_path` or `delete_path` runs (files inside the allowed folders only, size caps, a manifest per task in
+  `<data>/undo/<task>/`) and `after` drops the copy if the step failed. `restore` goes newest first, checks the
+  current policy, and moves anything in the way into `displaced/` instead of deleting it. `delta undo`,
+  `POST /api/tasks/{id}/undo` and Telegram `/undo` share `selfheal/actions.undo_task` (PIN for remote).
+- **Test-only hooks:** `ToolExecutor.faults` (`inject.py`) and the fake browser (`delta/evals/fakebrowser.py`)
+  are set only by the eval runner and tests, never from settings.
+
+## Durable task engine
+
+`delta/engine/` keeps every task as a state machine in `tasks.db` (SQLite, WAL, standard library only) next to
+an append-only log of what happened in it. The orchestrator and the tool executor write to it through
+`TaskEngine`; every write is fail-safe (a full disk is logged, never raised), so recording can never fail a task.
+`engine.enabled: false` detaches it and Delta runs exactly as before.
+
+**States.** `queued -> planning -> acting <-> verifying -> done`, plus `waiting_user` (Delta asked a question),
+`failed`, `cancelled` and `interrupted`. The allowed transitions are a table in `engine/states.py`, enforced by
+`TaskStore.transition` (an illegal one raises and is recorded as a note). `done`, `failed` and `cancelled` are
+final; `interrupted` can only go to `queued` (Resume), `cancelled` (Discard) or `failed`.
+
+| Who writes | When |
+|---|---|
+| `Orchestrator._run` | `begin`: the task row, its permission level (after any scheduled cap), `planning` |
+| `ToolExecutor._run` | `step_start` right before the tool really runs (first one moves the task to `acting`) |
+| `ToolExecutor.execute` | `step_end` with the result, or `step_blocked` for a call refused before it ran |
+| `Orchestrator._run` / `_replay` | `verifying` before the check |
+| `Orchestrator.run` | the final state from `TaskResult.status` (`needs_user` = `waiting_user`), also on Stop |
+
+**Event log.** `events` rows are append-only (an `UPDATE` trigger aborts). A step records the tool, its
+arguments redacted by `engine/redact.py` (secret-named keys and token-shaped values masked with
+`system.secrets.mask`, each value and the whole capped), a 300-character result summary, the model, the tokens
+of the model call that chose the step, the duration, any new proof screenshot, whether it is side-effecting, and
+a hash of its exact arguments (never the arguments themselves). Bounded by `max_events_per_task`; tasks older
+than `retention_days` and, above `max_mb`, the oldest finished tasks are pruned at start-up (never a running
+one). Schema changes are numbered migrations on `PRAGMA user_version`; a file from a newer Delta is read but
+never changed.
+
+**Crash resume.** At start-up (`Container.start`, after the single-instance lock) tasks still in `queued`,
+`planning`, `acting` or `verifying` become `interrupted`, a warning names how many, Telegram tells the owner of
+each one that came from Telegram (once), and the dashboard and `delta tasks` list them. Nothing resumes on its
+own. `engine/resume.py` applies the same rules to every channel:
+
+- only an `interrupted` task resumes, in place (same task id, same proof folder);
+- from a remote channel: refused while remote control is locked, without a PIN set, or unless the PIN was
+  entered (`/unlock`) within its window; the resumed run is a request from that channel, so Remote Guard covers
+  each tool as usual;
+- the run is submitted with `autonomy_cap` = the level the task started with (`Container._cap_autonomy` only
+  ever lowers it);
+- the last step is *unconfirmed* when it is side-effecting and has a start but no end: the user must say whether
+  it happened before anything runs;
+- the model gets the original request and the step list, with side effects marked `ALREADY DONE`, as context;
+- `TaskEngine.repeat_reason` makes `ToolExecutor` ask a human for any call whose tool and arguments are identical
+  to a side effect that already happened (or that the user said happened). That question never offers
+  "Allow for this task" and learned trust cannot answer it, at every permission level.
+
+Side-effecting means the tool's risk for those arguments is anything but `read`, or the tool is a shell, code,
+messaging, file-changing or memory tool, whatever its arguments look like.
+
+**Watchdog** (`engine/watchdog.py`, around every `tool.run`): a time limit per tool (`default_tool_timeout_s`,
+`tool_timeouts`, shorter built-in limits for quick tools, a tool's own `timeout_s` plus 30 s); on a timeout or a
+Stop, every process the call registered with `system/proctree.track` (shell, Python, PowerShell helpers, LaTeX)
+is ended with its whole tree, matched by pid and start time. `run_shell` and `run_python` also end their tree on
+their own timeout (audit M5). A Delta-profile browser that died or stopped answering is closed (only the copy
+Delta started) and opened again, once per task; the step is reported failed, never silently re-run. A blocking
+call in a worker thread cannot be interrupted by Python: after a timeout its result is ignored.
+
+**Run timeline.** `GET /api/tasks` (filters `state`, `channel`, `q`, `since_hours`), `GET
+/api/tasks/{id}/timeline`, `POST /api/tasks/{id}/resume` and `/discard`; the dashboard's Tasks panel is
+`api/static/tasks.js`. `delta tasks [list|show|resume|discard|prune]` is the terminal version; `resume` goes to
+the running service when there is one.
+
+## Evals
+
+`delta/evals/` runs the task specs in `evals/tasks/*.yaml` (40 tasks: files, documents, web pages on a local
+fixture site, apps, memory) through the real orchestrator, tools, policy, approvals and task engine, each in
+its own sandbox and data folder. Every task has deterministic checks (`evals/checkers.py`: file contents, JSON
+fields, the fixture site's recorded page state, memory, steps, leftover processes, redaction of `tasks.db`).
+The scripted model (`evals/scripted.py`) replays each task's `script` so the suite runs with no keys and no
+network; it tests the harness and Delta's plumbing, not a model's judgment. `--model <provider>` uses a real
+provider from the user's settings for manual runs. CI job `evals-scripted` runs the scripted suite on Windows.
 
 ## Run control
 - **Stop.** Every task runs as its own asyncio task; `POST /api/tasks/{id}/cancel` cancels it. Clean-up still runs: live CLI sessions closed, run record closed, audit entry written, its approval cards withdrawn.
-- **Interrupted runs.** A run with progress but no `run.json` (Delta or the PC stopped) is offered once on the next start: *Resume* (with the finished steps listed, so nothing is repeated blindly) or *Dismiss*. Never resumed silently, because a half-done task may already have sent something.
+- **Interrupted runs.** With the task engine on (the default), interrupted tasks come from `tasks.db` (see *Durable task engine*). Older runs without an engine record still use the run folder: a run with progress but no `run.json` is offered once on the next start: *Resume* or *Dismiss*. Never resumed silently, because a half-done task may already have sent something.
 - **Live checklist.** The plan's steps are shown as a checklist; each tool call ticks the step that names it; a passed verification ticks the rest. No tokens.
 
 ## Chats

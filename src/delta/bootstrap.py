@@ -103,6 +103,11 @@ class Container:
     scheduler: Any = None  # delta.scheduler.service.Scheduler (its loop starts in `delta run`)
     browsers: Any = None  # delta.tools.browser_switch.BrowserHub: which browser each task uses
 
+    @property
+    def engine(self) -> Any:
+        """delta.engine.recorder.TaskEngine: task states, the step log, resume. None when switched off."""
+        return self.orchestrator.engine
+
     def warn(self, message: str) -> None:
         if message not in self.warnings:
             self.warnings.append(message)
@@ -167,9 +172,18 @@ class Container:
                 self.scheduler.store.close()
 
         self.lifecycle.on_shutdown("state", close_state)
+        if self.engine is not None:  # tasks a crash or power cut cut off: shown with Resume / Discard
+            if interrupted := self.engine.recover():
+                self.warn(f"{len(interrupted)} task(s) were interrupted when Delta last stopped. Resume or discard "
+                          "them under Tasks in the dashboard, with `delta tasks`, or from Telegram.")
+            self.lifecycle.on_shutdown("engine", self._close_engine)
         for name, closer in self.closers:
             self.lifecycle.on_shutdown(name, closer)
         self.audit.record("delta.start")
+
+    async def _close_engine(self) -> None:
+        if self.engine is not None:
+            self.engine.store.close()
 
     def _check_models(self) -> None:
         """Tell new users up front when no AI model can be reached, instead of failing later."""
@@ -208,6 +222,58 @@ class Container:
     async def stop(self) -> None:
         self.audit.record("delta.stop")
         await self.lifecycle.shutdown()
+
+
+def attach_engine(settings: Settings, router: ModelRouter, executor: ToolExecutor, orchestrator: Orchestrator,
+                  proof: ProofRecorder | None, registry: ToolRegistry, audit: AuditLog) -> Any:
+    """The durable task engine (delta.engine): tasks.db, the step log and the tool watchdog. Off in
+    settings (engine.enabled: false), nothing is attached and tasks run exactly as before."""
+    if not settings.engine.enabled:
+        return None
+    from delta.engine.recorder import TaskEngine
+    from delta.engine.store import TaskStore
+    from delta.engine.watchdog import Watchdog
+
+    cfg = settings.engine
+    try:
+        store = TaskStore(settings.data_dir / "tasks.db", cfg.max_events_per_task)
+    except Exception as e:  # a damaged tasks.db must never stop Delta from starting
+        log.error("engine.unavailable", error=str(e))
+        return None
+    engine = TaskEngine(store, router, proof, registry, cfg.retention_days, cfg.max_mb)
+    executor.recorder = engine
+    executor.watchdog = Watchdog(cfg, audit)
+    orchestrator.engine = engine
+    return engine
+
+
+def attach_selfheal(settings: Settings, router: ModelRouter, executor: ToolExecutor, orchestrator: Orchestrator,
+                    events: EventBus) -> Any:
+    """Self-heal (recovery playbooks, strategy ladder), undo for file changes, and the opt-in model ladder and
+    failover. Each piece follows its own setting; the model ladder and fallbacks are empty (off) by default,
+    so routing is unchanged unless the user fills them in."""
+    from delta.llm.ladder import ModelLadder
+    from delta.selfheal.healer import Healer
+    from delta.selfheal.undo import UndoStore
+
+    router.fallbacks = [n for n in settings.router.fallbacks if n in router.providers]
+    ladder = ModelLadder(settings.router, router.providers)
+    orchestrator.ladder = ladder if ladder.enabled else None
+    healer = None
+    if settings.selfheal.enabled:
+        healer = Healer(settings.selfheal, executor, events, can_see=orchestrator._can_see)
+        healer.engine = orchestrator.engine
+        orchestrator.healer = healer
+    if settings.undo.enabled:
+        undo = UndoStore(settings.data_dir / "undo", settings.undo, lambda: list(executor.policy.allowed))
+        try:
+            undo.prune()
+        except Exception as e:  # an unreadable undo folder must never stop Delta from starting
+            log.warning("undo.prune_failed", error=str(e))
+        executor.undo = undo
+        if orchestrator.engine is not None:
+            orchestrator.engine.undo = undo
+    return healer
 
 
 def build(settings: Settings) -> Container:
@@ -312,6 +378,8 @@ def build(settings: Settings) -> Container:
         await events.publish("governor.health", health=a.health.name, reasons=a.reasons)
 
     governor.on_change(on_health)
+    attach_engine(settings, router, executor, orchestrator, proof, registry, audit)  # tasks.db, watchdog
+    attach_selfheal(settings, router, executor, orchestrator, events)  # recovery, undo, opt-in model ladder
     from delta.safety.remote_guard import RemoteGuard
     from delta.system.notify import notify
 

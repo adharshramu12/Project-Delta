@@ -36,3 +36,23 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --python 3.12
       - run: uv run pytest -m e2e -v -rs tests/e2e
+
+  # The eval suite (evals/tasks) with the scripted model: no keys, no network beyond 127.0.0.1, never a
+  # paid API. Checks the harness, its checkers and Delta's agent loop on a clean Windows PC. Not a
+  # required check; real-model runs are manual (`delta eval run --model <provider>`).
+  evals-scripted:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --python 3.12
+      - run: uv run delta eval run --scripted --out evals-out --min-success 1.0
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: evals-out/*.*
+          if-no-files-found: ignore

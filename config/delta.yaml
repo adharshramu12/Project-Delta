@@ -128,6 +128,42 @@ browser:
   snapshot_diffs: true      # delta-profile: on the same page, send the AI only what changed
   full_snapshot_every: 8    # ...with a full page listing at least this often
 
+# Durable task engine: task states and each step's log in tasks.db (secrets masked), crash resume with
+# Resume / Discard (never automatic), and a watchdog that stops a hanging tool and every program it started.
+engine:
+  enabled: true
+  retention_days: 30          # finished tasks older than this are removed
+  max_mb: 50                  # tasks.db above this: the oldest finished tasks go first
+  max_events_per_task: 2000
+  default_tool_timeout_s: 600 # per tool call; 0 = no limit
+  tool_timeouts: {}           # per tool, e.g. {web_search: 60, make_document: 900}
+
+# Self-heal: when a step fails Delta works out why (element moved, slow page, banner in the way, browser
+# died, AI busy...) and tries a fixed, safe fix first. Every retry passes the same policy and approvals.
+# Steps that send, delete, buy, submit or run commands are never retried automatically. See SECURITY.md.
+selfheal:
+  enabled: true
+  max_per_step: 2             # recovery attempts for one failed step
+  max_per_task: 6             # recovery attempts in one task
+  dismiss_benign_popups: true # close cookie banners / "not now" prompts that block a click (never accepts)
+  strategy_after: 2           # failures before stepping down: page -> UI Automation -> screen -> ask you
+  max_backoff_s: 30           # longest wait when the AI service is busy
+
+# Opt-in, OFF by default: nothing here changes your providers or routes unless you fill it in.
+router:
+  ladder: []                  # cheaper models of your own providers, cheapest first, e.g. [ollama]
+  escalate_after: 2           # failed steps before moving up the ladder
+  cheap_steps: [observe]      # observe and/or act: which steps may start on the cheapest model
+  fallbacks: []               # used only when every normal provider is rate limited, down or out of quota
+
+# Undo for file changes: a copy of each file Delta changes inside your allowed folders, kept for a while.
+# Restore with `delta undo <task id>`, the dashboard, or Telegram /undo (needs your PIN).
+undo:
+  enabled: true
+  max_file_mb: 25             # bigger files are not copied (the timeline says so)
+  max_task_mb: 200
+  retention_days: 7
+
 # Writer and Documents: write_post, prepare_post (Delta never presses Post), make_document.
 writer:
   enabled: true

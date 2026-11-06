@@ -1,0 +1,74 @@
+# Memory: saving and recalling facts about the user, plus the task engine's own record of a run.
+
+- id: mem-remember-colour
+  request: Remember that my favourite colour is teal.
+  script:
+    plan: [{needs_tools: true, goal: remember the colour, tools: [remember], success_criteria: ["the fact is saved"]}]
+    chat:
+      - call: {tool: remember, args: {fact: "favourite colour is teal"}}
+      - text: "DONE: I'll remember that your favourite colour is teal."
+  check:
+    - status: done
+    - memory_contains: teal
+
+- id: mem-recall-birthday
+  request: When is my sister's birthday?
+  setup:
+    memory: ["The user's sister Priya has her birthday on 14 August."]
+  script:
+    plan: [{needs_tools: true, goal: recall, tools: [recall], success_criteria: ["the date is reported"]}]
+    chat:
+      - call: {tool: recall, args: {query: sister birthday}}
+      - text: "DONE: Priya's birthday is on 14 August."
+  check:
+    - status: done
+    - step_output_contains: {tool: recall, text: 14 August}
+
+- id: mem-recall-missing
+  request: What is my passport number?
+  script:
+    plan: [{needs_tools: true, goal: recall, tools: [recall], success_criteria: ["answer says it is not known"]}]
+    chat:
+      - call: {tool: recall, args: {query: passport number}}
+      - text: "DONE: I don't have your passport number saved."
+  check:
+    - status: done
+    - step_output_contains: {tool: recall, text: nothing found}
+    - answer_not_contains: ["P1234"]
+
+- id: mem-planner-learns-fact
+  request: I am vegetarian, suggest a quick dinner.
+  script:
+    plan: [{needs_tools: false, answer: "Try a paneer and pea curry with rice: about 25 minutes.", remember: ["The user is vegetarian"]}]
+  check:
+    - status: done
+    - memory_contains: vegetarian
+    - max_steps: 0
+
+- id: mem-remember-and-note
+  request: Remember that my gym is on Ring Road and also note it in {sandbox}/places.txt.
+  script:
+    plan: [{needs_tools: true, goal: remember and note, tools: [remember, write_file], success_criteria: ["memory and file both have it"]}]
+    chat:
+      - calls:
+          - {tool: remember, args: {fact: "gym is on Ring Road"}}
+          - {tool: write_file, args: {path: "{sandbox}/places.txt", content: "Gym: Ring Road"}}
+      - text: "DONE: Remembered and noted."
+  check:
+    - status: done
+    - memory_contains: Ring Road
+    - file_contains: {path: places.txt, text: Ring Road}
+
+- id: engine-log-redacts-secrets
+  description: The step log keeps every step but never the secret written in it.
+  request: Save my test API key sk-proj-EVALSECRET0123456789abcdef in {sandbox}/key.txt.
+  script:
+    plan: [{needs_tools: true, goal: save the key, tools: [write_file], success_criteria: ["key.txt has the key"]}]
+    chat:
+      - call: {tool: write_file, args: {path: "{sandbox}/key.txt", content: "sk-proj-EVALSECRET0123456789abcdef"}}
+      - call: {tool: read_file, args: {path: "{sandbox}/key.txt"}}
+      - text: "DONE: Saved."
+  check:
+    - status: done
+    - file_contains: {path: key.txt, text: EVALSECRET0123456789}
+    - events_recorded: {min_steps: 2, absent: EVALSECRET0123456789}

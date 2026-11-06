@@ -1,0 +1,84 @@
+# Apps and programs: what is running, opening an app, running code, and the watchdog ending a program
+# together with everything it started (audit M5). Tasks marked needs: [windows] are skipped elsewhere.
+
+- id: apps-list-running
+  request: Which apps are running on my PC right now?
+  script:
+    plan: [{needs_tools: true, goal: list apps, tools: [list_running_apps], success_criteria: ["running apps are listed"]}]
+    chat:
+      - call: {tool: list_running_apps, args: {}}
+      - text: "DONE: Here are the apps that are running."
+  check:
+    - status: done
+    - step_output_contains: {tool: list_running_apps, text: " MB"}
+    - steps_ok: true
+
+- id: apps-open-marker-app
+  needs: [windows]
+  request: Open the eval marker app with {marker_app}.
+  timeout_s: 90
+  script:
+    plan: [{needs_tools: true, goal: open the app, tools: [open_app], success_criteria: ["the app ran"]}]
+    chat:
+      - call: {tool: open_app, args: {name: evalmarker, argument: "{marker_app}"}}
+      - text: "DONE: Opened the marker app."
+  check:
+    - status: done
+    - file_exists: {path: opened.txt, wait_s: 20}
+
+- id: apps-python-version
+  request: Which Python version does this PC have?
+  script:
+    plan: [{needs_tools: true, goal: check python, tools: [run_python], success_criteria: ["the version is reported"]}]
+    chat:
+      - call: {tool: run_python, args: {code: "import platform\nprint('python', platform.python_version())\n"}}
+      - text: "DONE: Python 3.12 is installed."
+  check:
+    - status: done
+    - step_output_contains: {tool: run_python, text: "python 3."}
+
+- id: apps-shell-echo
+  needs: [windows]
+  request: Run a PowerShell command that prints {marker}.
+  timeout_s: 90
+  script:
+    plan: [{needs_tools: true, goal: run a command, tools: [run_shell], success_criteria: ["the word is printed"]}]
+    chat:
+      - call: {tool: run_shell, args: {command: "Write-Output {marker}"}}
+      - text: "DONE: It printed the word."
+  check:
+    - status: done
+    - step_output_contains: {tool: run_shell, text: "{marker}"}
+
+- id: apps-python-timeout-kills-tree
+  description: A script that starts a helper and hangs is stopped at its time limit, helper included.
+  request: Run a long background job, but give it only 3 seconds.
+  timeout_s: 120
+  script:
+    plan: [{needs_tools: true, goal: run the job, tools: [run_python], success_criteria: ["the job ran"]}]
+    chat:
+      - call: {tool: run_python, args: {timeout_s: 3, code: "import subprocess, sys, time\nsubprocess.Popen([sys.executable, '-c', 'import time; time.sleep(90)', '{marker}'])\ntime.sleep(90)\n"}}
+      - text: "DONE: The job did not finish in 3 seconds, so I stopped it and everything it started."
+  check:
+    - step_failed_with: {tool: run_python, text: timed out}
+    - no_process: "{marker}"
+
+- id: apps-shell-timeout-kills-tree
+  needs: [windows]
+  description: A PowerShell command whose child outlives it is stopped with the child (audit M5).
+  request: Start a helper program from PowerShell, but give it only 5 seconds.
+  timeout_s: 120
+  script:
+    plan: [{needs_tools: true, goal: run the helper, tools: [run_shell], success_criteria: ["the helper ran"]}]
+    chat:
+      - call:
+          tool: run_shell
+          args:
+            timeout_s: 5
+            command: >-
+              Start-Process -NoNewWindow -FilePath '{python}'
+              -ArgumentList '-c',"__import__('time').sleep(90)",'{marker}'; Start-Sleep 90
+      - text: "DONE: The command did not finish in 5 seconds, so I stopped it and its helper."
+  check:
+    - step_failed_with: {tool: run_shell, text: timed out}
+    - no_process: "{marker}"

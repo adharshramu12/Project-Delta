@@ -140,6 +140,11 @@ def create_app(c: Container, token: str) -> FastAPI:
             history = chats.context_for(chat_id)  # before this message is added
             chats.add(chat_id, "user", body.text)
         req = TaskRequest(body.text, channel="api", chat_id=chat_id, history=history)
+        return launch(req, chat_id)
+
+    def launch(req: TaskRequest, chat_id: str, autonomy_cap: str | None = None) -> dict[str, str]:
+        """Run a request in the background like a typed message (a new one, or a resumed task)."""
+        chats = c.chats
         results[req.id] = {"task_id": req.id, "status": "running", "chat_id": chat_id}
 
         async def work() -> None:
@@ -147,7 +152,7 @@ def create_app(c: Container, token: str) -> FastAPI:
             dashboard: it is never left "running"."""
             cancelled = False
             try:
-                res = await c.submit(req)
+                res = await (c.submit(req) if autonomy_cap is None else c.submit(req, autonomy_cap=autonomy_cap))
             except asyncio.CancelledError:
                 # Stopped from the dashboard: nothing more runs for this task (clean-up already ran).
                 cancelled = True
@@ -322,6 +327,9 @@ def create_app(c: Container, token: str) -> FastAPI:
     register_documents(app, c, auth)
 
     register_schedules(app, c, auth)
+    from delta.api.tasks_routes import register as register_tasks
+
+    register_tasks(app, c, auth, launch)  # task history, run timeline, resume / discard (delta.engine)
 
     @app.get("/api/runs/unfinished", dependencies=[Depends(auth)])
     async def unfinished_run() -> dict[str, Any]:
