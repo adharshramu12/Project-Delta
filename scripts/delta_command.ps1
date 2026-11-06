@@ -47,10 +47,11 @@ function Test-PathListContains([string]$pathValue, [string]$dir) {
 
 function Add-PathListEntry([string]$pathValue, [string]$dir) {
     # The Path with $dir added at the end (after everything already there), or $null when it is already in it.
-    # The other entries are kept exactly as they are, %VARIABLES% included.
+    # The other entries are kept exactly as they are, %VARIABLES% included. A Path that ends in ";" keeps that
+    # ending after $dir, so removing $dir later gives back exactly the value there was before.
     if (Test-PathListContains $pathValue $dir) { return $null }
     if (-not "$pathValue".Trim()) { return $dir }
-    if ("$pathValue".EndsWith(";")) { return "$pathValue$dir" }
+    if ("$pathValue".EndsWith(";")) { return "$pathValue$dir;" }
     return "$pathValue;$dir"
 }
 

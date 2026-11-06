@@ -105,7 +105,9 @@ def test_install_command_new_process_and_uninstall(tmp_path, user_path):
         assert entries.count(str(bin_dir)) == 1 and entries[-1] == str(bin_dir)
         if before is not None:
             assert after[1] == before[1]  # REG_EXPAND_SZ stays REG_EXPAND_SZ
-            assert after[0] == (before[0] + ("" if before[0].endswith(";") or not before[0] else ";") + str(bin_dir))
+            old = before[0]
+            want = f"{old}{bin_dir};" if old.endswith(";") else (f"{old};{bin_dir}" if old else str(bin_dir))
+            assert after[0] == want
         data = shim.read_bytes()
         assert data.isascii() and data.count(b"\r\n") == 5 and b"\n" not in data.replace(b"\r\n", b"")
 

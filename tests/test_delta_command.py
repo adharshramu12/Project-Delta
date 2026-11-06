@@ -154,6 +154,7 @@ def test_path_list_functions(shell, tmp_path):
         "remove_all_spellings": ["remove", "C:\\a;;" + BIN + ";%DELTA_T_HOME%\\b;" + BIN + "\\", BIN],
         "remove_only": ["remove", BIN, BIN],
         "remove_absent": ["remove", "C:\\a", BIN],
+        "round_trip": ["remove", "C:\\y;" + BIN + ";", BIN],
     }
     body = (
         "$cases = $env:DELTA_T_CASES | ConvertFrom-Json\n"
@@ -171,11 +172,12 @@ def test_path_list_functions(shell, tmp_path):
                                                      "DELTA_T_HOME": "C:\\Users\\T"}))
     assert got["empty"] == BIN
     assert got["append"] == "%DELTA_T_HOME%\\x;C:\\y;" + BIN  # other entries untouched, %VAR% not expanded
-    assert got["trailing_semicolon"] == "C:\\y;" + BIN
+    assert got["trailing_semicolon"] == "C:\\y;" + BIN + ";"  # and removing it gives back "C:\\y;"
     assert got["dup_case_slash"] == got["dup_quoted"] == got["dup_variable"] == "<null>"  # never twice
     assert got["remove_all_spellings"] == "C:\\a;;%DELTA_T_HOME%\\b"
     assert got["remove_only"] == ""
     assert got["remove_absent"] == "<null>"
+    assert got["round_trip"] == "C:\\y;"
     shim = got["shim"]
     assert shim.isascii() and shim.count("\r\n") == 5 and "\n" not in shim.replace("\r\n", "")
     assert '"%~dp0..\\.venv\\Scripts\\python.exe" -m delta %*\r\n' in shim and shim.endswith("exit /b %ERRORLEVEL%\r\n")
@@ -245,6 +247,12 @@ def test_install_and_uninstall_keep_the_rest_of_the_path(shell, env_key, tmp_pat
     run("-Action", "Uninstall")
     assert _reg_path(env_key) == (original, winreg.REG_EXPAND_SZ)
     assert not (install / "bin").exists()
+
+    _set_reg_path(env_key, "C:\\Other;", winreg.REG_EXPAND_SZ)  # ends in ";": given back exactly
+    run("-Action", "Install")
+    assert _reg_path(env_key) == (f"C:\\Other;{bin_dir};", winreg.REG_EXPAND_SZ)
+    run("-Action", "Uninstall")
+    assert _reg_path(env_key) == ("C:\\Other;", winreg.REG_EXPAND_SZ)
 
     _set_reg_path(env_key, "C:\\Other", winreg.REG_SZ)  # a plain REG_SZ Path stays REG_SZ
     run("-Action", "Install")
