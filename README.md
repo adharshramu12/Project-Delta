@@ -409,7 +409,7 @@ pip install uv
 uv sync --extra all          # plain 'uv sync' = core agent + dashboard
 uv run delta doctor          # checks your setup
 uv run delta run --open      # start the service and open the app
-uv run pytest -q             # about 1,000 tests (CI on Windows, v0.2.0: full 1,070+ passed; see the CI job)
+uv run pytest -q             # about 1,090 tests (CI on Windows, v0.2.0: full suite 1,069 passed, 17 skipped)
 ```
 
 | File | What |
