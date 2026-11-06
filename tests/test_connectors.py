@@ -6,7 +6,6 @@ real accounts. Secrets are sealed with a test sealer here (on Windows CI the rea
 from __future__ import annotations
 
 import asyncio
-import base64
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,6 +30,7 @@ from delta.connectors.secrets import SecretBox, SecretsUnavailableError
 from delta.connectors.tools import AppTools, resolve_risk, tool_enabled
 from delta.core.state import CURRENT_REQUEST, TaskRequest
 from delta.evals.fakemcp import INJECTION, FakeApp, auto_consent
+from delta.evals.standin_vault import STANDIN
 from delta.safety.approvals import ApprovalBroker
 from delta.safety.audit import AuditLog
 from delta.safety.policy import PolicyEngine
@@ -44,8 +44,7 @@ FAST = MSettings(read_retries=2, backoff_s=0.01, breaker_failures=3, breaker_coo
 
 
 def box(folder: Path) -> SecretBox:
-    return SecretBox(folder / "secrets", seal=lambda t: "test:" + base64.b64encode(t.encode()).decode(),
-                     unseal=lambda s: base64.b64decode(s[5:]).decode())
+    return SecretBox(folder / "secrets", seal=STANDIN.seal, unseal=STANDIN.unseal)
 
 
 def fake_spec(app: FakeApp, auth: str = "oauth", **kw: Any) -> AppSpec:
@@ -142,7 +141,7 @@ async def test_oauth_connect_uses_dcr_pkce_and_seals_tokens(tmp_path):
         sealed = (tmp_path / "connectors" / "secrets" / "secrets" / "fake.bin")
         sealed = next((tmp_path).rglob("fake.bin"))
         token = next(iter(app.access))
-        assert token not in sealed.read_text() and sealed.read_text().startswith("test:")
+        assert token not in sealed.read_text() and sealed.read_text().startswith("standin:")
         assert token not in (tmp_path / "connectors" / "connections.json").read_text()
         out = await m.call("fake", "search_notes", {"query": "delta"}, Risk.READ)
         assert out.ok and "Project Delta" in out.text

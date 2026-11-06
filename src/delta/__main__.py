@@ -5,6 +5,8 @@
   delta secrets set|delete|list [name]
   delta audit verify
   delta captcha allow|remove|list [host]
+  delta logins add|list|remove|test|allow [name]
+  delta watch list|run|remove [watcher]
   delta schedule add|list|pause|resume|remove|run [text | id]
   delta tasks [list|show|resume|discard|prune] [id]
   delta undo [task id]
@@ -247,6 +249,11 @@ def main() -> None:
     from delta.connectors.cli import add_parser as add_apps_parser
 
     add_apps_parser(sub)
+    from delta.logins.cli import add_parser as add_logins_parser
+    from delta.watchers.cli import add_parser as add_watch_parser
+
+    add_logins_parser(sub)
+    add_watch_parser(sub)
     args = parser.parse_args()
     try:
         _dispatch(args, no_console)
@@ -290,6 +297,14 @@ def _dispatch(args: argparse.Namespace, no_console: bool) -> None:
         from delta.connectors.cli import run_cli as run_apps_cli
 
         sys.exit(run_apps_cli(load_settings(), args))
+    if args.cmd == "logins":
+        from delta.logins.cli import run_cli as run_logins_cli
+
+        sys.exit(run_logins_cli(load_settings(), args))
+    if args.cmd == "watch":
+        from delta.watchers.cli import run_cli as run_watch_cli
+
+        sys.exit(run_watch_cli(load_settings(), args))
     if args.cmd == "eval":
         from delta.evals.cli import run_cli as run_eval_cli
 

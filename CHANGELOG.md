@@ -7,6 +7,26 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Saved site logins**: save a login for a site such as a college ERP or LMS on the PC (Settings, Logins and
+  watchers, or `delta logins add`), then ask Delta to use it. One DPAPI-sealed file per login (saving is refused
+  without DPAPI); bound to one exact origin, so lookalike hosts, http downgrades, other ports and cross-origin
+  frames are refused before anything is typed. The password is masked in screenshots and never reaches the
+  model, a log or the audit log. Per-login permission (ask every time, the default, or always for this site);
+  PIN for sign-ins approved from a phone; one-time codes and reCAPTCHA-type checks handed to the user on the PC.
+  New tools `sign_in` and `list_logins`; Telegram `/logins` (read-only). See [docs/LOGINS.md](docs/LOGINS.md).
+- **Portal watchers**: "watch my ERP for exams and notifications". Schedules of kind `watch` (default every 6
+  hours, at most hourly; manual checks at most every 10 minutes) sign in, read each page with a recipe and no AI,
+  compare with a DPAPI-sealed snapshot and report only what is new, at once or in a daily digest. New exams and
+  deadlines are offered as reminders and made only when the user says so. Recipes are learned per site with
+  `inspect_portal` and `save_watch_recipe` and kept as skills. `delta watch list|run|remove`, Telegram
+  `/watchers`, and a Settings panel. See [docs/WATCHERS.md](docs/WATCHERS.md).
+- **Steadier browser actions** in Delta's private browser: retries with a check afterwards that the page really
+  changed, elements inside frames, new tabs and dialogs, scrolling lists, and new tools `browser_select`,
+  `browser_check`, `browser_upload` (asks first), `browser_hover`, `browser_wait`, `browser_tabs` and
+  `browser_dialog`.
+- **Portal evals**: five scripted evals against the fake college portal (`evals/tasks/portal.yaml`): sign in and
+  read the timetable, report only the new exam, refuse a lookalike site, ignore an injection in a portal page,
+  and hand a reCAPTCHA-type check to the user. Each also proves the saved password appears nowhere.
 - **Attachments**: send pictures (JPG, PNG, WebP, GIF), PDF, Word (.docx), PowerPoint (.pptx) and text files
   (.txt, .md, .csv) in the dashboard chat (paper clip, drag and drop, paste) or on Telegram (photo or file with a
   caption, albums as one request). Read on the PC first with a standard-library PDF reader and an OOXML reader
@@ -43,6 +63,9 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   menu gets **Update Delta** (in a Delta folder), which runs `delta update --stop`. An update keeps `bin` in place.
   `scripts\uninstall.ps1` takes the folder off the Path and removes **Update Delta**. The README gives two fallbacks:
   the install line again (updates in place, keeps your data) and Delta's Python by its full path.
+- A picture attached in the dashboard could take 20 seconds or more to show as read on a slow PC: Windows OCR
+  started PowerShell twice (a probe, then the read), and the next file waited behind it. The first OCR read is now
+  also the probe (one PowerShell start), and attached files are uploaded and read at the same time.
 
 ### Fixed (fresh-laptop audit)
 - A damaged `memory.db`, `chats.db`, `learning.db`, `skills.db`, `schedules.db` or `tasks.db` (power cut, full disk)
@@ -65,6 +88,9 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   their listed name only, a schedule-parsing regex is linear, and duplicate emoji ranges were removed.
 
 ### Changed
+- Captcha help (`solve_captcha`) and sign-in share one solver: the allowlist rule is unchanged, Windows OCR is
+  tried first and at most 3 attempts are made before a hand-off.
+- The dashboard's payload cap is 221 KB (was 215 KB) for the Logins and watchers panel.
 - Telegram `/apps` now shows your connected apps; the list of open windows moved to `/windows` (a button under
   `/apps` opens it too).
 

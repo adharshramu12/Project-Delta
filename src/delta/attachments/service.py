@@ -160,9 +160,10 @@ class AttachmentService:
         if self.ocr is None:
             return "", "none"
         try:
-            if not await self.ocr.probe():
-                return "", "none"
+            # read first: on its first call it is also the probe, so a cold PC starts PowerShell once, not twice
             lines = await self.ocr.read(img)
+            if not lines and not await self.ocr.probe():  # probed by now: no second PowerShell start
+                return "", "none"
         except Exception as e:  # OCR is a help, never a reason to fail
             log.info("attachments.ocr_failed", error=str(e)[:200])
             return "", "none"

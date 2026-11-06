@@ -99,7 +99,8 @@ Rules:
 - Songs/videos: to prove something is playing, call media_status (Windows' own Playing/Paused,
   title and position: exact, instant, free). A screenshot cannot show playback. If an ad
   plays first, click its Skip button when shown, then check media_status again.
-- Never ask for or handle passwords, card numbers or API keys.
+- Never ask for or handle passwords, card numbers or API keys. If a site needs the user signed in and they saved a
+  login (list_logins), call sign_in(site): Delta types it on the exact site; you never see it.
 - Messages in WhatsApp, Telegram or Slack: ONLY with send_message (it checks the right chat
   and the text before sending). Never click, type and press Enter in those apps yourself; if
   send_message fails, tell the user why instead.
@@ -337,7 +338,8 @@ def stuck_in_loop(steps: list[StepRecord], repeats: int = 3) -> bool:
 DESKTOP_ACTIONS = {"click_element", "click_at", "do_actions", "type_text", "press_keys", "set_field", "scroll",
                    "focus_window", "close_window", "open_app", "open_target"}
 BROWSER_ACTIONS = {"browser_open", "browser_search", "browser_click", "browser_fill", "browser_press",
-                   "browser_scroll", "browser_back"}
+                   "browser_scroll", "browser_back", "browser_select", "browser_check", "browser_upload",
+                   "browser_hover", "browser_wait", "browser_tabs", "sign_in"}
 TEXT_ACTIONS = {"type_text", "set_field", "press_keys"}
 PIXEL_ACTIONS = {"click_at", "scroll", "do_actions"}  # aimed by coordinates: only a screenshot shows what happened
 OBSERVE_CHARS = 1500

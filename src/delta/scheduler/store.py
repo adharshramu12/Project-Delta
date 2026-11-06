@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS runs(
 CREATE INDEX IF NOT EXISTS runs_by_schedule ON runs(schedule_id, id);
 """
 
-KINDS = ("task", "reminder")
+KINDS = ("task", "reminder", "watch")  # watch: a portal watcher (delta.watchers), prompt "watch:<id>" or "digest:<id>"
 
 
 @dataclass

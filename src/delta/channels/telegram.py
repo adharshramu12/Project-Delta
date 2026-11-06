@@ -126,6 +126,9 @@ class TelegramChannel(PCMenu):
         from delta.channels.telegram_apps import attach as attach_apps
 
         attach_apps(self)  # /apps, /connect, /disconnect: connected apps (delta.connectors)
+        from delta.channels.telegram_logins import attach as attach_logins
+
+        attach_logins(self)  # /logins and /watchers: read-only (delta.logins, delta.watchers)
 
     async def start(self) -> None:
         self.c.approvals.add_presenter(self.name, self._present)
@@ -146,6 +149,7 @@ class TelegramChannel(PCMenu):
                 ("lock", "Lock remote control now"), ("unlock", "Enter your PIN"),
                 ("volume", "PC volume"), ("brightness", "Screen brightness"), ("theme", "Windows light / dark mode"),
                 ("apps", "Connected apps (Notion, GitHub...)"), ("connect", "Connect an app"),
+                ("logins", "Saved site logins (list only)"), ("watchers", "Sites I watch for you"),
                 ("windows", "Open windows, tap to close"),
                 ("screen", "Screenshot of the PC"), ("camera", "Webcam photo"),
                 ("status", "PC health and AIs"), ("help", "What I can do")])

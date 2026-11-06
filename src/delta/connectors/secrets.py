@@ -48,10 +48,8 @@ class SecretBox:
         if self._seal is not None:
             sealed = self._seal(text)
         else:
-            if not vault.available():
-                raise SecretsUnavailableError(NOT_SEALED)
             try:
-                sealed = vault.seal(text)
+                sealed = vault.seal_strict(text)  # never returns the text: no plain-text path to the file at all
             except vault.VaultUnavailableError as e:
                 raise SecretsUnavailableError(NOT_SEALED) from e
             if not sealed.startswith(vault.PREFIX):  # only a DPAPI-sealed value ("dpapi:...") is ever written

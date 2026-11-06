@@ -24,7 +24,6 @@ with Windows DPAPI where it works (CI's Windows runners) and with a test sealer 
 
 from __future__ import annotations
 
-import base64
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -71,8 +70,9 @@ def _secrets(folder: Path) -> SecretBox:
 
     if vault.available():
         return SecretBox(folder / "connectors" / "secrets")  # the real DPAPI path
-    return SecretBox(folder / "connectors" / "secrets", seal=lambda t: "eval:" + base64.b64encode(t.encode()).decode(),
-                     unseal=lambda s: base64.b64decode(s[5:]).decode())
+    from delta.evals.standin_vault import STANDIN
+
+    return SecretBox(folder / "connectors" / "secrets", seal=STANDIN.seal, unseal=STANDIN.unseal)
 
 
 async def start(cfg: dict[str, Any], data: Path, registry: Any, audit: Any) -> ConnectorFixture:

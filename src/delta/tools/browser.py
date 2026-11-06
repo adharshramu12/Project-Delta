@@ -22,7 +22,7 @@ import time
 import weakref
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import psutil
 from pydantic import BaseModel, Field, model_validator
@@ -81,7 +81,7 @@ REFS_JS = """() => {
   const ROLE = {a: 'link', button: 'button', textarea: 'textbox', select: 'combobox', summary: 'button'};
   const INPUT = {submit: 'button', button: 'button', reset: 'button', image: 'button', checkbox: 'checkbox',
                  radio: 'radio', search: 'searchbox', range: 'slider', file: 'file'};
-  if (typeof window.__deltaRefNext !== 'number') window.__deltaRefNext = 1;
+  if (typeof window.__deltaRefNext !== 'number') window.__deltaRefNext = %(base)d;
   const out = [];
   const vh = window.innerHeight, vw = window.innerWidth;
   for (const el of document.querySelectorAll(SEL)) {
@@ -108,7 +108,12 @@ SNAPSHOT_ELEMENTS = 30
 SETTLE_IDLE_MS = 1500  # the most an action waits for the network and the DOM to go quiet
 QUIET_S = 0.2  # no request in flight for this long counts as quiet
 DOM_QUIET_MS = 150  # no DOM change for this long counts as rendered
-ELEMENTS_JS = REFS_JS % {"limit": REF_LIMIT}  # kept name: older callers evaluate ELEMENTS_JS
+ELEMENTS_JS = REFS_JS % {"limit": REF_LIMIT, "base": 1}  # kept name: older callers evaluate ELEMENTS_JS
+# Elements inside frames (iframes) are numbered too, each frame from its own block of numbers, so a ref is unique
+# across the page and stays valid while the frame lives. At most MAX_FRAMES frames and FRAME_LIMIT elements each.
+FRAME_BLOCK = 1000
+MAX_FRAMES = 6
+FRAME_LIMIT = 80
 
 
 @dataclass(frozen=True)
@@ -122,10 +127,12 @@ class ElementRef:
     type: str = ""
     attrs: str = ""  # name/aria-label/placeholder/autocomplete, for search-box and password checks
     in_view: bool = True
+    frame: str = ""  # '' = the page itself; else the host of the frame (iframe) it is in
 
     def line(self) -> str:
         kind = f" ({self.type})" if self.type and self.role == "textbox" and self.type != "text" else ""
-        return f'[{self.ref}] {self.role} "{self.name}"{kind}'
+        where = f" (in frame {self.frame})" if self.frame else ""
+        return f'[{self.ref}] {self.role} "{self.name}"{kind}{where}'
 
     def field_text(self) -> str:
         """What a fill's search-box check reads: the same signals _is_search_box looks at."""
@@ -146,7 +153,8 @@ def parse_refs(raw: Any) -> list[ElementRef]:
             continue
         out.append(ElementRef(ref=ref, role=str(item.get("role") or ""), name=str(item.get("name") or ""),
                               tag=str(item.get("tag") or ""), type=str(item.get("type") or ""),
-                              attrs=str(item.get("attrs") or ""), in_view=bool(item.get("inView", True))))
+                              attrs=str(item.get("attrs") or ""), in_view=bool(item.get("inView", True)),
+                              frame=str(item.get("frame") or "")))
     return out
 
 
@@ -253,6 +261,27 @@ class BrowserManager:
         self.diff_snapshots = True
         self.full_every = snapshot.FULL_EVERY
         self.snap = snapshot.SnapshotState()  # what the model was last shown of this page
+        # Tabs, frames and dialogs (delta.tools.browser_actions): the tab Delta works in, the number block each
+        # frame's elements get, what the last dialog said and what to do with the next one.
+        self.active: Any = None
+        self.frame_bases: weakref.WeakKeyDictionary[Any, int] = weakref.WeakKeyDictionary()
+        self.events: list[str] = []  # things that happened by themselves (a new tab, a dialog), told once
+        self.next_dialog = "dismiss"  # accept | dismiss: the next confirm/prompt dialog (alerts are just closed)
+        self.dialog_text = ""
+
+    def frame_base(self, frame: Any) -> int:
+        """The first ref number for a frame's elements: a new block of FRAME_BLOCK per frame, kept while it lives."""
+        if frame not in self.frame_bases:
+            self.frame_bases[frame] = FRAME_BLOCK * (len(self.frame_bases) + 1) + 1
+        return self.frame_bases[frame]
+
+    def note(self, text: str) -> None:
+        if text and text not in self.events:
+            self.events = [*self.events[-4:], text]
+
+    def take_notes(self) -> str:
+        out, self.events = self.events, []
+        return " ".join(out)
 
     def remember_refs(self, elements: list[ElementRef], url: str) -> None:
         """The latest listing replaces the old one: only refs the agent was just shown are valid."""
@@ -270,8 +299,15 @@ class BrowserManager:
                 await self._launch()
             self._last_used = time.monotonic()
             ctx = self._browser.contexts[0]
-            page = ctx.pages[-1] if ctx.pages else await ctx.new_page()
+            watch_context(ctx, self)
+            active = self.active
+            if active is not None and active in ctx.pages and not _closed(active):
+                page = active
+            else:
+                page = ctx.pages[-1] if ctx.pages else await ctx.new_page()
+                self.active = page
             track_requests(page)
+            watch_page(page, self)
             return page
 
     async def _launch(self) -> None:
@@ -373,6 +409,57 @@ def track_requests(page: Any) -> None:
     page.on("requestfailed", ended)
 
 
+def _closed(page: Any) -> bool:
+    with contextlib.suppress(Exception):
+        return bool(page.is_closed())
+    return False
+
+
+_WATCHED: weakref.WeakSet[Any] = weakref.WeakSet()
+
+
+def watch_context(ctx: Any, mgr: BrowserManager) -> None:
+    """New tabs and popups: the tab a click opened becomes the one Delta works in (as before), and the next action
+    result says so once. Installed once per browser context."""
+    if ctx in _WATCHED:
+        return
+    _WATCHED.add(ctx)
+
+    def opened(page: Any) -> None:
+        mgr.active = page
+        mgr.note("A new tab opened and Delta now works in it (browser_tabs lists and switches tabs).")
+
+    with contextlib.suppress(Exception):
+        ctx.on("page", opened)
+
+
+def watch_page(page: Any, mgr: BrowserManager) -> None:
+    """Dialogs (alert, confirm, prompt, leave-page): an alert is closed; a confirm or prompt is dismissed unless the
+    agent asked for the next one to be accepted (browser_dialog). What it said is told once with the next result.
+    Before, Playwright dismissed every dialog silently."""
+    if page in _WATCHED:
+        return
+    _WATCHED.add(page)
+
+    async def handle(dialog: Any) -> None:
+        kind = str(getattr(dialog, "type", "") or "")
+        text = str(getattr(dialog, "message", "") or "")[:200]
+        accept = kind == "alert" or mgr.next_dialog == "accept"
+        mgr.next_dialog = "dismiss"  # one dialog per browser_dialog(accept=true)
+        mgr.dialog_text = text
+        with contextlib.suppress(Exception):
+            await (dialog.accept() if accept else dialog.dismiss())
+        what = "closed" if kind == "alert" else ("accepted" if accept else "dismissed (Cancel)")
+        mgr.note(f"A {kind or 'page'} dialog said: \"{text}\". It was {what}."
+                 + ("" if accept else " To accept the next one, call browser_dialog(accept=true) and repeat."))
+
+    def on_dialog(dialog: Any) -> None:
+        asyncio.ensure_future(handle(dialog))  # noqa: RUF006 (lives as long as the dialog)
+
+    with contextlib.suppress(Exception):
+        page.on("dialog", on_dialog)
+
+
 async def _network_quiet(pending: set[Any], deadline: float) -> None:
     """Until no request has been in flight for QUIET_S, or the deadline passes."""
     quiet_since: float | None = None
@@ -440,11 +527,51 @@ async def settle(page: Any, idle_ms: int = SETTLE_IDLE_MS) -> None:
             "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))"), 1.0)
 
 
+def _frame_host(url: str) -> str:
+    from urllib.parse import urlparse
+
+    return (urlparse(url).hostname or "") if url.startswith("http") else ""
+
+
+def child_frames(page: Any) -> list[Any]:
+    """The page's frames other than the page itself (iframes), in document order. [] for fakes without frames."""
+    frames = getattr(page, "frames", None)
+    main = getattr(page, "main_frame", None)
+    if not isinstance(frames, list) or main is None:
+        return []
+    return [f for f in frames if f is not main]
+
+
 async def list_refs(page: Any, mgr: BrowserManager) -> list[ElementRef]:
-    """Number the page's interactive elements and make them the agent's current refs."""
+    """Number the page's interactive elements (and those inside its frames) and make them the agent's current
+    refs. Frame elements carry the frame's host; one from another site says so."""
     elements = parse_refs(await page.evaluate(ELEMENTS_JS))
+    main_host = _frame_host(str(getattr(page, "url", "")))
+    for frame in child_frames(page)[:MAX_FRAMES]:
+        with contextlib.suppress(Exception):
+            if frame.is_detached():
+                continue
+            js = REFS_JS % {"limit": FRAME_LIMIT, "base": mgr.frame_base(frame)}
+            host = _frame_host(str(frame.url)) or "this page"
+            label = host if host in (main_host, "this page") else f"{host}, another site"
+            elements += [ElementRef(e.ref, e.role, e.name, e.tag, e.type, e.attrs, e.in_view, label)
+                         for e in parse_refs(await frame.evaluate(js))]
     mgr.remember_refs(elements, page.url)
     return elements
+
+
+async def locate_ref(page: Any, ref: int) -> Any | None:
+    """The live element numbered `ref`: on the page itself first, then inside its frames."""
+    sel = f'[data-delta-ref="{ref}"]'
+    loc = page.locator(sel)
+    if await loc.count():
+        return loc.first
+    for frame in child_frames(page)[:MAX_FRAMES]:
+        with contextlib.suppress(Exception):
+            floc = frame.locator(sel)
+            if await floc.count():
+                return floc.first
+    return None
 
 
 def _ordered(elements: list[ElementRef]) -> list[ElementRef]:
@@ -492,11 +619,79 @@ def page_listing(mgr: BrowserManager, title: str, url: str, elements: list[Eleme
                            enabled=mgr.diff_snapshots, every=mgr.full_every)
 
 
-async def _observed(page: Any, mgr: BrowserManager, message: str, force_full: bool = False) -> ToolResult:
+# What the self-check compares before and after an action: address, title, how much is on the page, what has focus,
+# scroll position and the number of tabs. Cheap (one evaluate) and never fails the action.
+STATE_JS = """() => {
+  const a = document.activeElement;
+  return {url: location.href, title: document.title, nodes: document.getElementsByTagName('*').length,
+          text: document.body ? document.body.innerText.length : 0,
+          focus: a ? (a.tagName + ':' + (a.getAttribute('data-delta-ref') || '')) : '',
+          y: Math.round(window.scrollY), height: document.documentElement.scrollHeight};
+}"""
+
+
+async def page_state(page: Any) -> dict[str, Any]:
+    """A small fingerprint of the page for the self-check ({} when it cannot be read)."""
+    state: dict[str, Any] = {}
+    with contextlib.suppress(Exception):
+        raw = await asyncio.wait_for(page.evaluate(STATE_JS), 3.0)
+        if isinstance(raw, dict):
+            state = dict(raw)
+    with contextlib.suppress(Exception):
+        state["tabs"] = len(page.context.pages)
+    return state
+
+
+def what_changed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """Plain words for what an action changed; [] when nothing visible changed (or nothing could be read)."""
+    if not before or not after:
+        return ["unknown"]
+    out = []
+    if before.get("url") != after.get("url"):
+        out.append("address")
+    if before.get("title") != after.get("title"):
+        out.append("title")
+    if before.get("tabs") != after.get("tabs"):
+        out.append("tabs")
+    if before.get("nodes") != after.get("nodes") or before.get("text") != after.get("text"):
+        out.append("content")
+    if before.get("y") != after.get("y") or before.get("height") != after.get("height"):
+        out.append("scroll")
+    if before.get("focus") != after.get("focus"):
+        out.append("focus")
+    return out
+
+
+async def current_page(page: Any, mgr: BrowserManager) -> Any:
+    """The tab to observe after an action: a tab the action opened, else the same one."""
+    active = mgr.active
+    if active is not None and active is not page and not _closed(active):
+        await _dom_ready(active, 5000)
+        track_requests(active)
+        watch_page(active, mgr)
+        return active
+    return page
+
+
+async def _observed(page: Any, mgr: BrowserManager, message: str, force_full: bool = False,
+                    before: dict[str, Any] | None = None) -> ToolResult:
     """Act-and-observe: the action's result carries a short snapshot of the page it left behind,
     with fresh refs, so the next step usually needs no separate browser_read. On the same page it
-    is only what changed (see snapshot.py); after a navigation it is the full listing."""
+    is only what changed (see snapshot.py); after a navigation it is the full listing.
+    With `before` (a page_state taken before acting) the result also says whether the page changed, so the agent
+    can tell a click that did nothing from one that worked (evidence "changed")."""
+    page = await current_page(page, mgr)
     ev = await _evidence(page, mgr)
+    if before is not None:
+        changed = what_changed(before, await page_state(page))
+        ev["changed"] = changed
+        if not changed:
+            message += ("\nSelf-check: the page did not visibly change. If something should have happened, the "
+                        "action may not have worked: read the page, or try another way.")
+        if "address" in changed:
+            force_full = True
+    if notes := mgr.take_notes():
+        message += f"\n{notes}"
     try:
         elements = await list_refs(page, mgr)
     except Exception:  # snapshot is a bonus; the action itself succeeded
@@ -511,12 +706,62 @@ async def _observed(page: Any, mgr: BrowserManager, message: str, force_full: bo
 async def _ref_target(page: Any, mgr: BrowserManager, ref: int) -> tuple[Any, ElementRef, str]:
     """The live element for a ref, the record the agent saw, and the element's name right now."""
     seen = mgr.ref(ref)
-    loc = page.locator(f'[data-delta-ref="{ref}"]')
-    if await loc.count() == 0:
+    loc = await locate_ref(page, ref)
+    if loc is None:
         raise StaleRef(stale_message(ref))
-    loc = loc.first
     live = str(await loc.evaluate(_NAME_JS) or "")
     return loc, seen, live
+
+
+CLICK_TRIES = 3  # a click is tried this often (scrolled into view, the page given time to settle) before failing
+
+
+class ActionFailed(RuntimeError):
+    """A browser action that could not be done, with a plain reason for the agent and the user."""
+
+
+def explain(e: BaseException, what: str = "the element") -> str:
+    """A Playwright error in plain words: why the action failed and what to try next."""
+    msg = str(e).splitlines()[0] if str(e) else type(e).__name__
+    low = str(e).lower()
+    if "intercepts pointer events" in low:
+        cover = re.search(r"<(\w+)[^>]*>", str(e).split("intercepts pointer events")[0][-300:])
+        by = f" (a <{cover.group(1)}> element)" if cover else ""
+        return (f"{what} is covered by something else{by}, such as a popup, cookie banner or overlay. Close it first "
+                "(browser_read shows it), then try again.")
+    if "not attached" in low or "detached" in low or "execution context was destroyed" in low:
+        return f"{what} disappeared while acting (the page changed). Call browser_read for fresh refs."
+    if "not visible" in low or "outside of the viewport" in low:
+        return f"{what} is not visible. Scroll to it (browser_scroll ref=...) or open the menu that holds it."
+    if "disabled" in low or "not enabled" in low:
+        return f"{what} is disabled right now. Something else may need to be filled or chosen first."
+    if "not editable" in low or "readonly" in low:
+        return f"{what} cannot be typed into."
+    if "timeout" in low:
+        return (f"{what} did not become ready in time (it may be hidden, disabled, covered or still loading). "
+                "Read the page and try another way.")
+    if "net::" in low or "err_" in low:
+        return f"the page could not be loaded ({msg[:120]}). The site may be down or the address wrong."
+    return msg[:300]
+
+
+async def robust_click(page: Any, target: Any, tries: int = CLICK_TRIES, what: str = "the element") -> None:
+    """Click with retries: scroll into view, click, and on a temporary failure let the page settle and try again.
+    Never forces a click through a covering element (that could press something the agent did not choose)."""
+    last: BaseException | None = None
+    for i in range(max(1, tries)):
+        try:
+            with contextlib.suppress(Exception):
+                await target.scroll_into_view_if_needed(timeout=2000)
+            await target.click(timeout=8000 if i == 0 else 4000)
+            return
+        except Exception as e:
+            last = e
+            low = str(e).lower()
+            if "not attached" in low or "detached" in low:
+                break  # the element is gone: retrying the same handle cannot work
+            await settle(page, idle_ms=600)
+    raise ActionFailed(explain(last or RuntimeError("click failed"), what))
 
 
 class _BrowserTool[A: BaseModel](Tool[A]):
@@ -529,8 +774,12 @@ class _BrowserTool[A: BaseModel](Tool[A]):
     async def _guarded(self, coro_fn: Any) -> ToolResult:
         try:
             return await coro_fn()
+        except ActionFailed as e:
+            return ToolResult(False, f"{self.name} failed: {e}")
         except Exception as e:  # playwright timeouts etc. are normal outcomes for the agent
-            return ToolResult(False, f"{type(e).__name__}: {str(e).splitlines()[0][:300]}")
+            first = str(e).splitlines()[0][:300] if str(e) else ""
+            hint = explain(e, "the page")
+            return ToolResult(False, f"{type(e).__name__}: {first}" + (f" ({hint})" if hint not in first else ""))
 
 
 class OpenArgs(BaseModel):
@@ -657,9 +906,10 @@ class BrowserClick(_BrowserTool[RefClickArgs]):
                 if target is None:
                     return ToolResult(False, f"nothing visible called '{args.text}'; use browser_read to see the page")
                 label = args.text
-            await target.click(timeout=8000)
+            before = await page_state(page)
+            await robust_click(page, target, what=f"'{label}'")
             await settle(page)
-            return await _observed(page, self.mgr, f"clicked '{label}', now at {page.url}")
+            return await _observed(page, self.mgr, f"clicked '{label}', now at {page.url}", before=before)
 
         return await self._guarded(go)
 
@@ -758,13 +1008,24 @@ class BrowserFill(_BrowserTool[RefFillArgs]):
             if ref is not None and args.submit and not is_search and self.risk_for(args) == Risk.ACT:
                 # Approved as a search box; the live field is not one, so Enter could send a form.
                 return ToolResult(False, f"element [{ref}] is no longer a search box; call browser_read again")
-            await box.fill(args.value, timeout=8000)
+            before = await page_state(page)
+            try:
+                await box.fill(args.value, timeout=8000)
+            except Exception as e:
+                raise ActionFailed(explain(e, f"'{label}'")) from e
+            check = ""
+            with contextlib.suppress(Exception):  # self-check: the field holds what was typed
+                now = str(await box.input_value(timeout=2000))
+                if now != args.value:
+                    check = (f"\nSelf-check: the field now holds {len(now)} characters, not the {len(args.value)} "
+                             "typed (the site may format or limit it). Check it before submitting.")
             self.mgr.last_fill_was_search = is_search
             if args.submit:
                 await box.press("Enter")
                 await settle(page)
             done = "filled and submitted" if args.submit else "filled"
-            return await _observed(page, self.mgr, f"{done} '{label}'")
+            return await _observed(page, self.mgr, f"{done} '{label}'{check}",
+                                   before=before if args.submit else None)
 
         return await self._guarded(go)
 
@@ -800,21 +1061,76 @@ class BrowserSearch(_BrowserTool[SearchArgs]):
 class ScrollArgs(BaseModel):
     direction: str = Field(default="down", pattern="^(up|down)$")
     pages: float = Field(default=1, gt=0, le=10)
+    ref: int | None = Field(default=None, description="Scroll inside this element (a list or panel) instead of "
+                                                      "the page, or bring this element into view")
+    to: Literal["", "top", "bottom"] = Field(default="", description="Jump to the top or bottom instead")
+    load_more: bool = Field(default=False, description="Infinite lists: keep scrolling down until no new items "
+                                                       "appear (at most 10 rounds)")
+
+
+# Scrolls the element numbered %(ref)d, or the page when it is not scrollable itself, by dy pixels (or to an end).
+SCROLL_JS = """(el, a) => {
+  const scrollable = (n) => n && n.scrollHeight > n.clientHeight + 2 &&
+    ['auto', 'scroll'].includes(getComputedStyle(n).overflowY);
+  let box = el;
+  while (box && box !== document.body && !scrollable(box)) box = box.parentElement;
+  const target = (box && box !== document.body) ? box : document.scrollingElement;
+  if (a.to === 'top') target.scrollTop = 0;
+  else if (a.to === 'bottom') target.scrollTop = target.scrollHeight;
+  else target.scrollTop += a.dy;
+  return {top: Math.round(target.scrollTop), height: target.scrollHeight, inner: target !== document.scrollingElement};
+}"""
+LOAD_MORE_ROUNDS = 10
 
 
 class BrowserScroll(_BrowserTool[ScrollArgs]):
     name = "browser_scroll"
-    description = "Scroll the current page up or down by screen heights."
+    description = ("Scroll the page (or, with ref, the list or panel that element is in) up or down by screen "
+                   "heights; to=top/bottom jumps; load_more=true keeps scrolling an infinite list until nothing "
+                   "new loads.")
     risk = Risk.ACT
     Args = ScrollArgs
 
     async def run(self, args: ScrollArgs) -> ToolResult:
         async def go() -> ToolResult:
             page = await self.mgr.page()
+            before = await page_state(page)
             height = await page.evaluate("window.innerHeight")
-            await page.mouse.wheel(0, height * args.pages * (1 if args.direction == "down" else -1))
-            await settle(page, idle_ms=800)
-            return await _observed(page, self.mgr, f"scrolled {args.direction}")
+            sign = 1 if args.direction == "down" else -1
+            target = None
+            if args.ref is not None:
+                try:
+                    target, _, _ = await _ref_target(page, self.mgr, args.ref)
+                except StaleRef as e:
+                    return ToolResult(False, str(e))
+            what = f"scrolled {args.direction}" if not args.to else f"scrolled to the {args.to}"
+            if args.load_more:
+                rounds, last = 0, -1
+                for rounds in range(1, LOAD_MORE_ROUNDS + 1):  # noqa: B007 (rounds is reported)
+                    if target is not None:
+                        info = await target.evaluate(SCROLL_JS, {"to": "bottom", "dy": 0})
+                        size = int(info.get("height", 0)) if isinstance(info, dict) else 0
+                    else:
+                        await page.mouse.wheel(0, height * 3)
+                        size = int(await page.evaluate("document.documentElement.scrollHeight") or 0)
+                    await settle(page, idle_ms=1500)
+                    if size == last:
+                        break
+                    last = size
+                what = f"scrolled to the end of the list ({rounds} round{'s' if rounds != 1 else ''})"
+            elif target is not None:
+                if not args.to and args.pages == 1 and args.direction == "down":
+                    with contextlib.suppress(Exception):
+                        await target.scroll_into_view_if_needed(timeout=3000)
+                await target.evaluate(SCROLL_JS, {"to": args.to, "dy": height * args.pages * sign})
+                await settle(page, idle_ms=800)
+            elif args.to:
+                await page.evaluate(f"window.scrollTo(0, {'0' if args.to == 'top' else 'document.body.scrollHeight'})")
+                await settle(page, idle_ms=800)
+            else:
+                await page.mouse.wheel(0, height * args.pages * sign)
+                await settle(page, idle_ms=800)
+            return await _observed(page, self.mgr, what, before=before)
 
         return await self._guarded(go)
 
@@ -866,5 +1182,7 @@ class BrowserPress(_BrowserTool[PressArgs]):
 
 
 def browser_tools(mgr: BrowserManager) -> list[Tool]:
+    from delta.tools.browser_actions import more_browser_tools
+
     return [BrowserOpen(mgr), BrowserSearch(mgr), BrowserRead(mgr), BrowserClick(mgr), BrowserFill(mgr),
-            BrowserPress(mgr), BrowserScroll(mgr), BrowserBack(mgr)]
+            BrowserPress(mgr), BrowserScroll(mgr), BrowserBack(mgr), *more_browser_tools(mgr)]

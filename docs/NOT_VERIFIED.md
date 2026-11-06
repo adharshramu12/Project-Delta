@@ -57,6 +57,26 @@ saying what you found (it worked, or how it failed) is very welcome.
 - The local reference servers (`npx` and `uvx`) at their pinned versions on a real PC, and Node.js / uv being
   missing on a stranger's laptop (the message is tested, the install is not).
 
+## Saved logins and watchers
+
+- **DPAPI on a fresh laptop**: saving, opening and refusing logins and watcher snapshots with real DPAPI on a newly
+  set up Windows account. CI's Windows runners use real DPAPI in the end-to-end test, but not on a user's PC or
+  after a Windows password change.
+- **OCR on real captchas**: the "OCR first, at most 3 attempts" rule is tested with a captcha picture drawn by the
+  fake portal. Real portal captchas (noise, warped letters) were not tried, so expect more hand-offs than in tests.
+- **Real ERP and LMS sign-ins**: multi-step forms (user name first, password on the next page), single sign-on
+  that sends you through another site, and forms submitted by JavaScript were tested only against the fake college
+  portal. A portal that signs in on another address (SSO) is refused by design until you save a login for that
+  address.
+- **OTP hand-off through Telegram**: the hand-off is an ordinary approval, so it reaches Telegram like any other,
+  but sending the masked picture of the waiting page to the phone has no automated test and was not tried on a real
+  phone.
+- **Recipe learning with a real model**: `inspect_portal` and `save_watch_recipe` are tested with scripted calls.
+  How well a real model picks the right tables and keys on a real portal is not measured.
+- **The browser window during watcher runs**: whether Delta's private browser window appears or takes focus on the
+  desktop while a scheduled watcher runs (it should open one tab and close what it opened) was not checked on a
+  real screen.
+
 ## Phone and remote control
 
 - Telegram pairing, the PIN unlock, `/lock`, Remote Guard approvals from a phone, and Windows notifications.

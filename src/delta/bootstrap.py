@@ -104,6 +104,8 @@ class Container:
     scheduler: Any = None  # delta.scheduler.service.Scheduler (its loop starts in `delta run`)
     browsers: Any = None  # delta.tools.browser_switch.BrowserHub: which browser each task uses
     connectors: Any = None  # delta.connectors.tools.AppTools: connected apps (its .manager connects them)
+    logins: Any = None  # delta.logins.service.LoginService: saved site logins
+    watchers: Any = None  # delta.watchers.service.WatchService: portals watched on a schedule
 
     @property
     def engine(self) -> Any:
@@ -177,6 +179,8 @@ class Container:
                 self.orchestrator.learning.close()
             if self.scheduler is not None:
                 self.scheduler.store.close()
+            if self.watchers is not None:
+                self.watchers.store.close()
 
         self.lifecycle.on_shutdown("state", close_state)
         if self.engine is not None:  # tasks a crash or power cut cut off: shown with Resume / Discard
@@ -381,6 +385,7 @@ def attach_learning(settings: Settings, orchestrator: Orchestrator, learning: Le
 def build(settings: Settings) -> Container:
     data = settings.data_dir
     data.mkdir(parents=True, exist_ok=True)  # first run: databases need the folder to exist
+    solver: Any = None  # the captcha solver, shared by solve_captcha and sign-in
     events = EventBus()
     governor = Governor(settings.governor, watch_gpu=any(p.local for p in settings.llm.providers.values()))
     router = ModelRouter(build_providers(settings), settings.llm.routes, allow_local=governor.allow_local,
@@ -455,13 +460,19 @@ def build(settings: Settings) -> Container:
         browser = BrowserManager(data)
         browser.diff_snapshots = settings.browser.snapshot_diffs
         browser.full_every = settings.browser.full_snapshot_every
-        from delta.tools.captcha import captcha_tool
+        from delta.tools.captcha import captcha_tool, make_solver
 
+        solver = make_solver(settings, router, approvals, audit, proof)
         browsers.add_private([*browser_tools(browser),
-                              captcha_tool(browser, settings, router, approvals, audit, proof)], browser)
+                              captcha_tool(browser, settings, router, approvals, audit, proof, solver)], browser)
         closers.append(("browser", browser.close))
     for t in browsers.tools():
         registry.register(t)
+    from delta.logins.setup import attach as attach_logins
+
+    # Saved site logins (delta.logins): sign_in / list_logins, typed only on the exact saved site
+    logins = attach_logins(settings, registry, browsers, audit, approvals, solver if browsers.mgr else None, proof,
+                           live_channels)
     learning = LearningStore(data / "learning.db")
 
     async def on_learned(item: Learned) -> None:
@@ -481,6 +492,10 @@ def build(settings: Settings) -> Container:
         if hasattr(t, "executor"):
             t.executor = executor  # documents go back to Telegram/Slack through send_file, with every check
     skills = SkillStore(data / "skills.db")
+    task_lock = asyncio.Semaphore(1)  # one heavy task at a time (Container.submit), shared with watcher runs
+    from delta.watchers.setup import attach as attach_watchers
+
+    watchers = attach_watchers(settings, registry, logins, browsers, scheduler, skills, audit, task_lock)
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
                                 governor, events, audit, skills, learning, proof)
     orchestrator.browsers = browsers  # pins each task to its browser (switches apply at the next task)
@@ -501,12 +516,14 @@ def build(settings: Settings) -> Container:
     from delta.system.notify import notify
 
     guard = RemoteGuard(data, audit, alert=notify)
+    logins.guard = guard
+    watchers.guard = guard
     send_file.guard = guard
     executor.guard = guard  # Remote Guard for every tool call (PIN for sensitive reads, the lock)
     approvals.guard = guard  # ...and for every approval button pressed on a phone
     container = Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
-                          Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"),
+                          Lifecycle(data), task_lock, closers, chats=ChatStore(data / "chats.db"),
                           live_channels=live_channels, guard=guard, emergency=emergency, scheduler=scheduler,
-                          browsers=browsers, connectors=connectors)
+                          browsers=browsers, connectors=connectors, logins=logins, watchers=watchers)
     scheduler.bind(container)
     return container

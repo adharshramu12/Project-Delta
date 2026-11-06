@@ -201,6 +201,12 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     values = {"sandbox": sandbox.as_posix(), "site": site.url, "python": Path(sys.executable).as_posix(),
               "marker": f"deltaeval{uuid.uuid4().hex[:8]}", "marker_app": marker_script.as_posix()}
     site.reset()
+    portal: Any = None
+    if task.portal is not None:  # the fake college portal: started first so {portal} is filled everywhere
+        from delta.evals.portal_fixture import PortalHarness
+
+        portal = PortalHarness(dict(task.portal))
+        values.update(portal.values())
     setup = fill(task.setup, values)
     for name, content in (setup.get("files") or {}).items():
         path = sandbox / name
@@ -266,6 +272,11 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         browser = browser_mod.BrowserManager(data)
         tools += browser_mod.browser_tools(browser)
     registry = ToolRegistry(tools)
+    if portal is not None:
+        if browser is None:
+            portal.close()
+            raise RuntimeError("a portal task needs Delta's private browser (needs: [browser])")
+        await portal.attach(data, registry, audit, approvals, browser, settings, asked)
     connector = None
     if task.connector is not None:  # a connected app: the fake notes app through Delta's real connector code
         from delta.evals import connector_fixture
@@ -349,6 +360,9 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         from delta.evals import connector_fixture
 
         await connector_fixture.finish(connector)
+    if portal is not None and browser is not None:  # its checks read every file in the data folder: let Chrome
+        with contextlib.suppress(Exception):           # release its profile (Windows locks open files) first
+            await browser.close()
     out.cost_usd = cost_of(out.provider or "scripted", out.tokens_in, out.tokens_out)
     meter = dict(getattr(router, "meter", {}) or {})
     ctx = CheckContext(sandbox=sandbox, status=out.status, answer=out.answer, steps=steps, meter=meter,
@@ -356,7 +370,7 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
                        tasks_db=data / "tasks.db", timeline=engine.timeline(req.id), undo=undo,
                        policy=executor.policy, task_id=req.id, request=req.text, memory_store=memory,
                        learning=learning_store, skills=skill_store, gate=gate, connector=connector,
-                       registry=registry)
+                       registry=registry, portal=portal, asked=asked, data=data)
     out.checks = await asyncio.to_thread(run_checks, ctx, fill(task.check, values))
     out.passed = bool(out.checks) and all(c["passed"] for c in out.checks)
     if task.eval_gate and gate is not None:
@@ -374,6 +388,11 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     if connector is not None:
         with contextlib.suppress(Exception):
             await connector.close()
+    if portal is not None:
+        with contextlib.suppress(Exception):
+            portal.close()
+        if portal.watchers is not None:
+            portal.watchers.store.close()
     memory.close()
     store.close()
     for extra in (learning_store, skill_store):

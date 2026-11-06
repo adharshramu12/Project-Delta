@@ -39,6 +39,8 @@ _TAINT_ORIGIN = {
     "parallel_research": WEB_READ, "read_file": FILE, "read_messages": MESSAGE, "read_window": SCREEN,
     "look_at_screen": SCREEN, "look_with_marks": SCREEN, "read_screen_text": SCREEN,
     "attachment": ATTACHMENT, "read_attachment": ATTACHMENT, "look_at_attachment": ATTACHMENT,
+    "sign_in": WEB_READ, "inspect_portal": WEB_READ, "watch_items": WEB_READ, "check_watcher": WEB_READ,
+    "browser_wait": WEB_READ, "browser_tabs": WEB_READ,
 }
 
 ORIGIN_WORDS = {

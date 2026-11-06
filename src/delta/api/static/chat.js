@@ -544,19 +544,25 @@
     }}, icon("x")));
     return f.el = chip;
   }
-  async function addFiles(list) {
+  async function upload(f, file) {
+    try {
+      const r = await fetch("/api/attachments?name=" + encodeURIComponent(file.name || "picture.png"), {method: "PUT", body: file, headers: {"Authorization": "Bearer " + D.token, "Content-Type": "application/octet-stream"}});
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(D.detail(data) || "Delta could not take that file.");
+      f.att = data.attachment; f.state = "ready";
+      if (f.att.kind === "image" && !data.can_see_pictures) f.att.summary += ", text only";
+    } catch (err) { f.state = "error"; f.error = err.message || "Delta could not take that file."; }
+    const old = f.el; old.replaceWith(chipFor(f, file));
+  }
+  function addFiles(list) {
+    // Every file is sent and read at once: a picture read with OCR never holds up the PDF next to it.
+    const started = [];
     for (const file of [...list]) {
       if (files.length >= 5) { D.toast({title: "Up to 5 files per message", kind: "warn"}); break; }
-      const f = {state: "loading"}; chipFor(f, file); files.push(f); renderFiles();
-      try {
-        const r = await fetch("/api/attachments?name=" + encodeURIComponent(file.name || "picture.png"), {method: "PUT", body: file, headers: {"Authorization": "Bearer " + D.token, "Content-Type": "application/octet-stream"}});
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(D.detail(data) || "Delta could not take that file.");
-        f.att = data.attachment; f.state = "ready";
-        if (f.att.kind === "image" && !data.can_see_pictures) f.att.summary += ", text only";
-      } catch (err) { f.state = "error"; f.error = err.message || "Delta could not take that file."; }
-      const old = f.el; old.replaceWith(chipFor(f, file));
+      const f = {state: "loading"}; chipFor(f, file); files.push(f); started.push([f, file]);
     }
+    renderFiles();
+    return Promise.all(started.map(([f, file]) => upload(f, file)));
   }
   $("attachbtn").onclick = () => $("attachinput").click();
   $("attachinput").onchange = () => { addFiles($("attachinput").files); $("attachinput").value = ""; };

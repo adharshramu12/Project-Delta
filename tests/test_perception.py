@@ -513,3 +513,70 @@ async def test_only_tools_marked_as_alias_are_resolved(tmp_path: Path) -> None:
                       ApprovalBroker(timeout_s=1), AuditLog(tmp_path / "audit.jsonl"))
     r = await ex.execute("open_thing", {"name": " notepad "}, task_id="t")
     assert r.ok and r.output == "ran notepad" and "resolved_to" not in r.evidence
+
+
+async def test_the_first_ocr_read_is_also_the_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cold PowerShell start (WinRT OCR types) can take 10 s or more: the first read must not start it twice."""
+    from delta.perception import ocr as ocr_mod
+
+    scripts: list[str] = []
+
+    async def ps(script: str, env: dict[str, str], timeout_s: float) -> str:
+        scripts.append(script)
+        return json.dumps({"lang": "en-US", "lines": [{"text": "Sales 2026", "words": [
+            {"t": "Sales", "x": 1, "y": 2, "w": 30, "h": 10}, {"t": "2026", "x": 35, "y": 2, "w": 25, "h": 10}]}]})
+
+    monkeypatch.setattr(ocr_mod, "_powershell", ps)
+    eng = WindowsOcr("auto")
+    monkeypatch.setattr(eng, "platform_ok", lambda: True)
+    lines = await eng.read(Image.new("RGB", (40, 20)))
+    assert [line.text for line in lines] == ["Sales 2026"]
+    assert scripts == [ocr_mod.READ_SCRIPT]  # one start: no separate probe
+    assert eng.available() and eng.language == "en-US"
+    assert await eng.probe() and len(scripts) == 1  # the probe is answered from that read
+    await eng.read(Image.new("RGB", (40, 20)))
+    assert len(scripts) == 2
+
+
+async def test_a_first_read_with_no_ocr_language_turns_ocr_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    from delta.perception import ocr as ocr_mod
+
+    calls: list[str] = []
+
+    async def ps(script: str, env: dict[str, str], timeout_s: float) -> str:
+        calls.append(script)
+        return '{"error":"no OCR language installed"}'
+
+    monkeypatch.setattr(ocr_mod, "_powershell", ps)
+    eng = WindowsOcr("auto")
+    monkeypatch.setattr(eng, "platform_ok", lambda: True)
+    assert await eng.read(Image.new("RGB", (10, 10))) == []
+    assert not eng.available() and not await eng.probe()
+    assert await eng.read(Image.new("RGB", (10, 10))) == [] and len(calls) == 1
+
+
+async def test_a_first_read_that_powershell_refuses_turns_ocr_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    from delta.perception import ocr as ocr_mod
+
+    async def ps(script: str, env: dict[str, str], timeout_s: float) -> str:
+        raise TimeoutError
+
+    monkeypatch.setattr(ocr_mod, "_powershell", ps)
+    eng = WindowsOcr("auto")
+    monkeypatch.setattr(eng, "platform_ok", lambda: True)
+    assert await eng.read(Image.new("RGB", (10, 10))) == []
+    assert not eng.available()
+
+
+async def test_a_first_read_that_fails_on_its_picture_leaves_the_engine_unknown(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from delta.perception import ocr as ocr_mod
+
+    async def ps(script: str, env: dict[str, str], timeout_s: float) -> str:
+        return ""  # the picture could not be decoded: nothing on stdout
+
+    monkeypatch.setattr(ocr_mod, "_powershell", ps)
+    eng = WindowsOcr("auto")
+    monkeypatch.setattr(eng, "platform_ok", lambda: True)
+    assert await eng.read(Image.new("RGB", (10, 10))) == []
+    assert eng._available is None  # asked again next time, not switched off for good

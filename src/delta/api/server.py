@@ -481,6 +481,9 @@ def create_app(c: Container, token: str) -> FastAPI:
     from delta.api.connectors_routes import register as register_connectors
 
     register_connectors(app, c, auth)  # connected apps (delta.connectors): the Apps page
+    from delta.api.logins_routes import register as register_logins
+
+    register_logins(app, c, auth)  # saved site logins and watchers (delta.logins, delta.watchers)
     from delta.api.tasks_routes import register as register_tasks
 
     register_tasks(app, c, auth, launch)  # task history, run timeline, resume / discard (delta.engine)
