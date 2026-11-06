@@ -14,6 +14,12 @@
 # Store one (found through the py launcher, the registry, or the usual folders). Windows on ARM (Snapdragon,
 # Copilot+ PCs): Delta uses the x64 build of Python under Windows' built-in x64 emulation, because some of its
 # packages (OpenCV) have no ARM64 build yet. Updating while Delta runs: it is closed first (you are asked).
+#
+# Execution policy: a new Windows PC runs no .ps1 files (policy Restricted), and `irm ... | iex` runs this
+# installer as text, which the policy does not cover. So this installer never starts another script as a file:
+# Delta's other scripts are read as text and run here (Invoke-DeltaScript), and nothing changes the PC's or the
+# account's execution policy. The installed files are unblocked (Unblock-File removes the "downloaded from the
+# internet" mark), so Delta's own scripts are not treated as downloaded files later.
 param(
     [string]$Source = "",   # a Delta folder or .zip; empty = this script's own folder if it is one, else GitHub
     [string]$Repo = "adharshramu12/Project-Delta",
@@ -24,7 +30,8 @@ param(
     [switch]$NoPath,         # make bin\delta.cmd but do not add it to your Path
     [switch]$FromGitHub,     # always download the newest version (delta update)
     [switch]$StopRunning,    # close a running Delta without asking (delta update --stop)
-    [string]$WaitForPid = "" # comma-separated process ids to wait for first (the `delta update` that started us)
+    [string]$WaitForPid = "", # comma-separated process ids to wait for first (the `delta update` that started us)
+    [switch]$DefineOnly      # only define the functions below and stop (the tests use this)
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is 10x slower with the progress bar
@@ -32,7 +39,7 @@ $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is 10x slower wit
 # secure channel"). Allow TLS 1.2 as well (3072); nothing older is added.
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch { }
 $log = Join-Path $env:TEMP "delta-install.log"
-Start-Transcript -Path $log -Force | Out-Null
+if (-not $DefineOnly) { Start-Transcript -Path $log -Force | Out-Null }
 
 function Step($n, $text) { Write-Host "`n[$n/6] $text" -ForegroundColor Cyan }
 function Done($text) { Write-Host "      OK  $text" -ForegroundColor Green }
@@ -97,6 +104,62 @@ function Find-Python312 {
     return $null
 }
 
+function Invoke-DeltaScript([string]$Path, [hashtable]$Arguments = @{}) {
+    # Runs one of Delta's own scripts from its text, here in this PowerShell, never as a script file. The
+    # execution policy (Restricted on a new PC) refuses `& file.ps1` when this installer runs as text
+    # (irm ... | iex): "running scripts is disabled on this system". Text is not checked against that policy, nor
+    # by Smart App Control as a downloaded script file. The script's own $PSScriptRoot is empty this way, so the
+    # scripts run here take their folder as a parameter. No execution policy is changed.
+    $block = [scriptblock]::Create([System.IO.File]::ReadAllText($Path))
+    & $block @Arguments
+}
+
+function Unblock-DeltaFiles([string]$dir) {
+    # Files from a downloaded zip that Explorer extracted carry a "downloaded from the internet" mark
+    # (Zone.Identifier), and robocopy copies it. Removing it from Delta's own install folder means `delta update`,
+    # the Start-menu items and the fix commands below are not treated as downloaded scripts. Not the environment
+    # (.venv): it is built here and has no mark.
+    $venv = (Join-Path $dir ".venv").TrimEnd("\") + "\"
+    Get-ChildItem -LiteralPath $dir -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Where-Object { -not $_.FullName.StartsWith($venv, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Unblock-File -ErrorAction SilentlyContinue
+}
+
+function Install-DeltaShortcuts([string]$dir, [bool]$noPath, [bool]$noShortcuts) {
+    # The delta command and the icons. Optional: Delta is installed and checked before this, so a part that fails
+    # here is a warning with the exact command that adds it, never "Delta could not be installed".
+    $scripts = Join-Path $dir "scripts"
+    $result = [pscustomobject]@{ Command = $null; Fixes = (New-Object System.Collections.Generic.List[string]) }
+    try {
+        # Your account's Path only (HKCU), never the PC-wide one. A trial install (-NoShortcuts) leaves it alone.
+        $result.Command = Invoke-DeltaScript (Join-Path $scripts "delta_command.ps1") @{
+            Action = "Install"; InstallDir = $dir; NoPath = ($noPath -or $noShortcuts) } | Select-Object -Last 1
+    } catch {
+        Write-Host "      The delta command could not be set up: $($_.Exception.Message)" -ForegroundColor Yellow
+        $result.Fixes.Add(('powershell -NoProfile -ExecutionPolicy Bypass -File "{0}" -Action Install -InstallDir "{1}"' -f
+                           (Join-Path $scripts "delta_command.ps1"), $dir))
+    }
+    $command = $result.Command
+    if ($command -and $command.OnPath) {
+        Done "delta command added ($($command.Bin) is on your Path)"
+        if ($command.Other) {
+            Write-Host ("      Another program called delta comes first on your Path ($($command.Other)), so 'delta' " +
+                        "runs that one. Use the full path instead: ""$($command.Shim)"" update") -ForegroundColor Yellow
+        }
+    } elseif ($command) { Done "delta command made in $($command.Bin) (not added to your Path)" }
+    if ($noShortcuts) { Done "icons skipped (-NoShortcuts)" } else {
+        try {
+            Invoke-DeltaScript (Join-Path $scripts "create_shortcut.ps1") @{ NoCommand = $true; Root = $dir } | Out-Host
+            Done "Delta icon added"
+        } catch {
+            Write-Host "      The Desktop and Start-menu icons could not be made: $($_.Exception.Message)" -ForegroundColor Yellow
+            $result.Fixes.Add(('powershell -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f
+                               (Join-Path $scripts "create_shortcut.ps1")))
+        }
+    }
+    return $result
+}
+
 function Get-RunningDelta {
     # Processes started from this install's environment (python.exe, pythonw.exe, delta.exe in .venv\Scripts).
     $venv = (Join-Path $InstallDir ".venv").TrimEnd("\") + "\"
@@ -106,6 +169,8 @@ function Get-RunningDelta {
         ($skip -notcontains [int]$_.ProcessId)
     })
 }
+
+if ($DefineOnly) { return }
 
 try {
     Write-Host "Installing Delta, your personal AI agent for Windows" -ForegroundColor White
@@ -182,6 +247,7 @@ try {
             /XF *.lnk .outside-* .realview-* /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { Fail "copying Delta's files failed (robocopy code $LASTEXITCODE)" }
     }
+    Unblock-DeltaFiles $InstallDir
     Done "files in place"
 
     # 3. Environment ---------------------------------------------------------------------------------
@@ -222,25 +288,8 @@ try {
 
     # 5. Command and icons ----------------------------------------------------------------------------
     Step 5 "The delta command, Desktop and Start-menu icons"
-    $command = $null
-    try {
-        # Your account's Path only (HKCU), never the PC-wide one. A trial install (-NoShortcuts) leaves it alone.
-        $command = & (Join-Path $InstallDir "scripts\delta_command.ps1") -Action Install -InstallDir $InstallDir `
-            -NoPath:([bool]($NoPath -or $NoShortcuts)) | Select-Object -Last 1
-    } catch {
-        Write-Host "      The delta command could not be set up: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-    if ($command -and $command.OnPath) {
-        Done "delta command added ($($command.Bin) is on your Path)"
-        if ($command.Other) {
-            Write-Host ("      Another program called delta comes first on your Path ($($command.Other)), so 'delta' " +
-                        "runs that one. Use the full path instead: ""$($command.Shim)"" update") -ForegroundColor Yellow
-        }
-    } elseif ($command) { Done "delta command made in $($command.Bin) (not added to your Path)" }
-    if ($NoShortcuts) { Done "icons skipped (-NoShortcuts)" } else {
-        & (Join-Path $InstallDir "scripts\create_shortcut.ps1") -NoCommand | Out-Host
-        Done "Delta icon added"
-    }
+    $setup = Install-DeltaShortcuts $InstallDir ([bool]$NoPath) ([bool]$NoShortcuts)
+    $command = $setup.Command
 
     # 6. Open ----------------------------------------------------------------------------------------
     Step 6 "Opening Delta"
@@ -252,7 +301,12 @@ try {
     Write-Host "`nDelta is installed. Open it any time from the Delta icon on your Desktop." -ForegroundColor Green
     if ($command -and $command.OnPath) { Write-Host "Open a new PowerShell window to use the delta command." }
     $later = if ($NoShortcuts) { "" } else { "'Update Delta' in the Start menu, " }
-    Write-Host "Update later: $later'delta update' in a new PowerShell window, or run this again. Remove: scripts\uninstall.ps1"
+    Write-Host "Update later: $later'delta update' in a new PowerShell window, or run this again."
+    Write-Host ('Remove: powershell -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $InstallDir "scripts\uninstall.ps1"))
+    if ($setup.Fixes.Count -gt 0) {
+        Write-Host "`nSome optional parts were not set up (Delta itself works). To add them, paste this in PowerShell:" -ForegroundColor Yellow
+        foreach ($fix in $setup.Fixes) { Write-Host "  $fix" -ForegroundColor Yellow }
+    }
     if (Test-Path $staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue }
     Stop-Transcript | Out-Null
 } catch {

@@ -11,6 +11,13 @@ saying what you found (it worked, or how it failed) is very welcome.
 - The full installer on a clean Windows 10 and Windows 11 laptop: `irm ... | iex` and double-clicking
   `Install Delta.cmd`, with Smart App Control on, the Desktop and Start-menu icons, the splash screen and the
   setup wizard.
+- **Smart App Control** on a real PC: `irm ... | iex` with Smart App Control on (the installer runs Delta's other
+  scripts from their text and removes the "downloaded from the internet" mark from the files it installs), Windows
+  blocking a double-clicked `Install Delta.cmd` from a downloaded zip, and `delta update` and the fix commands the
+  installer prints (`powershell -ExecutionPolicy Bypass -File ...`) on such a PC. The CI Windows runner checks the
+  installer's step 5, `delta update`, `Install Delta.cmd` and the Unblock-File step with the account's execution
+  policy set to Restricted, but it has no Smart App Control, and steps 1 to 4 of a real install (Python, files,
+  packages) are not run under that policy there.
 - **Windows on ARM** (Snapdragon, Copilot+ PCs): installing the x64 Python 3.12 under emulation, building
   Delta's environment there, and running Delta. Not tried on an ARM PC.
 - Finding an existing Python 3.12 through the `py` launcher and the registry (all-users installs, a per-user

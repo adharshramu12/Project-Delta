@@ -6,17 +6,24 @@
 # The shortcut runs the venv's pythonw.exe directly. Not a .vbs (Windows is retiring VBScript and
 # Explorer no longer runs it), and the venv must come from the official, signed python.org Python:
 # with Smart App Control on, Windows silently blocks an unsigned python.exe started from the Desktop.
+# Neither shortcut runs a PowerShell script, so a PC whose execution policy runs no scripts (Restricted, the
+# Windows default) opens and updates Delta the same way.
+#
+# Run it yourself with: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\create_shortcut.ps1
 param(
-    [switch]$NoCommand   # install.ps1 sets up the delta command itself and passes this
+    [switch]$NoCommand,  # install.ps1 sets up the delta command itself and passes this
+    [string]$Root = ""   # Delta's folder; empty = the folder above this script. install.ps1 runs this file's text
+                         # (no $PSScriptRoot then), so it passes the folder
 )
-$root = Split-Path $PSScriptRoot -Parent
+if (-not $Root) { $Root = Split-Path $PSScriptRoot -Parent }
+$root = $Root.TrimEnd("\")
 $installed = -not (Test-Path (Join-Path $root ".git"))   # an installed copy, not a developer checkout
 $pythonw = Join-Path $root ".venv\Scripts\pythonw.exe"
-if (-not (Test-Path $pythonw)) { throw "Run scripts\install.ps1 (or 'uv sync --extra all') first." }
+if (-not (Test-Path $pythonw)) { throw "Delta's environment is missing: run Delta's installer first (or 'uv sync --extra all' in a developer checkout)." }
 $sac = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState
 if ($sac -eq 1 -and (Get-AuthenticodeSignature $pythonw).Status -ne "Valid") {
     Write-Warning ("Smart App Control is on and .venv uses an unsigned Python, so Windows will block the shortcut. " +
-                   "Run scripts\install.ps1 to rebuild .venv on the official python.org Python 3.12.")
+                   "Run Delta's installer again to rebuild .venv on the official python.org Python 3.12.")
 }
 
 # A "Delta" folder on the Desktop shows up as a second "Delta" icon (Windows hides ".lnk"), and
@@ -70,7 +77,10 @@ if ($installed) {
 # older installer, which runs this newer script but does not know about the command.
 if ($installed -and -not $NoCommand) {
     try {
-        $command = & (Join-Path $PSScriptRoot "delta_command.ps1") -Action Install -InstallDir $root | Select-Object -Last 1
+        # Its text, run here, not the file: the execution policy (Restricted on a new PC) refuses a .ps1 file
+        # when this script itself was run as text by install.ps1.
+        $block = [scriptblock]::Create([System.IO.File]::ReadAllText((Join-Path $root "scripts\delta_command.ps1")))
+        $command = & $block -Action Install -InstallDir $root | Select-Object -Last 1
         if ($command -and $command.PathAdded) {
             Write-Host "added the delta command ($($command.Bin) is on your Path). Open a new PowerShell window to use it."
         }

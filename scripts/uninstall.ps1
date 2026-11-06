@@ -2,6 +2,9 @@
 # delta command off your Path.
 # Your data (%LOCALAPPDATA%\Delta: chats, memory, settings) is kept unless you pass -RemoveData.
 # Saved keys live in Windows Credential Manager under "delta"; they are removed with -RemoveData too.
+#
+# Run it with (works whatever the PC's execution policy is, and changes none):
+#   powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\Delta\scripts\uninstall.ps1"
 param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\Delta"),
     [switch]$RemoveData
@@ -41,7 +44,9 @@ $command = Join-Path $PSScriptRoot "delta_command.ps1"
 if (-not (Test-Path $command)) { $command = Join-Path $InstallDir "scripts\delta_command.ps1" }
 if (Test-Path $command) {
     try {
-        $removed = & $command -Action Uninstall -InstallDir $InstallDir | Select-Object -Last 1
+        # Its text, run here, not the file, so the execution policy (Restricted on a new PC) does not refuse it.
+        $block = [scriptblock]::Create([System.IO.File]::ReadAllText($command))
+        $removed = & $block -Action Uninstall -InstallDir $InstallDir | Select-Object -Last 1
         if ($removed -and $removed.PathRemoved) { Write-Host "removed the delta command from your Path" }
     } catch {
         Write-Host "Could not take the delta command off your Path: $($_.Exception.Message)" -ForegroundColor Yellow
