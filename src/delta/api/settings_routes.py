@@ -46,9 +46,17 @@ class MemoryIn(BaseModel):
 
 
 class BrowserIn(BaseModel):
+    # The four-way choice (delta.tools.browser_choice): default | chrome | edge | private, and which browser
+    # runs Delta's private one. Older clients keep sending mode/prefer, which work exactly as before.
+    choice: Literal["default", "chrome", "edge", "private"] | None = None
+    engine: Literal["auto", "chrome", "edge"] | None = None
     mode: Literal["your-browser", "delta-profile"] | None = None
     prefer: Literal["auto", "chrome", "edge"] | None = None
     orange_cursor: bool | None = None
+
+
+class SigninIn(BaseModel):
+    url: str = Field(default="", max_length=2000)
 
 
 class SettingsIn(BaseModel):
@@ -71,11 +79,13 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
     async def get_settings() -> dict[str, Any]:
         s = c.settings
         keys = await asyncio.to_thread(lambda: {k: bool(get_secret(k)) for k in KEY_INFO})
+        from delta.control import browser_state
         from delta.tools.user_browser import default_browser
 
         found = await asyncio.to_thread(default_browser, s.browser.prefer)
+        state = await asyncio.to_thread(browser_state, c)
         return {
-            "browser": {**s.browser.model_dump(), "using": found[0] if found else None},
+            "browser": {**s.browser.model_dump(), "using": found[0] if found else None, **state},
             "boundaries": s.boundaries.model_dump(),
             "memory": {"enabled": s.memory.enabled, "auto_extract": s.memory.auto_extract,
                        "learn_skills": s.memory.learn_skills},
@@ -91,11 +101,32 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
         s = c.settings
         changes: dict[str, Any] = {}
         restart = False
+        browser_note = ""
         if body.browser:
             br = body.browser.model_dump(exclude_none=True)
-            if br.get("mode", s.browser.mode) != s.browser.mode:
-                restart = True  # a different set of browser tools is registered at start-up
-            changes["browser"] = br
+            choice, engine = br.pop("choice", None), br.pop("engine", None)
+            from delta.tools.browser_choice import from_config
+
+            now = from_config(s.browser)
+            if choice == now.choice and engine in (None, now.engine):
+                choice = engine = None  # the page sends the whole form: an unchanged choice is no change
+            if choice or engine:
+                from delta.control import set_browser, set_private_engine
+
+                try:  # validated (installed?), saved, audited and applied from the next task
+                    if choice:
+                        browser_note = await asyncio.to_thread(set_browser, c, choice, "dashboard", engine)
+                    else:
+                        browser_note = await asyncio.to_thread(set_private_engine, c, str(engine), "dashboard")
+                except ValueError as e:
+                    raise HTTPException(400, str(e)) from None
+            if body.browser.choice:  # the four-way choice decides mode/prefer; old keys alongside are ignored
+                br.pop("mode", None)
+                br.pop("prefer", None)
+            if br.get("mode", s.browser.mode) != s.browser.mode and getattr(c, "browsers", None) is None:
+                restart = True  # without the browser switch, the tools are chosen at start-up
+            if br:
+                changes["browser"] = br
         if body.boundaries:
             b = body.boundaries.model_dump(exclude_none=True)
             for key in ("allowed_paths", "denied_paths", "denied_apps", "denied_domains", "allowed_domains"):
@@ -128,7 +159,7 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
             restart = sorted(body.addons_enabled) != sorted(s.addons.enabled)
             changes["addons"] = {"enabled": body.addons_enabled}
         if not changes:
-            return {"ok": True, "restart_needed": False}
+            return {"ok": True, "restart_needed": False, **({"browser_note": browser_note} if browser_note else {})}
 
         write_user_settings(s.data_dir, changes)
         # apply live
@@ -144,9 +175,10 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
         if "browser" in changes:
             for k, v in changes["browser"].items():
                 setattr(s.browser, k, v)
-            ub = getattr(c.registry.get("browser_open"), "ub", None)
-            if ub is not None and "prefer" in changes["browser"]:  # switch Chrome/Edge right away
-                ub.use(s.browser.prefer)
+            if getattr(c, "browsers", None) is None:  # without the switch: change Chrome/Edge right away
+                ub = getattr(c.registry.get("browser_open"), "ub", None)
+                if ub is not None and "prefer" in changes["browser"]:
+                    ub.use(s.browser.prefer)
             cursor = getattr(getattr(c.registry.get("click_at"), "ctl", None), "cursor", None)
             if cursor is not None:
                 cursor.enabled = s.browser.orange_cursor
@@ -154,7 +186,16 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
                     cursor.restore()
         c.orchestrator.executor.policy = make_policy(s)  # next action uses the new rules
         c.audit.record("settings.changed", sections=sorted(changes))
-        return {"ok": True, "restart_needed": restart, "save_dir_resolved": str(save_dir(s.files, create=False))}
+        return {"ok": True, "restart_needed": restart, "save_dir_resolved": str(save_dir(s.files, create=False)),
+                **({"browser_note": browser_note} if browser_note else {})}
+
+    @app.post("/api/browser/signin", dependencies=[Depends(auth)])
+    async def browser_signin(body: SigninIn) -> dict[str, Any]:
+        """'Sign in to my sites': open Delta's private browser on this PC; the person signs in there."""
+        from delta.control import open_signin_browser
+
+        ok, message = await open_signin_browser(c, body.url, by="dashboard")
+        return {"ok": ok, "message": message}
 
     @app.delete("/api/settings/key/{name}", dependencies=[Depends(auth)])
     async def remove_key(name: str) -> dict[str, Any]:

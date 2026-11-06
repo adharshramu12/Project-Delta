@@ -398,7 +398,9 @@ class ToolExecutor:
         if self.guard is None or req is None:
             return None
         outside = any(not _under(norm_path(p), self.policy.allowed) for p in tool.paths(args) if p)
-        return tool_refusal(self.guard, req.channel, req.user, tool.name, outside)
+        probe = getattr(tool, "remote_pin", None)  # a tool can ask for the PIN on some calls (set_browser)
+        extra = probe(args) if callable(probe) else None
+        return tool_refusal(self.guard, req.channel, req.user, tool.name, outside, extra)
 
     async def _run(self, tool: Tool, args: BaseModel, name: str, task_id: str) -> ToolResult:
         step: int | None = None

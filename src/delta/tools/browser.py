@@ -162,13 +162,18 @@ def stale_message(ref: int) -> str:
     return f"element [{ref}] is no longer on the page (it changed or navigated); call browser_read to get fresh refs"
 
 
-def find_browser() -> tuple[str, str] | None:
-    """(name, exe) of the first installed browser: Chrome, else Edge."""
+def find_browser(prefer: str = "auto") -> tuple[str, str] | None:
+    """(name, exe) of the browser for Delta's own profile. auto: the first installed (Chrome, else Edge).
+    chrome / edge: that one when installed, else the other one, so a task still works."""
+    found: list[tuple[str, str]] = []
     for name, paths in BROWSERS:
         for p in (os.path.expandvars(x) for x in paths):
             if Path(p).exists():
-                return name, p
-    return None
+                found.append((name, p))
+                break
+    if prefer in ("chrome", "edge"):
+        found.sort(key=lambda f: f[0] != prefer)
+    return found[0] if found else None
 
 
 def find_chrome() -> str | None:  # kept for scripts and older callers
@@ -186,6 +191,10 @@ class BrowserManager:
         self.data_dir = data_dir
         self.profile = data_dir / "chrome-profile"  # set per browser at launch
         self.browser_name = ""
+        # Which installed browser runs Delta's profile: auto (Chrome, else Edge), chrome or edge.
+        # Changed only between tasks (delta.tools.browser_switch), never while a task is using it.
+        self.engine = "auto"
+        self.hold_until = 0.0  # monotonic time: not closed for idleness before this (the user is signing in)
         self.last_fill_was_search = False  # lets "press Enter" after typing a search run freely
         self._proc: subprocess.Popen[bytes] | None = None
         self._pw: Any = None
@@ -226,7 +235,7 @@ class BrowserManager:
 
         endpoint = f"http://127.0.0.1:{PORT}"
         if not await self._alive(endpoint):
-            found = find_browser()
+            found = find_browser(self.engine)
             if not found:
                 raise RuntimeError("No supported browser found. Install Google Chrome or Microsoft Edge.")
             self.browser_name, exe = found
@@ -246,6 +255,10 @@ class BrowserManager:
             self._reaper = asyncio.create_task(self._reap_when_idle())
         log.info("browser.started", browser=self.browser_name or "already running")
 
+    @property
+    def running(self) -> bool:
+        return self._browser is not None
+
     @staticmethod
     async def _alive(endpoint: str) -> bool:
         import httpx
@@ -259,7 +272,7 @@ class BrowserManager:
     async def _reap_when_idle(self) -> None:
         while self._browser is not None:
             await asyncio.sleep(30)
-            if time.monotonic() - self._last_used > IDLE_CLOSE_S:
+            if time.monotonic() - self._last_used > IDLE_CLOSE_S and time.monotonic() > self.hold_until:
                 log.info("browser.idle_close")
                 await self.close()
                 return

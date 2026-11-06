@@ -41,6 +41,8 @@ SENSITIVE = {
     "send_file": "send a file from the PC", "keys": "change an API key", "autopilot": "turn on Autopilot",
     "unlock": "unlock sensitive actions",
     "schedule": "create, change or turn on a scheduled task",
+    "browser": "change which browser Delta uses",
+    "signin": "open Delta's private browser on the PC for signing in",
 }
 
 
@@ -59,6 +61,8 @@ REMOTE_PIN_TOOLS = {
     "run_python": "run code on the PC",
     # a schedule runs later, unattended: making one or turning it back on from a phone needs the PIN
     "schedule_task": "create a scheduled task", "resume_schedule": "turn a scheduled task back on",
+    # opens a browser window on the PC for whoever is there to sign in to (delta.tools.browser_switch)
+    "open_signin_browser": "open Delta's private browser on the PC",
 }
 # Read tools that need the PIN remotely only when they look outside the allowed folders.
 REMOTE_PIN_OUTSIDE_ALLOWED = {"list_dir": "list a folder", "search_files": "search files",
@@ -90,15 +94,18 @@ def pin_hint(guard: Any, channel: str, then: str = "ask again") -> str:
     return f"{channel.capitalize()} cannot take the PIN: do this from the PC or from Telegram after /unlock."
 
 
-def tool_refusal(guard: Any, channel: str, user: str, tool: str, outside_allowed: bool = False) -> str | None:
+def tool_refusal(guard: Any, channel: str, user: str, tool: str, outside_allowed: bool = False,
+                 extra: str | None = None) -> str | None:
     """None when a tool call from this request may run; otherwise why not (for the model and the user).
-    Called by ToolExecutor for every call, so no tool and no channel can skip it."""
+    Called by ToolExecutor for every call, so no tool and no channel can skip it.
+    extra: what this particular call would do when the tool itself says it needs the PIN (e.g. set_browser
+    saving a setting); it only ever adds a PIN requirement, never removes one."""
     if guard is None or not is_remote(channel):
         return None
     if guard.locked:
         guard.audit.record("guard.blocked", tool=tool, channel=channel, user=user, why="locked")
         return guard.locked_message()
-    what = needs_remote_pin(tool, outside_allowed)
+    what = needs_remote_pin(tool, outside_allowed) or extra
     if what is None:
         return None
     if guard.is_unlocked(user):

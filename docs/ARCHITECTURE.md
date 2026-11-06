@@ -52,6 +52,8 @@ A rung that cannot prove its result hands over to the next one **with what it al
 | `tools/snapshot.py` | after an action on the same page, only the changed elements (`+` new, `~` changed, `-` gone); full listing after a navigation, every 8 actions, or when the diff is not smaller |
 | `llm/usage.py` | per-task token meter: reported usage, an estimate (labelled) when an API gives none, "not reported" for CLI providers |
 | `tools/user_browser.py` | the user's own signed-in Chrome/Edge through UI Automation: read, click (real pointer for web menus), fill (Shift+Enter newlines, paste for long text) |
+| `tools/browser_choice.py` | the four-way browser choice (My default browser, Chrome, Edge, Delta's private browser) mapped onto `browser.mode` / `browser.prefer` / `browser.private_engine`; installed-browser detection (file checks and the Windows default, nothing launched); the sentences that mean a lasting or one-task switch |
+| `tools/browser_switch.py` | `BrowserHub`: both browser kits are built at start-up; the registry holds one stand-in per browser tool that hands each call to the kit the current task uses. Each task is pinned at start (`Orchestrator.run`), so a switch never lands mid-task. `set_browser` (save, or this task only) and `open_signin_browser` ("Sign in to my sites") |
 | `tools/pc.py` | volume, brightness, Windows light/dark theme, screenshot, webcam; pictures go straight to a remote requester |
 | `tools/deliver.py` | `send_file` back to Telegram/Slack (Remote Guard PIN checked) |
 | `tools/emergency.py` | encrypted emergency contacts; `alert_emergency_contacts` (WhatsApp message + optional voice call) |
@@ -323,6 +325,18 @@ double-click icon ─► launcher (pythonw) ─► service: python -m delta run 
 - **Shutdown** stops channels, helpers (Claude Code, Codex, Cline, local models), the service and the
   window. Nothing keeps listening.
 
+## Browser choice
+One choice, changed from anywhere (dashboard Settings, Telegram `/browser`, or chat through `set_browser` and an
+instant intent for whole-message switches like "use Edge from now on"), all through `control.set_browser` /
+`browser_switch.save_choice`: validated against what is installed, saved to the user's settings file, audited
+(`settings.changed` with who changed it). The executor sees the real browser tool behind each stand-in (its
+arguments, risk, domains, password and captcha refusals), so policy, approvals, ExfilGuard and Remote Guard are
+unchanged. Each task is pinned to its browser when it starts; a saved switch applies from the next task, except
+for the task that asked for it when it has not opened a browser yet. A browser named inside a request ("open
+Gmail in Chrome") is a choice for that task only. The private browser's engine changes only between tasks (Delta
+closes the browser it started, then opens the new one on first use). "Sign in to my sites" opens Delta's private
+browser visibly on a page the user picks and keeps it open 30 minutes; Delta never types there.
+
 ## Remote control (Telegram)
 - **Pairing:** a single-use 8-character code shown only on the PC (10 minutes) binds one Telegram account;
   all others are ignored.
@@ -332,7 +346,7 @@ double-click icon ─► launcher (pythonw) ─► service: python -m delta run 
   clipboard, shell, Python; listing outside allowed folders) and runs nothing remote while locked;
   `ApprovalBroker.answer` turns a locked remote answer into a logged *deny* and needs the PIN to approve
   deletes and sends from a phone. The Telegram menu also needs the PIN for camera, screenshot, closing apps,
-  keys and Autopilot. PIN: scrypt hash, 15-minute unlock. 5 wrong PINs lock remote control until someone at
+  keys, Autopilot, switching the browser (`/browser`) and opening the sign-in browser (`/signin`). PIN: scrypt hash, 15-minute unlock. 5 wrong PINs lock remote control until someone at
   the PC unlocks it; `/lock` locks at once. Full list in SECURITY.md.
 - Every remote request shows a Windows notification and is audited. Results (pictures, files) are sent
   back into the chat.
