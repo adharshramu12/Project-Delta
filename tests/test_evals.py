@@ -138,3 +138,38 @@ def test_cli_lists_tasks(capsys):
     assert "mem-remember-colour" in out and "files-create-note" not in out
     args.specs = str(Path("/no/such/folder"))
     assert run_cli(args) == 2
+
+
+def test_portal_tasks_need_a_browser_and_use_the_portal_checks(tmp_path):
+    portal = [t for t in load_specs(SPECS_DIR) if t.suite == "portal"]
+    assert len(portal) >= 5 and all("browser" in t.needs and t.portal is not None for t in portal)
+    assert all(any("password_nowhere" in c for c in t.check) for t in portal)
+    (tmp_path / "bad.yaml").write_text("- id: p\n  request: r\n  portal: {}\n  check: [{status: done}]\n",
+                                       encoding="utf-8")
+    with pytest.raises(SpecError, match="needs: \\[browser\\]"):
+        load_specs(tmp_path)
+
+
+def test_portal_checks_read_the_fake_portal(tmp_path):
+    from types import SimpleNamespace
+
+    from delta.evals.checkers import CheckContext, run_checks
+
+    class Portal:
+        password = "Not-Shown-123"
+
+        def snapshot(self) -> dict[str, int]:
+            return {"logins": 1, "failed": 0, "posts": 1}
+
+    step = SimpleNamespace(tool="check_watcher", ok=True, output="Upcoming exams (1 new): CS399")
+    ctx = CheckContext(sandbox=tmp_path, status="done", answer="ok", steps=[step], portal=Portal(),
+                       asked=[SimpleNamespace(tool="sign_in_handoff")])
+    out = run_checks(ctx, [{"portal_state": {"logins": 1, "posts": 1}}, {"portal_asked": {"tool": "sign_in_handoff",
+                                                                                          "count": 1}},
+                           {"step_output_lacks": {"tool": "check_watcher", "text": ["CS301"]}},
+                           {"password_nowhere": True}])
+    assert all(c["passed"] for c in out), out
+    step.output += " Not-Shown-123 CS301"
+    out = run_checks(ctx, [{"step_output_lacks": {"tool": "check_watcher", "text": "CS301"}},
+                           {"password_nowhere": True}])
+    assert not any(c["passed"] for c in out), out

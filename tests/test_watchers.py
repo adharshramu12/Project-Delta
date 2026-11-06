@@ -419,3 +419,15 @@ async def test_sign_in_tool_output_never_holds_the_secret(setup, monkeypatch):
     assert result.ok
     blob = json.dumps([result.output, result.evidence, tool.summary(SignInArgs(site="College ERP")), tool.spec()])
     assert SECRET not in blob and "student01" not in blob
+
+
+async def test_first_manual_check_allowed_right_after_boot(setup, monkeypatch):
+    """monotonic() counts from boot; a fresh machine must still allow the first check, then rate limit."""
+    watch, w, _, _, _ = setup
+    clock = {"t": 5.0}  # five seconds after boot
+    monkeypatch.setattr("delta.watchers.service._clock", lambda: clock["t"])
+    assert (await watch.check(w, trigger="manual")).status == "done"
+    clock["t"] += 60
+    assert (await watch.check(watch.store.get(w.id), trigger="manual")).status == "skipped"
+    clock["t"] += 10 * 60
+    assert (await watch.check(watch.store.get(w.id), trigger="manual")).status == "done"

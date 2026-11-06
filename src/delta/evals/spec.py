@@ -30,6 +30,8 @@
         vision: false                  no model can see pictures (the non-vision fallback); default true
         settings: {ocr: off}           AttachmentsConfig settings (evals turn OCR off so results never depend on
                                        the PC's OCR languages)
+      portal: {mode: otp, prime: true} optional: the fake college portal with a saved login (and a watcher), wired
+                                       through Delta's real logins and watchers; see delta.evals.portal_fixture
       runs: 2                          optional: the same request this many times, one after another, in the
                                        same data folder (the script holds the replies for every run)
       eval_gate: true                  optional: when every check passes, each learning candidate the task
@@ -40,8 +42,9 @@
       timeout_s: 120
 
 Placeholders in request, setup, script and check: {sandbox} (the task's own folder), {site} (the local
-fixture web site), {python} (this Python), {marker} (a unique word for this run), {attachment_1} ... (the ids
-of the task's attached files, in order).
+fixture web site), {portal} and {portal_other} (the fake college portal and the same server under another
+origin, tasks with `portal:`), {python} (this Python), {marker} (a unique word for this run), {attachment_1} ...
+(the ids of the task's attached files, in order).
 """
 
 from __future__ import annotations
@@ -53,7 +56,7 @@ from typing import Any
 import yaml
 
 SUITES = ("files", "documents", "browser", "apps", "memory", "selfheal", "perception", "helpers", "learning",
-          "connectors", "attachments")
+          "connectors", "attachments", "portal")
 
 
 @dataclass
@@ -76,6 +79,7 @@ class EvalTask:
     grounding: dict[str, Any] | None = None
     connector: dict[str, Any] | None = None  # connected apps: the fake notes app (delta.evals.connector_fixture)
     attachments: dict[str, Any] | None = None  # files sent with the request (delta.attachments)
+    portal: dict[str, Any] | None = None  # the fake college portal with a saved login (delta.evals.portal_fixture)
     runs: int = 1
     eval_gate: bool = False
     check_after_gate: list[dict[str, Any]] = field(default_factory=list)
@@ -107,11 +111,13 @@ def _task(raw: Any, suite: str, where: str) -> EvalTask:
     if fake is not None and not isinstance(fake, dict):
         raise SpecError(f"{where} {raw['id']}: fake_browser must be a mapping of switches")
     extra: dict[str, dict[str, Any] | None] = {}
-    for key in ("perception", "helpers", "learning", "grounding", "connector", "attachments"):
+    for key in ("perception", "helpers", "learning", "grounding", "connector", "attachments", "portal"):
         value = raw.get(key)
         if value is not None and not isinstance(value, dict):
             raise SpecError(f"{where} {raw['id']}: {key} must be a mapping of settings")
         extra[key] = dict(value) if value is not None else None
+    if extra["portal"] is not None and "browser" not in (raw.get("needs") or []):
+        raise SpecError(f"{where} {raw['id']}: a portal task needs: [browser]")
     after = raw.get("check_after_gate") or []
     if not isinstance(after, list) or not all(isinstance(c, dict) and len(c) == 1 for c in after):
         raise SpecError(f"{where} {raw['id']}: check_after_gate must be a list of one-key mappings")

@@ -39,6 +39,7 @@ from delta.watchers.diff import SectionDiff, clean_items, diff, line
 from delta.watchers.recipe import EXTRACT_JS, MAX_FIELD, MAX_ITEMS, Recipe, Section, default_recipe, section_url
 from delta.watchers.store import DEFAULT_INTERVAL_MINUTES, MIN_INTERVAL_MINUTES, Watcher, WatchStore
 
+_clock = time.monotonic  # module level so tests can drive it without touching asyncio's clock
 MANUAL_GAP_S = 10 * 60  # "check now" at most this often per watcher (respect the site)
 LINES_PER_SECTION = 8
 OFFER_WORDS = re.compile(r"exam|assignment|deadline|due|test|quiz|submission|event|lab|viva|project|seminar", re.I)
@@ -185,12 +186,15 @@ class WatchService:
                     hold_lock: bool = True) -> RunReport:
         """One run. hold_lock=False only from inside a task, which already holds Delta's one-task lock."""
         if trigger == "manual":
-            last = self._manual.get(w.id, 0.0)
-            if time.monotonic() - last < MANUAL_GAP_S:
-                wait = int((MANUAL_GAP_S - (time.monotonic() - last)) // 60) + 1
+            # No entry means never checked. Do not default to 0.0: monotonic() counts from boot, so on a
+            # machine up for less than MANUAL_GAP_S the very first manual check would be refused.
+            last = self._manual.get(w.id)
+            now = _clock()
+            if last is not None and now - last < MANUAL_GAP_S:
+                wait = int((MANUAL_GAP_S - (now - last)) // 60) + 1
                 return RunReport("skipped", f"I checked {w.name} a moment ago; to go easy on the site I'll check "
                                             f"again in about {wait} minutes.", "skipped: checked a moment ago")
-            self._manual[w.id] = time.monotonic()
+            self._manual[w.id] = now
         channel, user = channel or w.owner_channel, user or w.owner_user
         if self.guard is not None and is_remote(channel) and self.guard.locked:
             return RunReport("skipped", "", "remote control is locked")

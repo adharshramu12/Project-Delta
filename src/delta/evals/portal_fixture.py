@@ -278,3 +278,97 @@ class PortalSite:
     def expire(self) -> None:
         with self.state.lock:
             self.state.sessions.clear()
+
+
+# --- the eval harness (delta.evals.runner, tasks with `portal:`) ---------------------------------------------------
+# A task with `portal:` gets this site, one saved login for it and, when asked, a watcher, all wired through Delta's
+# real LoginService, WatchService and their tools. Spec keys (all optional):
+#   mode: normal | otp | captcha | recaptcha      the site's sign-in switch (PortalState.mode)
+#   login: {name, origin, permission}             origin: portal (default) | other (the same server on another
+#                                                 host name) | a URL; permission: always (default) | ask
+#   watcher: {name, what, sections}               a watcher with this recipe (delta.watchers.recipe.Section fields)
+#   prime: true                                   one scheduled check before the task: the watcher's baseline
+#   then: [add_exam | expire]                     changes to the site after priming, before the task runs
+# Placeholders: {portal} (the site's URL), {portal_other} (the same site under another origin).
+
+EVAL_PASSWORD = "Eval-Portal-Pass-5180"  # made up; checks assert it never leaves the sign-in form
+NEW_EXAM = ("CS399 Compiler Design", "2026-12-02", "10:00", "Hall C")
+
+
+def sealers() -> dict[str, Any]:
+    """Real DPAPI on Windows, a stand-in elsewhere (developer runs on Linux or macOS)."""
+    from delta.system import vault
+
+    if vault.available():
+        return {}
+    return {"seal": lambda t: "t:" + t[::-1], "unseal": lambda t: t[2:][::-1]}
+
+
+class PortalHarness:
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self.spec = spec
+        self.site = PortalSite(EVAL_PASSWORD)
+        self.site.state.mode = str(spec.get("mode", "normal"))
+        self.password = EVAL_PASSWORD
+        self.logins: Any = None
+        self.watchers: Any = None
+        self.asked: list[Any] = []  # approvals the user was asked for (the runner shares its list)
+        self.site._thread.start()
+
+    def values(self) -> dict[str, str]:
+        return {"portal": self.site.url, "portal_other": self.site.other}
+
+    async def attach(self, data: Any, registry: Any, audit: Any, approvals: Any, mgr: Any, settings: Any,
+                     asked: list[Any]) -> None:
+        from types import SimpleNamespace
+
+        from delta.logins.service import LoginService
+        from delta.logins.store import LoginStore
+        from delta.logins.tools import login_tools
+        from delta.tools.browser import settle
+        from delta.watchers.recipe import Recipe
+        from delta.watchers.service import WatchService
+        from delta.watchers.store import WatchStore
+        from delta.watchers.tools import watcher_tools
+
+        self.asked = asked
+        spec = self.spec
+        raw = dict(spec.get("login") or {})
+        origin = str(raw.get("origin", "portal"))
+        origin = {"portal": self.site.url, "other": self.site.other}.get(origin, origin)
+        store = LoginStore(data / "logins", **sealers())
+        name = str(raw.get("name", "College ERP"))
+        store.add(name, origin, USER, self.password, login_url=origin + "/login",
+                  permission=str(raw.get("permission", "always")))
+        self.logins = LoginService(store, audit, approvals, settle=settle)
+        hub = SimpleNamespace(mgr=mgr, settings=settings)
+        for tool in login_tools(self.logins, hub):
+            registry.register(tool)
+        self.watchers = WatchService(WatchStore(data / "watchers.db", **sealers()), self.logins, hub, None, None,
+                                     audit, settle=settle)
+        for tool in watcher_tools(self.watchers):
+            registry.register(tool)
+        if spec.get("watcher"):
+            w = dict(spec["watcher"])
+            recipe = Recipe.parse({"sections": list(w.get("sections") or [])}) if w.get("sections") else None
+            made = self.watchers.create(str(w.get("name", "ERP")), name, [str(x) for x in w.get("what") or ["exams"]],
+                                        recipe=recipe)
+            if spec.get("prime"):
+                report = await self.watchers.check(made, trigger="schedule")
+                if report.status != "done":
+                    raise RuntimeError(f"priming the watcher failed: {report.summary}")
+        for change in spec.get("then") or []:
+            if change == "add_exam":
+                with self.site.state.lock:
+                    self.site.state.exams.append(NEW_EXAM)
+            elif change == "expire":
+                self.site.expire()
+            else:
+                raise ValueError(f"unknown portal change {change!r}")
+
+    def snapshot(self) -> dict[str, int]:
+        s = self.site.state
+        return {"logins": s.logins, "failed": s.failed, "posts": len(s.posts)}
+
+    def close(self) -> None:
+        self.site.__exit__(None, None, None)
