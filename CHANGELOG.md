@@ -53,6 +53,25 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   with nothing lost.
 - Scripted evals `evals/tasks/style.yaml` (identity, slop check, warmth, academy line, email approval) and an `asked`
   checker.
+- **Telegram menu, complete and grouped**: the "/" menu now lists every command the bot handles (it was missing
+  `/tasks`, `/undo`, `/disconnect` and `/start`), grouped by area, with short descriptions and no emojis. It is set
+  for private chats on every start, only written when it changed, and an older default or per-chat list that would
+  hide it is removed. `/help` (or typing `menu`) shows the same list by area, with Recent chats and New chat
+  buttons. One list in code (`delta.channels.menu`) feeds the menu, `/help` and the text menu; a test checks it
+  against the registered handlers both ways.
+- **Old chats from Telegram**: `/new` starts a fresh chat, `/chats` lists your recent ones (title, date, short id,
+  Open buttons), `/open 2` or `/open <id>` continues one, `/find <words>` searches your past chats and shows the
+  matching lines. Each phone chat now has an owner (`telegram:<user id>`), so you only ever see your own chats,
+  never the dashboard's or another paired user's; your existing Telegram chat is kept as your first one. Nothing
+  works while remote control is locked.
+- **Long chats without guessing**: past the recent window, a request also gets a short rolling outline of the older
+  turns (stored, extended only with turns that left the window) and the older lines that match it, quoted with
+  their turn number, plus a line telling the model that anything not shown is unknown and to say so. No extra AI
+  call; at most a few hundred characters. Two scripted evals: a 40-turn chat where the answer is in the first turn
+  (`chat-long-recalls-early-turn`) and one where it was never given (`chat-long-never-given`).
+- **Text menu for text-only channels**: the same menu and chat commands as typed words (`menu`, `chats`,
+  `open 2`, `find wifi code`, `new`, `stop`, `status`), formatted for WhatsApp. Delta has no WhatsApp control
+  channel yet, so this is not reachable from WhatsApp today; it is ready for when one is added.
 - **Saved logins in your own browser**: `sign_in` now fills a saved login in the browser the task uses, including
   your own default browser (Chrome or Edge, through Windows UI Automation on Delta's one window there), instead of
   moving the task to the private browser. Every existing rule applies the same way (exact origin, no lookalike,

@@ -68,6 +68,7 @@ A rung that cannot prove its result hands over to the next one **with what it al
 | `api/documents_routes.py` | list, preview and download documents in the dashboard (token-protected, listed files only) |
 | `safety/*` | policy matrix, approvals broker, hash-chained audit log, **Remote Guard** (PIN, unlock window, lockout) |
 | `channels/telegram.py`, `channels/pc_menu.py` | one-time-code pairing, commands, voice notes, question forms, PC controls, Remote Guard checks |
+| `channels/menu.py`, `channels/telegram_menu.py` | the one command list (Telegram "/" menu, `/help`, typed text menu), and a person's own chats from the phone: `/new`, `/chats`, `/open`, `/find` |
 | `memory/*` | profile facts, task episodes, learned skills with recipes |
 | `system/*` | governor (CPU/RAM/GPU/temps/battery), lifecycle, logging, secrets (Windows Credential Manager), PC control, notifications |
 | `daemon.py` | the background service, the lean app window, leftover-window cleanup, full shutdown |
@@ -388,6 +389,18 @@ and a long chat costs no more per request than a short one. Memory, learned skil
 and the audit log are shared by all chats. Greetings and thanks are answered on the spot (0 tokens)
 and never name a chat. A chat's work keeps running when you switch away; the sidebar shows a
 pulsing dot while it works and a green dot when an answer is waiting.
+
+**Phone chats.** A chat started from Telegram has an owner (`telegram:<user id>`). That person's current chat is
+the one they used last; `/new` starts another and `/open` makes an old one current again. `/chats`, `/open` and
+`/find` (`ChatStore.owned`, `ChatStore.search`) only ever see the sender's own chats, never the dashboard's or
+another paired user's, and do nothing while remote control is locked.
+
+**Long chats.** When a chat is longer than the recent window, `context_for(chat_id, query=request)` adds, with no AI
+call: a rolling outline of the older turns (the chat's first two requests, its latest five older ones, the rest
+counted; stored in `chat_summaries` and only extended with turns that newly left the window), up to three older
+lines that share the request's content words, quoted word for word as `[#turn Role]`, and a line saying that what
+is not shown is unknown and must not be guessed. That adds at most about 1.3k characters, and nothing at all for a
+short chat.
 
 ## Token strategy
 | Waste | Fix |

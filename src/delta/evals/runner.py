@@ -342,6 +342,8 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     channel = connector.channel if connector is not None else "api"
     req = TaskRequest(fill(task.request, values), channel=channel, user="5" if channel != "api" else "",
                       attachments=attached)
+    if setup.get("chat") or setup.get("chat_filler"):  # an earlier conversation: the request continues it
+        req.chat_id, req.history = _chat_history(setup, data, req.text)
     started = time.monotonic()
     try:
         for _ in range(task.runs - 1):  # earlier runs of a repeated task: same data folder, same script
@@ -375,7 +377,7 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
                        tasks_db=data / "tasks.db", timeline=engine.timeline(req.id), undo=undo,
                        policy=executor.policy, task_id=req.id, request=req.text, memory_store=memory,
                        learning=learning_store, skills=skill_store, gate=gate, connector=connector,
-                       registry=registry, portal=portal, asked=asked, data=data)
+                       registry=registry, portal=portal, asked=asked, data=data, history=req.history)
     out.checks = await asyncio.to_thread(run_checks, ctx, fill(task.check, values))
     out.passed = bool(out.checks) and all(c["passed"] for c in out.checks)
     if task.eval_gate and gate is not None:
@@ -404,6 +406,28 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         if extra is not None:
             extra.close()
     return out
+
+
+def _chat_history(setup: dict[str, Any], data: Path, request: str) -> tuple[str, str]:
+    """A chat with the turns in `setup.chat` ({user: ...} or {delta: ...}, in order), then `chat_filler` everyday
+    request/answer pairs, made through Delta's real ChatStore. Returns the chat id and the recap the request gets
+    (ChatStore.context_for with the request as the query, as the dashboard and Telegram do)."""
+    from delta.memory.chats import ChatStore
+
+    store = ChatStore(data / "chats.db")
+    try:
+        chat = store.create(owner="telegram:5")
+        for turn in setup.get("chat") or []:
+            for role in ("user", "delta"):
+                if role in turn:
+                    store.add(chat.id, role, str(turn[role]))
+        for i in range(int(setup.get("chat_filler") or 0)):
+            store.add(chat.id, "user", f"Open notepad and type shopping item {i}: tomatoes, onions and rice, then "
+                                       "save it on the desktop as list.txt")
+            store.add(chat.id, "delta", f"Done: item {i} is typed in list.txt on your desktop.")
+        return chat.id, store.context_for(chat.id, query=request)
+    finally:
+        store.close()
 
 
 async def _attachments(task: EvalTask, data: Path, values: dict[str, str]) -> tuple[Any, list[str]]:

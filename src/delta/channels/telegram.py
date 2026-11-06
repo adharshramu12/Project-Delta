@@ -21,44 +21,14 @@ from typing import Any
 
 from delta.bootstrap import Container
 from delta.channels.base import approval_text, chunks, is_allowed, result_text, to_html
+from delta.channels.menu import help_text
 from delta.channels.pc_menu import PCMenu
 from delta.core.state import TaskRequest
 from delta.safety.approvals import ApprovalRequest
 from delta.system.logging import log
 
-HELP = (
-    "<b>Talk to me normally</b> to get anything done on your PC: \"play ramadasu songs\", "
-    "\"find the biggest files in Downloads\", \"open notebooklm and make a notebook\"...\n\n"
-    "<b>Instant controls</b> (no AI, no tokens):\n"
-    "/ai - see or switch the main AI\n"
-    "/model - pick the model for the main AI\n"
-    "/mode - permission level (Careful, Balanced, Trusted, Autopilot)\n"
-    "/browser - which browser I use: your default, Chrome, Edge or my private one (switching needs your PIN)\n"
-    "/signin - open my private browser on the PC so you can sign in to your sites (needs your PIN)\n"
-    "/keys - replace an API key (when credits or limits run out)\n\n"
-    "<b>Your PC</b>:\n"
-    "/volume - mute, louder, quieter (or /volume 30)\n"
-    "/brightness - screen brightness (laptop screens)\n"
-    "/theme - Windows light or dark mode\n"
-    "/windows - what is open on the PC, tap to close it\n"
-    "/screen - a screenshot of the PC now\n"
-    "/camera - a photo from the webcam of whoever is at the PC\n\n"
-    "<b>Connected apps</b>: /apps to see them, /connect notion to add one (needs your PIN; you finish the sign-in "
-    "on the PC), /disconnect notion. Then just ask: \"search my Notion for the launch plan\".\n\n"
-    "<b>Schedules</b>: \"every day at 9 am check my attendance\", \"remind me at 6 pm to call Ravi\", "
-    "\"what's scheduled?\" (making or turning on a schedule from here needs your PIN)\n\n"
-    "/stop - stop what I'm doing now (or just send \"stop\"); /stop all - stop everything waiting too\n"
-    "/tasks - recent tasks; resume or discard one that was interrupted\n"
-    "/undo - put back the files a task changed (needs your PIN)\n"
-    "/unlock - enter your PIN (screen, camera, files, commands, approving deletes or sends,\n"
-    "  closing apps and keys need it)\n"
-    "/lock - lock all remote control now (only the PC can unlock it)\n"
-    "/status - PC health and AIs available\n"
-    "/help - this list\n\n"
-    "🎙 You can also just <b>send a voice note</b>: Telugu, Hindi or English.\n"
-    "<b>Send a photo or a file</b> (PDF, Word, PowerPoint, text) with a caption saying what you want, for example "
-    "\"summarise this\" or \"what is wrong in this screenshot?\""
-)
+# /help: every command by area, from the one list the "/" menu is made from (delta.channels.menu)
+HELP = help_text("telegram")
 
 # Pairing codes: no look-alike characters (0/O, 1/I/L), so they are easy to read off the screen and type.
 PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -90,6 +60,7 @@ class TelegramChannel(PCMenu):
         self._forms: dict[str, dict[str, Any]] = {}  # user -> open question form (delta.core.questions)
         self._awaiting_key: dict[str, tuple[str, float]] = {}  # user -> (key name, until) after /keys
         self._pending_pin: dict[str, tuple[Any, str, float]] = {}  # user -> (action to run, what, until)
+        self.phone_chats: Any = None  # this channel's chats per person (delta.channels.menu), set by telegram_menu
         self._pc_init()
         # concurrent_updates: an approval button must work while a long task is still running
         self.app = Application.builder().token(token).concurrent_updates(True).build()
@@ -130,6 +101,9 @@ class TelegramChannel(PCMenu):
         from delta.channels.telegram_logins import attach as attach_logins
 
         attach_logins(self)  # /logins and /watchers: read-only (delta.logins, delta.watchers)
+        from delta.channels.telegram_menu import attach as attach_menu
+
+        attach_menu(self)  # /new, /chats, /open, /find: this person's own chats (delta.channels.menu)
 
     async def start(self) -> None:
         self.c.approvals.add_presenter(self.name, self._present)
@@ -141,19 +115,10 @@ class TelegramChannel(PCMenu):
         self._menu_task = asyncio.create_task(self._set_menu())  # cosmetic: not part of the start-up timeout
 
     async def _set_menu(self) -> None:
-        with contextlib.suppress(Exception):  # the "/" menu in the chat
-            await self.app.bot.set_my_commands([
-                ("ai", "See or switch the main AI"), ("model", "Pick the model"),
-                ("mode", "Permission level"), ("browser", "Which browser I use"),
-                ("signin", "Open my private browser to sign in"), ("keys", "Replace an API key"),
-                ("stop", "Stop the running task"),
-                ("lock", "Lock remote control now"), ("unlock", "Enter your PIN"),
-                ("volume", "PC volume"), ("brightness", "Screen brightness"), ("theme", "Windows light / dark mode"),
-                ("apps", "Connected apps (Notion, GitHub...)"), ("connect", "Connect an app"),
-                ("logins", "Saved site logins (list only)"), ("watchers", "Sites I watch for you"),
-                ("windows", "Open windows, tap to close"),
-                ("screen", "Screenshot of the PC"), ("camera", "Webcam photo"),
-                ("status", "PC health and AIs"), ("help", "What I can do")])
+        """The "/" menu: every command the bot handles, for private chats (delta.channels.telegram_menu)."""
+        from delta.channels.telegram_menu import sync_menu
+
+        await sync_menu(self.app.bot, self.allowed)
         log.info("telegram.started", bot=self.bot_name)
 
     async def send_file(self, user: str, path: Path, caption: str = "") -> None:
@@ -247,7 +212,9 @@ class TelegramChannel(PCMenu):
 
     async def _help_cmd(self, update: Any, ctx: Any) -> None:
         if is_allowed(update.effective_user.id, self.allowed):
-            await update.message.reply_text(HELP, parse_mode="HTML")
+            from delta.channels.telegram_menu import help_buttons
+
+            await update.message.reply_text(HELP, parse_mode="HTML", reply_markup=help_buttons(self))
 
     def _ai_menu(self) -> tuple[str, Any]:
         from delta.control import main_ai_choices
@@ -430,6 +397,9 @@ class TelegramChannel(PCMenu):
             settled, why = self.c.approvals.edit(req_id, update.message.text, by=f"telegram:{user.id}")
             await update.message.reply_text("Got it. I'll redraft it and show you again." if settled else
                                             f"That email is no longer waiting ({why}).")
+            return
+        if (update.message.text or "").strip().lower() in ("menu", "help"):  # the menu, typed: no AI, no tokens
+            await self._help_cmd(update, ctx)
             return
         if (form := self._forms.pop(str(user.id), None)) is not None:
             from delta.core.questions import answers_text
@@ -669,13 +639,10 @@ class TelegramChannel(PCMenu):
                 os.unlink(tmp)
 
     def _chat(self, uid: str) -> str:
-        """This person's Telegram conversation (with memory, also in the dashboard sidebar)."""
-        chats = getattr(self.c, "chats", None)
-        if chats is None:
-            return ""
-        title = f"Telegram {uid}"
-        found = next((ch for ch in chats.list(title) if ch.title == title), None)
-        return (found or chats.create(title)).id
+        """This person's current Telegram conversation (with memory, also in the dashboard sidebar): the one they
+        used last, or the one /new or /open picked. Their chat from before /new existed ("Telegram <id>") is
+        theirs and stays their first chat."""
+        return self.phone_chats.current(uid)
 
     async def _run(self, update: Any, uid: str, text: str, attachments: list[Any] | None = None) -> None:
         """Do what was asked. The chat's recent turns go along, so an answer like "the second one" means
@@ -692,7 +659,8 @@ class TelegramChannel(PCMenu):
         files = list(attachments or [])
         try:
             chat_id = self._chat(uid)
-            history = chats.context_for(chat_id) if chats and chat_id else ""
+            # recent turns, plus for a long chat a short outline and the older lines that match this request
+            history = chats.context_for(chat_id, query=text) if chats and chat_id else ""
             if files and chat_id and (svc := self._attachments()) is not None:
                 files = [svc.store.move(a, chat_id) for a in files]
             if chats and chat_id:

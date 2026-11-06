@@ -9,6 +9,8 @@
       setup:                           optional, before the task runs
         files: {"in.txt": "text"}      written into the sandbox folder
         memory: ["fact", ...]          added to Delta's memory
+        chat: [{user: ...}, {delta: ...}]   earlier turns of the chat the request continues (ChatStore)
+        chat_filler: 40                then this many everyday request/answer pairs, so the chat is long
       script:                          scripted model replies (the CI mode); see delta.evals.scripted
         plan: [{...planner JSON...}]
         chat: [{call: {tool: write_file, args: {...}}}, {text: "DONE: ..."}]

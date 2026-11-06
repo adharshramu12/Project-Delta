@@ -130,6 +130,15 @@ saying what you found (it worked, or how it failed) is very welcome.
 - Telegram pairing, the PIN unlock, `/lock`, Remote Guard approvals from a phone, and Windows notifications.
 - The wrong-PIN count surviving a real restart of the service on a PC (tested with the state file, not with a
   phone).
+- **The Telegram "/" menu on a real bot**: that a phone shows the new grouped list after Delta starts (Telegram
+  apps cache the menu; reopening the chat may be needed), and that clearing the old default and per-chat lists
+  behaves as the Bot API documents. Tested against a fake bot only. `/new`, `/chats`, `/open`, `/find` and their
+  buttons were tested with fake Telegram updates, not from a real phone.
+- **WhatsApp menu**: Delta has no WhatsApp control channel, so the typed menu and chat commands
+  (`delta.channels.menu.handle_text`) are only unit tested; nothing receives WhatsApp messages yet.
+- **Long-chat recall with a real model**: the scripted evals check what the request carries (the quoted older line
+  with its turn number, or nothing and the no-guess line); whether a real model then answers from it, or says it
+  doesn't know, was not measured.
 
 ## AI providers
 
