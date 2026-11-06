@@ -49,6 +49,8 @@ class AgentConfig(BaseModel):
     auto_observe: bool = True  # after each mouse/keyboard/browser action, show the model the result
     max_attempts: int = 3
     approval_timeout_s: float = 300
+    # Tokens one task may use before Delta pauses and asks whether to keep going. 0 = no limit.
+    token_budget: int = 0  # 0 or less = off
 
 
 class SearchConfig(BaseModel):
@@ -158,6 +160,9 @@ class BrowserConfig(BaseModel):
     mode: Literal["your-browser", "delta-profile"] = "your-browser"
     prefer: Literal["auto", "chrome", "edge"] = "auto"  # auto = your Windows default browser
     orange_cursor: bool = True  # orange mouse pointer while Delta controls the mouse/keyboard
+    # Delta profile: after an action on the same page, send the AI only what changed on it.
+    snapshot_diffs: bool = True
+    full_snapshot_every: int = 8  # a full page listing at least this often (below 1 counts as 1)
 
 
 class CaptchaConfig(BaseModel):

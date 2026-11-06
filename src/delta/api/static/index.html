@@ -823,10 +823,17 @@ function connect() {
 }
 
 function renderAnswer(r, live) {
-  const t = r.tokens || {}, k = n => n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
-  const cost = t.calls ? ` · ${t.calls} AI calls · ${k((t.input || 0) + (t.output || 0))} tokens${t.cached ? " (+" + k(t.cached) + " cached)" : ""}`
+  const t = r.tokens || {}, u = r.usage || {}, k = n => n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
+  // Tokens per task: reported by the AI, an estimate (labelled), or "not reported" (some CLI AIs).
+  const src = u.source, tok = (u.input || 0) + (u.output || 0);
+  const amount = src === "not reported" ? "tokens not reported"
+               : src ? `${k(tok)} tokens${src === "estimate" ? " (estimate)" : src === "mixed" ? " (part estimate)" : ""}`
+               : `${k((t.input || 0) + (t.output || 0))} tokens`;
+  const calls = u.calls || t.calls;
+  const cost = calls ? ` · ${calls} AI calls · ${amount}${t.cached ? " (+" + k(t.cached) + " cached)" : ""}`
              : r.status === "done" ? " · instant, 0 tokens" : "";
-  add("msg" + (r.status === "done" || r.status === "needs_user" ? "" : " failed"), (r.status === "needs_user" ? "❓ " : "") + r.answer, `${r.status}${r.provider ? " · via " + r.provider : ""}${r.fallback ? " · " + r.fallback : ""}${r.attempts ? " · " + r.attempts + " attempt(s)" : ""}${cost}`);
+  const took = r.wall_s ? ` · ${r.wall_s < 60 ? r.wall_s.toFixed(1) + " s" : Math.floor(r.wall_s / 60) + " min " + Math.round(r.wall_s % 60) + " s"}` : "";
+  add("msg" + (r.status === "done" || r.status === "needs_user" ? "" : " failed"), (r.status === "needs_user" ? "❓ " : "") + r.answer, `${r.status}${r.provider ? " · via " + r.provider : ""}${r.fallback ? " · " + r.fallback : ""}${r.attempts ? " · " + r.attempts + " attempt(s)" : ""}${cost}${took}`);
   if (r.checks && r.checks.length) showProof(r);
   if (live && r.status === "needs_user" && r.asked_about) showOptions(r);
 }

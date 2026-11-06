@@ -89,6 +89,8 @@ class ProofRecorder:
         data = {"task_id": result.task_id, "status": result.status, "answer": result.answer,
                 "attempts": result.attempts, "provider": result.provider, "finished": time.time(),
                 "verification": asdict(result.verification) if result.verification else None,
+                "tokens": getattr(result, "tokens", {}), "usage": getattr(result, "usage", {}),
+                "wall_s": getattr(result, "wall_s", 0.0),
                 "steps": [asdict(s) for s in result.steps]}
         (self.dir / "run.json").write_text(json.dumps(data, indent=1, default=str), encoding="utf-8")
         self.dir = None

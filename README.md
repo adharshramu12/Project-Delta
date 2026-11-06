@@ -27,7 +27,7 @@ asks before anything risky, and **verifies every task before it says "done".**
 | ✅ **Verified, not hopeful** | Plan → act → **check the result against clear goals** → retry or tell you honestly what failed. |
 | 🤝 **A partner, not a chatbot** | Warm and honest in your own tone. It reads the mood, corrects you kindly when you're wrong, and says clearly what it can and can't do. |
 | 🪶 **Light on your laptop** | ~100 MB in the background, near-zero CPU at rest, **no GPU** unless you choose a local model. **Shutdown** stops everything. |
-| 🪙 **Careful with tokens** | Greetings cost 0 tokens. A chat reply and what Delta learns from it come from **one** AI call. Each step sends only the tools it needs. |
+| 🪙 **Careful with tokens** | Greetings cost 0 tokens. A chat reply and what Delta learns from it come from **one** AI call. Each step sends only the tools it needs, and a browser step on the same page sends only what changed. Every answer shows its tokens and time; you can set a per-task token limit. |
 
 ## What Delta can do
 

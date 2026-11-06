@@ -28,6 +28,7 @@ import psutil
 from pydantic import BaseModel, Field, model_validator
 
 from delta.system.logging import log
+from delta.tools import snapshot
 from delta.tools.base import Risk, Tool, ToolResult
 from delta.tools.desktop import click_risk
 
@@ -101,8 +102,9 @@ REFS_JS = """() => {
 REF_LIMIT = 200  # elements numbered per read; the listing itself is cut by the read budget
 SNAPSHOT_CHARS = 1200  # page summary returned with every action: enough to pick the next step
 SNAPSHOT_ELEMENTS = 30
-SETTLE_IDLE_MS = 1500  # the most an action waits for the network to go quiet
-QUIET_S = 0.25  # no request in flight for this long counts as quiet
+SETTLE_IDLE_MS = 1500  # the most an action waits for the network and the DOM to go quiet
+QUIET_S = 0.2  # no request in flight for this long counts as quiet
+DOM_QUIET_MS = 150  # no DOM change for this long counts as rendered
 ELEMENTS_JS = REFS_JS % {"limit": REF_LIMIT}  # kept name: older callers evaluate ELEMENTS_JS
 
 
@@ -194,6 +196,10 @@ class BrowserManager:
         self.current_url = ""
         self.refs: dict[int, ElementRef] = {}  # numbered elements from the latest listing of the page
         self.refs_url = ""
+        # Act-and-observe sends only what changed on the same page (snapshot.py); off = full every time.
+        self.diff_snapshots = True
+        self.full_every = snapshot.FULL_EVERY
+        self.snap = snapshot.SnapshotState()  # what the model was last shown of this page
 
     def remember_refs(self, elements: list[ElementRef], url: str) -> None:
         """The latest listing replaces the old one: only refs the agent was just shown are valid."""
@@ -318,19 +324,55 @@ async def _network_quiet(pending: set[Any], deadline: float) -> None:
         await asyncio.sleep(0.05)
 
 
+# Resolves once the DOM has had no mutation for %(quiet)d ms, or after %(cap)d ms at most. Plain
+# numbers are written into the script (no evaluate argument) so it runs on any page object.
+DOM_QUIET_JS = """() => new Promise((resolve) => {
+  let timer = null, cap = null;
+  const done = () => { obs.disconnect(); clearTimeout(timer); clearTimeout(cap); resolve(true); };
+  const obs = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, %(quiet)d); });
+  obs.observe(document, {subtree: true, childList: true, attributes: true, characterData: true});
+  timer = setTimeout(done, %(quiet)d);
+  cap = setTimeout(done, %(cap)d);
+})"""
+
+
+async def _dom_quiet(page: Any, deadline: float) -> None:
+    """Until the page stops changing its DOM for DOM_QUIET_MS, or the deadline passes. A page that
+    navigates away meanwhile ends the wait (its script context is gone): the network wait covers it."""
+    left_ms = int((deadline - time.monotonic()) * 1000)
+    if left_ms <= 0:
+        return
+    js = DOM_QUIET_JS % {"quiet": DOM_QUIET_MS, "cap": left_ms}
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(page.evaluate(js), left_ms / 1000 + 0.5)
+
+
+async def _dom_ready(page: Any, timeout_ms: int) -> None:
+    """Until the document is parsed. Asks the document first: a page restored from the back-forward
+    cache fires no load events, so Playwright's load-state wait would sit out its whole timeout."""
+    with contextlib.suppress(Exception):
+        if await asyncio.wait_for(page.evaluate("document.readyState"), 2.0) in ("interactive", "complete"):
+            return
+    with contextlib.suppress(Exception):
+        await page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+
+
 async def settle(page: Any, idle_ms: int = SETTLE_IDLE_MS) -> None:
-    """Wait for the page to be ready after an action, bounded: the document parsed, then up to
-    idle_ms for the network to go quiet (including requests the action itself started), then two
-    animation frames so scripts have rendered. Every step gives up quietly: a busy page (live
-    feeds, ads) must not stall the agent."""
-    with contextlib.suppress(Exception):
-        await page.wait_for_load_state("domcontentloaded", timeout=10000)
+    """Wait for the page to be ready after an action, driven by events and bounded: the document
+    parsed, then (together, both capped at idle_ms) the network quiet for QUIET_S, including requests
+    the action itself started, and the DOM free of mutations for DOM_QUIET_MS; then two animation
+    frames so scripts have rendered. No fixed sleep: a page that is already still costs ~QUIET_S.
+    (Playwright's "networkidle" is not used: it always waits 500 ms of silence after a load, and
+    returns at once for requests started after the page reached it.) Every step gives up quietly:
+    a busy page (live feeds, ads) must not stall the agent."""
+    await _dom_ready(page, 10000)
     deadline = time.monotonic() + idle_ms / 1000
-    with contextlib.suppress(Exception):
-        await page.wait_for_load_state("networkidle", timeout=idle_ms)
     pending = _INFLIGHT.get(page)
+    waits = [_dom_quiet(page, deadline)]
     if pending is not None:
-        await _network_quiet(pending, deadline)
+        waits.append(_network_quiet(pending, deadline))
+    await asyncio.gather(*waits)
+    await _dom_ready(page, 3000)  # the action may have started a navigation meanwhile
     with contextlib.suppress(Exception):
         await asyncio.wait_for(page.evaluate(
             "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))"), 1.0)
@@ -343,30 +385,65 @@ async def list_refs(page: Any, mgr: BrowserManager) -> list[ElementRef]:
     return elements
 
 
+def _ordered(elements: list[ElementRef]) -> list[ElementRef]:
+    return [e for e in elements if e.in_view] + [e for e in elements if not e.in_view]
+
+
+def _shown(elements: list[ElementRef], budget: int = SNAPSHOT_CHARS,
+           max_elements: int = SNAPSHOT_ELEMENTS) -> list[ElementRef]:
+    """The elements a snapshot lists: on-screen first, at most max_elements and ~budget characters
+    (the same cut select_lines makes)."""
+    out: list[ElementRef] = []
+    size = 0
+    for e in _ordered(elements)[:max_elements]:
+        out.append(e)
+        size += len(e.line())
+        if size > budget:
+            break
+    return out
+
+
 def snapshot_text(title: str, url: str, elements: list[ElementRef], budget: int = SNAPSHOT_CHARS,
                   max_elements: int = SNAPSHOT_ELEMENTS) -> str:
     """Compact page summary for action results: title, URL and the first numbered elements,
     on-screen ones first. Bounded so every action costs at most ~budget characters."""
     from delta.tools.user_browser import select_lines
 
-    ordered = [e for e in elements if e.in_view] + [e for e in elements if not e.in_view]
+    ordered = _ordered(elements)
     lines = [e.line() for e in ordered[:max_elements]]
     more = len(ordered) - len(lines)
     body = select_lines(lines, None, budget) if lines else "(no clickable elements found)"
     tail = f"\n…[{more} more elements; browser_read lists them]" if more > 0 else ""
-    return f"Page: {title} — {url}\n{body}{tail}"
+    return f"{snapshot.FULL_PREFIX}{title} — {url}\n{body}{tail}"
 
 
-async def _observed(page: Any, mgr: BrowserManager, message: str) -> ToolResult:
+def page_listing(mgr: BrowserManager, title: str, url: str, elements: list[ElementRef],
+                 force_full: bool = False) -> str:
+    """The listing to send after an action: only the changes when the model already holds this
+    page (same address, not too many diffs in a row, and the diff is smaller), else in full."""
+    full = snapshot_text(title, url, elements)
+    if force_full:
+        mgr.snap.reset()
+    shown = _shown(elements)
+    more = max(0, len(elements) - len(shown))
+    return snapshot.choose(mgr.snap, title, url, shown, {e.ref for e in elements}, full, more,
+                           enabled=mgr.diff_snapshots, every=mgr.full_every)
+
+
+async def _observed(page: Any, mgr: BrowserManager, message: str, force_full: bool = False) -> ToolResult:
     """Act-and-observe: the action's result carries a short snapshot of the page it left behind,
-    with fresh refs, so the next step usually needs no separate browser_read."""
+    with fresh refs, so the next step usually needs no separate browser_read. On the same page it
+    is only what changed (see snapshot.py); after a navigation it is the full listing."""
     ev = await _evidence(page, mgr)
     try:
         elements = await list_refs(page, mgr)
     except Exception:  # snapshot is a bonus; the action itself succeeded
         mgr.remember_refs([], page.url)
+        mgr.snap.reset()  # the model holds no current listing: the next one is sent in full
         return ToolResult(True, message, ev)
-    return ToolResult(True, f"{message}\n\n{snapshot_text(ev['title'], ev['url'], elements)}", ev)
+    listing = page_listing(mgr, ev["title"], ev["url"], elements, force_full)
+    ev["snapshot"] = "diff" if listing.startswith(snapshot.DIFF_PREFIX) else "full"
+    return ToolResult(True, f"{message}\n\n{listing}", ev)
 
 
 async def _ref_target(page: Any, mgr: BrowserManager, ref: int) -> tuple[Any, ElementRef, str]:
@@ -414,7 +491,7 @@ class BrowserOpen(_BrowserTool[OpenArgs]):
             url = args.url if "://" in args.url else f"https://{args.url}"
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await settle(page)
-            return await _observed(page, self.mgr, f"opened {await page.title()} ({page.url})")
+            return await _observed(page, self.mgr, f"opened {await page.title()} ({page.url})", force_full=True)
 
         return await self._guarded(go)
 
@@ -653,7 +730,7 @@ class BrowserSearch(_BrowserTool[SearchArgs]):
             with contextlib.suppress(Exception):
                 await page.wait_for_selector("a[data-testid=result-title-a], article h2 a", timeout=8000)
             await settle(page)
-            return await _observed(page, self.mgr, f"searched '{args.query}' ({page.url})")
+            return await _observed(page, self.mgr, f"searched '{args.query}' ({page.url})", force_full=True)
 
         return await self._guarded(go)
 
@@ -689,9 +766,11 @@ class BrowserBack(_BrowserTool[NoArgs]):
     async def run(self, args: NoArgs) -> ToolResult:
         async def go() -> ToolResult:
             page = await self.mgr.page()
-            await page.go_back(wait_until="domcontentloaded", timeout=15000)
+            # "commit", not "domcontentloaded": a page restored from the back-forward cache fires no
+            # load events, so waiting for one hung for the full 15 s. settle() then waits for the page.
+            await page.go_back(wait_until="commit", timeout=15000)
             await settle(page)
-            return await _observed(page, self.mgr, "went back")
+            return await _observed(page, self.mgr, "went back", force_full=True)
 
         return await self._guarded(go)
 
