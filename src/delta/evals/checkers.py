@@ -27,6 +27,16 @@ the fixture site's recorded page state, Delta's memory, the task's steps and its
                                         `text`, if given): proves a step was or was not retried
   undo_restores: {path, text}           `delta undo` for this task puts the file back with this text
   undo_skipped: true                    the timeline says a change could not be undone (e.g. too big)
+  memory_trust: {text, trust}           a memory holding `text` has this trust level (trusted/agent/untrusted)
+  memory_absent: text                   no memory holds this text (e.g. a secret that must be redacted)
+  in_prompt: text / not_in_prompt: text what the next task's prompt would carry from memory and the standing
+                                        instructions (untrusted notes and candidate lessons never appear)
+  learn_item: {kind, status, trust, count}  lessons (kind lesson) or repaired recipes (kind recipe) in the gate
+  skill_recipe: {contains | lacks}      the first saved skill's working recipe (JSON text)
+  learning_history: text                some line of the learning history (learn_events) has this text
+  timeline_line: {kind, text}           a memory / grounding / learning line of the run timeline has this text
+  forget: text                          forgetting the memories that hold `text` removes them, and the memory
+                                        file no longer contains the text anywhere (compacted)
 """
 
 from __future__ import annotations
@@ -54,6 +64,11 @@ class CheckContext:
     policy: Any = None    # the task's PolicyEngine (undo restores follow it)
     task_id: str = ""
     meter: dict[str, int] = field(default_factory=dict)  # the task's token meter, incl. perception counters
+    request: str = ""
+    memory_store: Any = None  # MemoryStore
+    learning: Any = None      # LearningStore (tasks with `learning:`)
+    skills: Any = None        # SkillStore
+    gate: Any = None          # PromotionGate
 
 
 Check = Callable[[CheckContext, Any], tuple[bool, str]]
@@ -334,6 +349,103 @@ def _helpers(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
     if "refused_min" in arg:
         good = good and refused >= int(arg["refused_min"])
     return good, f"{len(rows)} helper(s), {ok_count} answered, {refused} refused, {children} child task(s)"
+
+
+def _matching(ctx: CheckContext, text: str) -> list[Any]:
+    if ctx.memory_store is None:
+        return []
+    return [m for m in ctx.memory_store.list(limit=100_000) if text.lower() in m.content.lower()]
+
+
+@check("memory_trust")
+def _memory_trust(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    found = _matching(ctx, str(arg["text"]))
+    if not found:
+        return False, f"no memory holds {arg['text']!r}"
+    trusts = sorted({m.trust for m in found})
+    return all(m.trust == arg["trust"] for m in found), f"memory {arg['text']!r} is {', '.join(trusts)}"
+
+
+@check("memory_absent")
+def _memory_absent(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    hit = any(str(arg).lower() in m.lower() for m in ctx.memories)
+    return not hit, f"memory {'has' if hit else 'does not have'} {arg!r}"
+
+
+def _prompt(ctx: CheckContext) -> str:
+    from delta.learning.corrections import standing_instructions
+
+    parts = [ctx.memory_store.context_for(ctx.request) if ctx.memory_store is not None else ""]
+    if ctx.learning is not None:
+        parts.append(standing_instructions(ctx.learning))
+    return "\n".join(parts)
+
+
+@check("in_prompt")
+def _in_prompt(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    hit = str(arg).lower() in _prompt(ctx).lower()
+    return hit, f"the next prompt {'carries' if hit else 'does not carry'} {arg!r}"
+
+
+@check("not_in_prompt")
+def _not_in_prompt(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    hit = str(arg).lower() in _prompt(ctx).lower()
+    return not hit, f"the next prompt {'carries' if hit else 'does not carry'} {arg!r}"
+
+
+@check("learn_item")
+def _learn_item(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    if ctx.gate is None:
+        return False, "no promotion gate (add `learning:` to the task)"
+    items = [i for i in ctx.gate.items() if i["kind"] == arg.get("kind", i["kind"])
+             and i["status"] == arg.get("status", i["status"]) and i["trust"] == arg.get("trust", i["trust"])]
+    want = int(arg.get("count", 1))
+    seen = [f"{i['ref']} {i['status']} {i['trust']}" for i in ctx.gate.items()]
+    return len(items) == want, f"{len(items)} matching item(s), want {want}: {seen}"
+
+
+@check("skill_recipe")
+def _skill_recipe(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    skills = ctx.skills.list() if ctx.skills is not None else []
+    if not skills:
+        return False, "no saved skill"
+    recipe = min(skills, key=lambda s: s.id).recipe or ""
+    ok = True
+    if "contains" in arg:
+        ok = ok and str(arg["contains"]) in recipe
+    if "lacks" in arg:
+        ok = ok and str(arg["lacks"]) not in recipe
+    return ok, f"working recipe: {recipe[:200]}"
+
+
+@check("learning_history")
+def _learning_history(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    rows = ctx.learning.history(limit=500) if ctx.learning is not None else []
+    hit = any(str(arg).lower() in f"{r['event']} {r['detail']}".lower() for r in rows)
+    return hit, f"learning history {'has' if hit else 'lacks'} {arg!r}: {[r['detail'][:60] for r in rows[:4]]}"
+
+
+@check("timeline_line")
+def _timeline_line(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    lines = (ctx.timeline or {}).get(str(arg["kind"])) or []
+    hit = any(str(arg["text"]).lower() in str(line.get("summary", "")).lower() for line in lines)
+    return hit, f"{arg['kind']} lines: {[str(line.get('summary', ''))[:80] for line in lines]}"
+
+
+@check("forget")
+def _forget(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    store = ctx.memory_store
+    if store is None:
+        return False, "no memory store"
+    found = _matching(ctx, str(arg))
+    if not found:
+        return False, f"no memory holds {arg!r} to forget"
+    n = store.forget([m.id for m in found])
+    left = _matching(ctx, str(arg))
+    raw = b"".join(p.read_bytes() for p in store.path.parent.glob(store.path.name + "*") if p.is_file())
+    in_file = str(arg).encode() in raw
+    return n == len(found) and not left and not in_file, (f"forgot {n}, {len(left)} left, "
+                                                          f"text {'still' if in_file else 'not'} in the file")
 
 
 def run_checks(ctx: CheckContext, checks: list[dict[str, Any]]) -> list[dict[str, Any]]:

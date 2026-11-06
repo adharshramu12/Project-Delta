@@ -41,6 +41,7 @@ from delta.llm.schemas import AllProvidersFailedError, LLMError, Message
 from delta.memory.distill import distill
 from delta.memory.extractor import extract_facts
 from delta.memory.keywords import keywords
+from delta.memory.provenance import fact_trust, recipe_trust, traced_to_user
 from delta.memory.skills import Skill, SkillStore
 from delta.memory.store import MemoryStore
 from delta.safety.audit import AuditLog
@@ -391,6 +392,8 @@ class Orchestrator:
     ladder: Any = None  # ModelLadder (delta.llm.ladder): opt-in cheap-first models. None or empty = off
     perception: Any = None  # Perception (delta.perception): set-of-marks, OCR, the perception cache. None = off
     helpers: Any = None  # HelperSupervisor (delta.helpers): parallel read-only helpers. None or disabled = off
+    gate: Any = None  # PromotionGate (delta.learning.gate): lessons and repaired recipes. None = no candidates
+    lessons: Any = None  # LessonBook (delta.learning.lessons): self-heal recoveries -> lesson candidates. None = off
 
     def __init__(self, settings: Settings, router: ModelRouter, executor: ToolExecutor,
                  memory: MemoryStore | None, governor: Governor | None, events: EventBus,
@@ -408,6 +411,9 @@ class Orchestrator:
         self.proof = proof
         self._planned: set[str] = set()  # tasks whose planner call also did the fact learning
         self._learning: set[asyncio.Task[None]] = set()
+        # task id -> (first outside source, text read from outside), kept from the end of a task until its
+        # learning step has run: the executor forgets both when the task ends.
+        self._after: dict[str, tuple[str | None, str | None]] = {}
         self.browsers: Any = None  # BrowserHub (delta.tools.browser_switch), set by bootstrap
 
     def _finish_proof(self, result: TaskResult) -> None:
@@ -460,6 +466,7 @@ class Orchestrator:
             if pinned is not None:
                 self.browsers.end_task(req.id, pinned)
             CURRENT_REQUEST.reset(current)
+            self._keep_provenance(req.id)
             self.executor.forget_task(req.id)
             for helper in (self.healer, self.ladder):
                 if helper is not None:
@@ -473,6 +480,7 @@ class Orchestrator:
                 await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
             except Exception:
                 log.exception("router.release_failed", task=req.id)
+        result.tainted_by = (self._after.get(req.id) or (None, None))[0] or ""
         result.tokens = dict(self.router.meter)
         result.usage = usage.summary(result.tokens)
         if models := dict(getattr(self.router, "model_calls", None) or {}):
@@ -512,7 +520,7 @@ class Orchestrator:
                 return done
         if not steps and (done := await self._replay(req, steps)):
             return done
-        memory_ctx = self.memory.context_for(req.text, self.s.memory.recall_k) if self.memory else ""
+        memory_ctx = await self._memory_context(req)
         if self.learning and (rules := standing_instructions(self.learning)):
             memory_ctx = (f"STANDING INSTRUCTIONS FROM THE USER (always follow these):\n{rules}\n\n"
                           + (memory_ctx or ""))
@@ -530,8 +538,13 @@ class Orchestrator:
         self._planned.add(req.id)  # the planner already looked for facts to learn: no extra call later
         if plan.remember and self.memory and self.s.memory.enabled and self.s.memory.auto_extract:
             for fact in plan.remember:
-                self.memory.add(fact, kind="profile", source="auto")
-                await self.events.publish("memory.learned", fact=fact)
+                if req.history and not traced_to_user(fact, req.text):
+                    # The planner read earlier turns too (answers that may come from web pages): a fact is
+                    # kept only when the user's own message says it (audit item M7).
+                    log.info("memory.fact_not_from_user", task=req.id)
+                    continue
+                if self.memory.add(fact, kind="profile", source="auto", task_id=req.id):
+                    await self.events.publish("memory.learned", fact=fact)
         if not plan.needs_tools:
             return TaskResult(req.id, "done", plan.answer, provider=self.router.last_provider or "")
         if plan.direct and not steps:
@@ -579,6 +592,18 @@ class Orchestrator:
                                   options=questions[0]["options"] if simple else [],
                                   questions=[] if simple else questions, asked_about=req.text)
             final = final.removeprefix(DONE).strip()
+            report = await self._ground(req, final, steps)
+            if report is not None and (wrong := report.failure(self.s.grounding.mode == "strict")):
+                # A claim the task did not show, or that a check proved wrong: no verifier call, the agent
+                # gets one more go with the reason (the same path as a failed verification).
+                verification = Verification(False, f"grounding: {wrong}", [wrong])
+                await self.events.publish("task.verify", task_id=req.id, attempt=attempt, passed=False,
+                                          reason=verification.reason, checks=[], screenshot=False)
+                self.audit.record("verify", task=req.id, attempt=attempt, passed=False, reason=verification.reason)
+                messages.append({"role": "user", "content": (
+                    f"Grounding check FAILED: {wrong}. Check the real state with a read-only tool, fix what is "
+                    "missing, and in your summary state only what the tools in this task showed.")})
+                continue
             await self._fresh_media_status(req.id, steps)
             shot, target = await self._final_screenshot(steps)  # saved as proof either way
             if self.engine is not None:
@@ -591,8 +616,12 @@ class Orchestrator:
             self.audit.record("verify", task=req.id, attempt=attempt, passed=verification.passed,
                               reason=verification.reason, checks=verification.checks, raw=verification.raw)
             if verification.passed:
-                return TaskResult(req.id, "done", final, attempt, steps, verification,
+                if report is not None and (note := report.footnote()):
+                    final = f"{final}\n\n{note}"
+                done = TaskResult(req.id, "done", final, attempt, steps, verification,
                                   self.router.last_provider or "", plan.skill_id)
+                done.grounding = report.to_dict() if report is not None else {}
+                return done
             messages.append({"role": "user", "content": (
                 f"Verification FAILED: {verification.reason}. Unmet: {verification.missing}. "
                 "Inspect the current state with tools, fix what is missing, then summarise again. "
@@ -621,24 +650,38 @@ class Orchestrator:
             plan = Plan(True, goal=req.text, steps=[f"{s['tool']}" for s in recipe.steps],
                         success_criteria=[f"The request is fulfilled: {req.text}"], skill_id=skill.id)
             await self.events.publish("task.plan", task_id=req.id, plan={**plan.__dict__, "replay": skill.name})
-            for step in recipe.steps:
+            candidates = (self.skills.candidates(skill.id, status="candidate")
+                          if self.gate is not None and self.s.learning.repair_recipes else [])
+            used: list[int] = []  # recipe candidates created or used in this replay (delta.learning.repair)
+            broken = False
+            for index, step in enumerate(recipe.steps):
                 args = fill(step["args"], values)
                 await self.events.publish("task.step", task_id=req.id, tool=step["tool"], args=args)
                 result = await self.executor.execute(step["tool"], args, task_id=req.id)
                 steps.append(StepRecord(step["tool"], args, result.ok, result.output[:2000], result.evidence))
+                self._count(result)
                 if result.evidence.get("user_denied"):
                     return TaskResult(req.id, "cancelled", "OK, I didn't do it.", 1, steps)
-                if not result.ok:
+                if result.ok:
+                    continue
+                fixed = await self._repair_step(req, skill, recipe, index, step, args, result, values, steps,
+                                                candidates)
+                if fixed is None:
+                    broken = True
                     break
-            if all(s.ok for s in steps) and steps and steps[-1].evidence.get("verified"):
+                if fixed:
+                    used.append(fixed)
+            if not broken and steps and steps[-1].ok and steps[-1].evidence.get("verified"):
                 verification = Verification(True, f"replayed skill '{skill.name}'", [], [], False)
-            elif all(s.ok for s in steps) and steps:
+            elif not broken and steps:
                 shot, target = await self._final_screenshot(steps)
                 if self.engine is not None:
                     self.engine.verifying(req.id)
                 verification = await verify(self.router, req.text, plan, steps, "", shot, target)
             else:
                 verification = Verification(False, "a replayed step failed")
+            for cand in dict.fromkeys(used):
+                self.gate.record_run(f"R{cand}", verification.passed, req.id)
             change = self.skills.record(skill.id, success=verification.passed)
             await self.events.publish("skill.changed", change=change.change, skill=change.skill.to_dict())
             if verification.passed:
@@ -659,6 +702,7 @@ class Orchestrator:
         await self.events.publish("task.step", task_id=req.id, tool=tool, args=args)
         result = await self.executor.execute(tool, args, task_id=req.id)
         steps.append(StepRecord(tool, args, result.ok, result.output[:2000], result.evidence))
+        self._count(result)
         if result.evidence.get("user_denied"):
             return TaskResult(req.id, "cancelled", f"OK, I didn't do it. You declined: "
                               f"{result.evidence.get('denied_action', tool)}.", 1, steps)
@@ -941,6 +985,9 @@ class Orchestrator:
                     else:
                         heal = await self.healer.recover(req.id, call.name, call.arguments, result, steps, req.text)
                         result = heal.result
+                self._count(result)
+                if heal is not None and heal.lines and self.lessons is not None:
+                    await self._note_lesson(req, heal, steps, result)
                 if self.ladder is not None:
                     self.ladder.record(req.id, result.ok)
                 if self.proof:
@@ -991,6 +1038,178 @@ class Orchestrator:
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{latest_shot[0]}"}}]})
         return "I ran out of steps for this attempt.", ""
 
+    # --- memory, grounding and learning (Batch D) ------------------------------------------------
+    def _keep_provenance(self, task_id: str) -> None:
+        """Before the executor forgets the task: keep its taint and what it read from outside, for learning."""
+        try:
+            source = self.executor.tainted_by(task_id)
+            observations = getattr(self.executor, "observations", None)
+            outside = observations.outside_text(task_id) if (source and observations is not None) else None
+            self._after[task_id] = (source, outside)
+            while len(self._after) > 64:  # tasks whose learning never ran (shut down): drop the oldest
+                self._after.pop(next(iter(self._after)))
+        except Exception:
+            log.exception("orchestrator.provenance_failed", task=task_id)
+
+    def _count(self, result: Any) -> None:
+        """Usage-meter counters a tool result reports (recall hits)."""
+        ev = getattr(result, "evidence", None) or {}
+        if n := ev.get("memory_hits"):
+            usage.bump(self.router, "memory_hits", int(n))
+        if n := ev.get("memory_untrusted_hits"):
+            usage.bump(self.router, "memory_untrusted_hits", int(n))
+
+    async def _memory_context(self, req: TaskRequest) -> str:
+        if not self.memory:
+            return ""
+        with_hits = getattr(self.memory, "context_with_hits", None)
+        if callable(with_hits):
+            ctx, hits = with_hits(req.text, self.s.memory.recall_k)
+        else:  # a store without hit counts (older or test stores)
+            ctx, hits = self.memory.context_for(req.text, self.s.memory.recall_k), 0
+        if hits:
+            usage.bump(self.router, "memory_hits", hits)
+            if self.engine is not None:
+                self.engine.line(req.id, "memory", f"Recalled {hits} past task note(s) that match this request.",
+                                 data={"hits": hits})
+        return str(ctx or "")
+
+    def _allowed_quietly(self, name: str, args: dict[str, Any]) -> bool:
+        """A read-only call the policy allows without asking (grounding checks never trigger an approval)."""
+        from delta.safety.policy import Verdict
+
+        tool = self.executor.registry.get(name)
+        if tool is None:
+            return False
+        try:
+            decision = self.executor.policy.evaluate(tool, tool.Args.model_validate(args))
+        except Exception:
+            return False
+        return bool(decision.verdict == Verdict.ALLOW and str(decision.risk) == "read")
+
+    async def _ground(self, req: TaskRequest, final: str, steps: list[StepRecord]) -> Any:
+        """Answer grounding (delta.core.grounding). None when switched off."""
+        from delta.core.grounding import GroundingReport, apply_check, check_for, extract_claims, ground
+
+        cfg = self.s.grounding
+        if cfg.mode == "off":
+            return None
+        report = GroundingReport(extract_claims(final))
+        if not report.claims:
+            return report
+        observations = getattr(self.executor, "observations", None)
+        items = observations.items(req.id) if observations is not None else []
+        if items and observations is not None:
+            corpus = observations.corpus(req.id)
+            ok_tools = {o.tool for o in items if o.ok}
+        else:  # an executor without an observation log: the step records (outputs cut to 2000 characters)
+            corpus = "\n".join(f"{st.output}\n{json.dumps(st.args, default=str)}\n"
+                               f"{json.dumps(st.evidence, default=str)}" for st in steps if st.ok)
+            ok_tools = {st.tool for st in steps if st.ok}
+        known = (f"{datetime.now():%A %d %B %Y %H:%M} {save_dir(self.s.files)} {known_folder('Desktop')} "
+                 f"{known_folder('Personal')} {Path.home()}")
+        missing = observations.missing_paths(req.id) if (items and observations is not None) else set()
+        ground(report.claims, corpus, req.text, ok_tools, known, missing)
+        failed_args = [st.args for st in steps if not st.ok]
+        last_page = any(st.tool in BROWSER_TOOLS for st in steps) and "browser_read" in self.executor.registry.names()
+        order = sorted(report.unverified, key=lambda c: (c.kind != "path", c.kind != "number"))
+        for claim in order:
+            if report.checks >= cfg.max_checks:
+                break
+            found = check_for(claim, failed_args, last_page)
+            if found is None or not self._allowed_quietly(*found):
+                continue
+            tool, args = found
+            result = await self.executor.execute(tool, args, task_id=req.id)
+            report.checks += 1
+            steps.append(StepRecord(tool, args, result.ok, result.output[:2000],
+                                    {**result.evidence, "grounding": True}))
+            apply_check(claim, tool, result.output, result.evidence, result.ok)
+        usage.bump(self.router, "grounding_claims", len(report.claims))
+        usage.bump(self.router, "grounding_checks", report.checks)
+        usage.bump(self.router, "unverified_claims", len(report.unverified))
+        usage.bump(self.router, "contradicted_claims", len(report.contradicted))
+        if self.engine is not None:
+            clean = not report.unverified and not report.contradicted
+            self.engine.line(req.id, "grounding", report.summary(), ok=clean,
+                             data={"claims": len(report.claims),
+                                   "unverified": [c.text for c in report.unverified][:10],
+                                   "contradicted": [c.text for c in report.contradicted][:10]})
+        with contextlib.suppress(Exception):
+            await self.events.publish("task.grounding", task_id=req.id, **report.to_dict())
+        return report
+
+    async def _repair_step(self, req: TaskRequest, skill: Skill, recipe: Recipe, index: int, step: dict[str, Any],
+                           args: dict[str, Any], result: Any, values: dict[str, str], steps: list[StepRecord],
+                           candidates: list[Any]) -> int | None:
+        """A replayed step failed: repair just that step (delta.learning.repair). Returns the recipe candidate
+        it used or created, 0 when it recovered without a new version (a retry worked), None when it could not."""
+        from delta.learning.repair import REPAIRABLE, candidate_step, describe_change, repaired, same_recipe
+        from delta.selfheal.taxonomy import classify, is_refusal
+
+        if self.gate is None or not self.s.learning.repair_recipes or not self.skills:
+            return None
+        if is_refusal(result.output, result.evidence):
+            return None
+        tool = str(step["tool"])
+        failure = classify(tool, result.output, result.evidence)
+        if failure not in REPAIRABLE:
+            return None
+        found = candidate_step(candidates, index, values)
+        if found is not None:  # a repaired version of this step is waiting for evidence: try it
+            cand_id, cand_tool, cand_args = found
+            await self.events.publish("task.step", task_id=req.id, tool=cand_tool, args=cand_args)
+            tried = await self.executor.execute(cand_tool, cand_args, task_id=req.id)
+            steps.append(StepRecord(cand_tool, cand_args, tried.ok, tried.output[:2000],
+                                    {**tried.evidence, "recipe_candidate": cand_id}))
+            if tried.ok:
+                if self.engine is not None:
+                    self.engine.line(req.id, "learning",
+                                     f"Step {index + 1} of skill '{skill.name}' failed ({failure}); the repaired "
+                                     f"version from candidate R{cand_id} worked.", ok=True,
+                                     data={"item": f"R{cand_id}", "event": "used"})
+                return cand_id
+            self.gate.record_run(f"R{cand_id}", False, req.id)
+        if self.healer is None:
+            return None
+        heal = await self.healer.recover(req.id, tool, args, result, steps, req.text)
+        if not heal.recovered:
+            return None
+        worked = next((st for st in reversed(steps) if st.ok and st.evidence.get("recovery")), None)
+        if worked is None:
+            return 0
+        new = repaired(recipe, index, worked.tool, worked.args, values)
+        if same_recipe(new.to_json(), skill.recipe):
+            return 0  # the same call worked on a second try: nothing to learn
+        source, outside = None, None
+        with contextlib.suppress(Exception):
+            source = self.executor.tainted_by(req.id)
+            observations = getattr(self.executor, "observations", None)
+            outside = observations.outside_text(req.id) if (source and observations is not None) else None
+        trust, why = recipe_trust([new.steps[index]], req.text, source, outside)
+        cand = self.skills.add_candidate(skill.id, new.to_json(), skill.recipe or "", index, str(failure),
+                                         describe_change(step, worked.tool, worked.args), trust, req.id)
+        usage.bump(self.router, "learning_candidates")
+        tail = ("it is untrusted (" + why + ") and will never replace the working one" if trust != "trusted"
+                else "the working recipe stays until the candidate passes")
+        line = (f"Step {index + 1} of skill '{skill.name}' failed ({failure}); found a way that works and saved it "
+                f"as candidate R{cand.id}: {tail}.")
+        self.gate._history(f"R{cand.id}", "candidate", req.id, line)
+        return int(cand.id)
+
+    async def _note_lesson(self, req: TaskRequest, heal: Any, steps: list[StepRecord], result: Any) -> None:
+        """A self-heal outcome may teach (or count against) a lesson for the site (delta.learning.lessons)."""
+        from delta.learning.lessons import site_of
+
+        try:
+            site = site_of(steps, str(getattr(result, "evidence", {}).get("url") or ""))
+            change = self.lessons.note(req.id, req.text, heal.failure, site, bool(heal.recovered),
+                                       self.executor.tainted_by(req.id))
+            if change is not None and change.change == "candidate":
+                usage.bump(self.router, "learning_candidates")
+        except Exception:
+            log.exception("orchestrator.lesson_failed", task=req.id)
+
     def _over_budget(self) -> str:
         """NEED_USER question once the task's tokens pass the user's per-task budget (off when 0)."""
         budget = self.s.agent.token_budget
@@ -1007,6 +1226,7 @@ class Orchestrator:
 
     async def _learn(self, req: TaskRequest, result: TaskResult) -> None:
         """Self-improvement after a task: memory facts + skills. Never raises."""
+        taint, outside = self._after.pop(req.id, (None, None))
         if result.status in ("cancelled", "needs_user") or result.fast:
             return
         try:
@@ -1015,26 +1235,44 @@ class Orchestrator:
                     self.audit.record("learned", task=req.id, kind="preference", content=text)
                     item = self.learning.find("preference", re.sub(r"\W+", " ", text.lower()).strip())
                     await self.events.publish("learning.added", item=item.to_dict() if item else {"content": text})
-            await self._learn_skill(req, result)
+            await self._learn_skill(req, result, taint, outside)
             if self.memory and self.s.memory.enabled:
                 if result.steps:
-                    self.memory.add(f"{req.text[:200]} -> {result.status}", kind="episode", source="agent")
+                    self.memory.add(f"{req.text[:200]} -> {result.status}", kind="episode", source="agent",
+                                    task_id=req.id)
                 if self.s.memory.auto_extract and req.id not in self._planned:
                     for fact in await extract_facts(self.router, req.text, result.answer):
-                        self.memory.add(fact, kind="profile", source="auto")
-                        await self.events.publish("memory.learned", fact=fact)
+                        # The answer may repeat what a page said: in a task that read outside content a fact is
+                        # kept only when it traces to the user's own words (audit item M7).
+                        if fact_trust(fact, req.text, taint, outside)[0] != "trusted":
+                            self.audit.record("memory.refused", task=req.id, reason="traced to outside content")
+                            continue
+                        if self.memory.add(fact, kind="profile", source="auto", task_id=req.id):
+                            await self.events.publish("memory.learned", fact=fact)
         except Exception as e:
             log.error("learning.failed", task=req.id, error=str(e))
         finally:
             self._planned.discard(req.id)
 
-    async def _learn_skill(self, req: TaskRequest, result: TaskResult) -> None:
+    async def _learn_skill(self, req: TaskRequest, result: TaskResult, taint: str | None = None,
+                           outside: str | None = None) -> None:
         if not self.skills or not self.s.memory.learn_skills:
             return
         verified = result.status == "done" and result.verification is not None and result.verification.passed
         if result.skill_id is not None:  # a learned skill was used: its track record changes
             change = self.skills.record(result.skill_id, success=verified)
         elif verified:
+            # The distiller reads the arguments of the steps that worked. When the task read outside content,
+            # every value it would learn must trace to the user's request, else nothing is learned (M7).
+            acted = [{"tool": st.tool, "args": st.args} for st in result.steps if st.ok]
+            trust, why = recipe_trust(acted, req.text, taint, outside)
+            if trust != "trusted":
+                self.audit.record("skill", task=req.id, change="refused", reason=why)
+                if self.learning is not None:
+                    self.learning.log("S-", "refused", req.id, f"No skill learned: {why}.")
+                if self.engine is not None:
+                    self.engine.line(req.id, "learning", f"Did not learn a skill from this task: {why}.", ok=False)
+                return
             draft = await distill(self.router, req.text, result.steps)
             if draft is None:
                 return

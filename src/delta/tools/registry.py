@@ -16,6 +16,7 @@ from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ValidationError
 
+from delta.core.observations import ObservationLog
 from delta.core.state import CURRENT_REQUEST
 from delta.learning.store import TRUSTABLE_RISKS, Learned, LearningStore, is_folder_scope, split_key
 from delta.safety.approvals import ApprovalBroker, ApprovalRequest
@@ -185,6 +186,8 @@ class ToolExecutor:
         self.undo: Any = None  # UndoStore (delta.selfheal.undo): a copy of each file about to be changed
         # FaultInjector (delta.selfheal.inject): TESTS AND SCRIPTED EVALS ONLY, never set from settings.
         self.faults: Any = None
+        # Full results of every call that ran, per task (memory only): answer grounding and provenance.
+        self.observations = ObservationLog()
 
     @staticmethod
     def action_key(tool: Tool, args: BaseModel, risk: str) -> str:
@@ -252,6 +255,7 @@ class ToolExecutor:
         self._refused.pop(task_id, None)
         self._tainted.pop(task_id, None)
         self._task_grants.pop(task_id, None)
+        self.observations.forget(task_id)
         self.exfil.forget(task_id)
         if self.watchdog is not None:
             self.watchdog.forget(task_id)
@@ -471,6 +475,9 @@ class ToolExecutor:
             await asyncio.to_thread(self.undo.after, task_id, kept, result.ok)
         self.audit.record("tool", task=task_id, tool=name, ok=result.ok, evidence=result.evidence)
         self.exfil.observe(task_id, name, args, result)
+        if task_id:
+            self.observations.add(task_id, name, result.ok, args.model_dump(), result.output, result.evidence,
+                                  name in UNTRUSTED_SOURCES, str(getattr(tool, "risk", "")) == Risk.READ)
         if task_id and result.ok and name in UNTRUSTED_SOURCES and task_id not in self._tainted:
             self._tainted[task_id] = name
             self.audit.record("taint", task=task_id, source=name)

@@ -159,6 +159,15 @@
       }
       card.appendChild(box);
     }
+    // Memory recalled, answer grounding and learning (Batch D): one plain line each.
+    for (const [key, title] of [["memory", "Memory"], ["grounding", "Answer check"], ["learning", "Learning"]]) {
+      const lines = d[key] || [];
+      if (!lines.length) continue;
+      const box = el("div", "heal");
+      box.appendChild(el("b", "", title));
+      for (const l of lines) box.appendChild(el("div", l.ok === false ? "" : "ok", "+" + Math.max(0, l.ts - t0).toFixed(1) + "s  " + l.summary));
+      card.appendChild(box);
+    }
     if (d.undo && (d.undo.available || d.undo.restored || (d.undo.skipped || []).length)) {
       const row = el("div", "undo");
       if (d.undo.available) {

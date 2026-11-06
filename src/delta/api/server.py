@@ -60,6 +60,10 @@ class MemoryIn(BaseModel):
     kind: str = "profile"
 
 
+class LearnActionIn(BaseModel):
+    action: str = Field(pattern="^(promote|reject)$")
+
+
 class Hub:
     """Fan-out of events and approval requests to connected WebSocket clients."""
 
@@ -249,8 +253,23 @@ def create_app(c: Container, token: str) -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/memory", dependencies=[Depends(auth)])
-    async def list_memory() -> list[dict[str, Any]]:
-        return [m.__dict__ for m in c.memory.list()]
+    async def list_memory(trust: str = "", kind: str = "") -> list[dict[str, Any]]:
+        return [m.to_dict() for m in c.memory.list(kind or None, trust=trust or None)]
+
+    @app.get("/api/memory/stats", dependencies=[Depends(auth)])
+    async def memory_stats() -> dict[str, int]:
+        return c.memory.stats()
+
+    @app.post("/api/memory/forget", dependencies=[Depends(auth)])
+    async def forget_memory(body: dict[str, Any]) -> dict[str, int]:
+        """Forget by ids, by task, or by trust: {"ids": [..]}, {"task_id": ".."} or {"trust": "untrusted"}."""
+        ids = [int(i) for i in body.get("ids") or [] if str(i).isdigit()]
+        trust = str(body.get("trust") or "")
+        if trust and trust not in ("untrusted", "agent", "trusted"):
+            raise HTTPException(400, "trust must be untrusted, agent or trusted")
+        n = c.memory.forget(ids, task_id=str(body.get("task_id") or ""), trust=trust)
+        c.audit.record("memory.forget", count=n, by="dashboard")
+        return {"forgotten": n}
 
     @app.post("/api/memory", dependencies=[Depends(auth)])
     async def add_memory(body: MemoryIn) -> dict[str, int]:
@@ -290,12 +309,44 @@ def create_app(c: Container, token: str) -> FastAPI:
 
     @app.post("/api/learned/{item_id}", dependencies=[Depends(auth)])
     async def answer_learned(item_id: int, body: LearnedIn) -> dict[str, Any]:
+        from delta.learning.store import UntrustedPromotionError
+
         store = c.orchestrator.learning
-        item = store.set_status(item_id, "active" if body.action == "keep" else "undone") if store else None
+        try:
+            item = store.set_status(item_id, "active" if body.action == "keep" else "undone",
+                                    by="dashboard") if store else None
+        except UntrustedPromotionError as e:
+            raise HTTPException(409, "it came from outside content and can never become a rule") from e
         if not item:
             raise HTTPException(404, "no such learned item")
         c.audit.record("learned", item=item_id, user_action=body.action, kind=item.kind)
         return item.to_dict()
+
+    @app.get("/api/learn", dependencies=[Depends(auth)])
+    async def list_learn(status: str = "") -> list[dict[str, Any]]:
+        gate = c.orchestrator.gate
+        return gate.items(status or None) if gate else []
+
+    @app.get("/api/learn/history", dependencies=[Depends(auth)])
+    async def learn_history(item: str = "") -> list[dict[str, Any]]:
+        gate = c.orchestrator.gate
+        return gate.history(item or None) if gate else []
+
+    @app.post("/api/learn/{ref}", dependencies=[Depends(auth)])
+    async def learn_action(ref: str, body: LearnActionIn) -> dict[str, Any]:
+        from delta.learning.store import UntrustedPromotionError
+
+        gate = c.orchestrator.gate
+        if gate is None:
+            raise HTTPException(404, "learning is switched off")
+        try:
+            change = gate.promote(ref, by="dashboard") if body.action == "promote" else gate.reject(ref, by="dashboard")
+        except UntrustedPromotionError as e:
+            raise HTTPException(409, "it came from outside content and can never become a rule") from e
+        except (KeyError, ValueError) as e:
+            raise HTTPException(404, "no such learning item") from e
+        c.audit.record("learn", item=ref, user_action=body.action, change=change.change)
+        return {"ref": change.ref, "change": change.change, "summary": change.summary}
 
     @app.get("/api/addons", dependencies=[Depends(auth)])
     async def list_addons() -> list[dict[str, Any]]:

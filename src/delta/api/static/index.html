@@ -196,7 +196,7 @@ aside div.mem > button{border:0;background:none;color:var(--muted);border-radius
 aside div.mem > button:hover{background:var(--bad-soft);color:var(--bad)}
 .count{text-transform:none;letter-spacing:0;font-weight:500}
 .badge{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:var(--r-pill);margin-left:6px;vertical-align:1px}
-.badge.active{color:var(--ok);background:var(--ok-soft)}.badge.candidate{color:var(--warn);background:var(--warn-soft)}.badge.retired{color:var(--muted);background:var(--surface-2)}
+.badge.untrusted{color:var(--warn);background:var(--warn-soft)}.badge.active{color:var(--ok);background:var(--ok-soft)}.badge.candidate{color:var(--warn);background:var(--warn-soft)}.badge.retired{color:var(--muted);background:var(--surface-2)}
 .skill small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
 .learn{border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px;font-size:13.5px;background:var(--surface-2)}
 .learn.pending{background:var(--accent-soft)}.learn.undone{opacity:.5}
@@ -496,6 +496,7 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
     <div><h3>Tasks</h3><div id="tasks"></div></div>
     <div><h3>Delta learned</h3><div id="learned"></div></div>
     <div><h3>Learned skills <span id="skillcount" class="count"></span></h3><div id="skills"></div></div>
+    <div><h3>Waiting to prove themselves <span id="candcount" class="count"></span></h3><div id="candidates"></div></div>
     <div><h3>Memory</h3><div id="memory"></div>
       <form id="addmem"><textarea id="memtext" placeholder="Remember that…"></textarea><button>Add</button></form></div>
   </aside>
@@ -679,11 +680,36 @@ async function refreshMemory() {
   const items = await api("/api/memory").catch(() => []);
   $("memory").innerHTML = items.length ? "" : '<div class="empty">Delta has not learned anything yet.</div>';
   for (const m of items) {
+    // Where each memory came from: notes from web pages, files or messages are kept as data only.
     const row = document.createElement("div"); row.className = "mem";
-    row.innerHTML = "<span></span><button title='Forget'>×</button>";
-    row.querySelector("span").textContent = m.content + (m.kind === "episode" ? " (task)" : "");
+    row.innerHTML = "<span><span class='t'></span><span class='badge'></span><small></small></span><button title='Forget'>×</button>";
+    row.querySelector(".t").textContent = m.content + (m.kind === "episode" ? " (task)" : "");
+    const b = row.querySelector(".badge");
+    if (m.trust === "untrusted") { b.className = "badge untrusted"; b.textContent = "from outside: data only"; } else b.remove();
+    row.querySelector("small").textContent = " " + (m.provenance || "");
     row.querySelector("button").onclick = () => api(`/api/memory/${m.id}`, {method: "DELETE"}).then(refreshMemory);
     $("memory").appendChild(row);
+  }
+}
+
+async function refreshCandidates() {
+  const items = (await api("/api/learn").catch(() => [])).filter(i => i.status === "candidate" || i.status === "active").slice(0, 20);
+  $("candcount").textContent = items.length ? `· ${items.filter(i => i.status === "candidate").length} waiting` : "";
+  $("candidates").innerHTML = items.length ? "" : '<div class="empty">Lessons from recoveries and repaired skill steps wait here until they have worked a few times.</div>';
+  for (const i of items) {
+    const d = document.createElement("div"); d.className = "learn " + i.status;
+    d.innerHTML = "<div class='kind'></div><div class='text'></div><div class='row'></div>";
+    const trust = i.trust === "untrusted" ? " · from outside content: never used" : "";
+    d.querySelector(".kind").textContent = `${i.ref} ${i.kind === "recipe" ? "Repaired step" : "Lesson"} · ${i.status === "candidate" ? "waiting" : "in use"} · ${i.successes}✓ ${i.failures}✗${trust}`;
+    d.querySelector(".text").textContent = i.summary;
+    const row = d.querySelector(".row");
+    const btn = (label, action, primary) => { const b = document.createElement("button"); b.textContent = label;
+      if (primary) b.className = "primary";
+      b.onclick = () => api(`/api/learn/${i.ref}`, {method: "POST", body: JSON.stringify({action})}).then(refreshCandidates);
+      row.appendChild(b); };
+    if (i.status === "candidate" && i.trust !== "untrusted") btn("Use it now", "promote", true);
+    btn("Reject", "reject", false);
+    $("candidates").appendChild(d);
   }
 }
 
@@ -852,6 +878,8 @@ function connect() {
         add("step ok", `★ Delta ${words[d.change] || d.change}: ${d.skill.name}`); refreshSkills();
       }
       if (m.event === "memory.learned") { add("step", "★ remembered: " + d.fact); refreshMemory(); }
+      if (m.event === "task.grounding" && (d.unverified.length || d.contradicted.length))
+        add("step " + (d.contradicted.length ? "bad" : ""), "· answer check: " + (d.contradicted.length ? "not true: " + d.contradicted.join(", ") : "not confirmed: " + d.unverified.join(", ")));
       if (m.event === "document.created") showDocument(d);
       if (m.event === "learning.added") {
         const i = d.item || {};
@@ -1363,7 +1391,7 @@ $("s_save").onclick = async () => {
 api("/api/setup").then(s => { if (!s.completed) openSetup(); }).catch(() => {});
 
 if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-checkInterrupted(); refreshStatus(); refreshMemory(); refreshSkills(); refreshLearned(); connect(); (current ? openChat(current) : refreshChats()); api("/api/approvals").then(a => a.forEach(renderApproval)).catch(() => {});
+checkInterrupted(); refreshStatus(); refreshMemory(); refreshSkills(); refreshLearned(); refreshCandidates(); connect(); (current ? openChat(current) : refreshChats()); api("/api/approvals").then(a => a.forEach(renderApproval)).catch(() => {});
 setInterval(() => { if (!document.hidden) refreshStatus(); }, 5000);
 
 </script>

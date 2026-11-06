@@ -95,3 +95,22 @@ def test_a_crashing_task_is_reported_failed_not_left_running(client):
             break
         time.sleep(0.02)
     assert r["status"] == "failed" and r["answer"] == TASK_CRASHED and "disk on fire" not in str(r)
+
+
+def test_memory_provenance_forget_and_learning_gate_endpoints(client):
+    tc, c = client
+    c.memory.add("page said hello", "profile", "agent", origin="web_read", trust="untrusted", task_id="t7")
+    items = tc.get("/api/memory?trust=untrusted").json()
+    assert items and items[0]["kind"] == "note" and "data only" in items[0]["provenance"]
+    assert tc.get("/api/memory/stats").json()["trust:untrusted"] == 1
+    assert tc.post("/api/memory/forget", json={"task_id": "t7"}).json() == {"forgotten": 1}
+    assert tc.post("/api/memory/forget", json={"trust": "nonsense"}).status_code == 400
+    store = c.orchestrator.learning
+    bad = store.add("lesson", "k1", "x", status="candidate", trust="untrusted")
+    good = store.add("lesson", "k2", "y", status="candidate")
+    assert {i["ref"] for i in tc.get("/api/learn").json()} == {f"L{bad.id}", f"L{good.id}"}
+    assert tc.post(f"/api/learn/L{bad.id}", json={"action": "promote"}).status_code == 409
+    assert tc.post(f"/api/learned/{bad.id}", json={"action": "keep"}).status_code == 409
+    assert tc.post(f"/api/learn/L{good.id}", json={"action": "promote"}).json()["change"] == "promoted"
+    assert tc.post("/api/learn/R999", json={"action": "reject"}).status_code == 404
+    assert any(h["event"] == "promoted" for h in tc.get(f"/api/learn/history?item=L{good.id}").json())

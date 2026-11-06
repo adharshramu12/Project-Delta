@@ -18,13 +18,25 @@ from delta.evals.spec import SUITES, SpecError, fill, load_specs
 
 def test_the_suite_is_30_to_50_tasks_over_every_area():
     tasks = load_specs(SPECS_DIR)
-    assert 30 <= len(tasks) <= 80
+    assert 30 <= len(tasks) <= 120
     assert {t.suite for t in tasks} == set(SUITES)
     for t in tasks:
         assert t.script.get("plan"), f"{t.id} has no scripted plan"
-        for item in t.check:
+        for item in [*t.check, *t.check_after_gate]:
             (name,) = item
             assert name in CHECKS, f"{t.id}: unknown check {name}"
+
+
+def test_learning_suite_has_at_least_12_tasks_and_new_fields_are_checked(tmp_path):
+    learning = [t for t in load_specs(SPECS_DIR) if t.suite == "learning"]
+    assert len(learning) >= 12
+    assert any(t.eval_gate and t.check_after_gate for t in learning) and any(t.runs > 1 for t in learning)
+    (tmp_path / "x.yaml").write_text("- id: a\n  request: r\n  runs: 9\n  check: [{status: done}]\n")
+    with pytest.raises(SpecError):
+        load_specs(tmp_path)
+    (tmp_path / "x.yaml").write_text("- id: a\n  request: r\n  check_after_gate: [x]\n  check: [{status: done}]\n")
+    with pytest.raises(SpecError):
+        load_specs(tmp_path)
 
 
 def test_bad_specs_are_refused(tmp_path):

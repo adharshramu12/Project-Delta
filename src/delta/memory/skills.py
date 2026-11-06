@@ -6,6 +6,11 @@ Lifecycle (evidence-gated, so learning can never quietly make Delta worse):
   retired    failed RETIRE_AFTER times and more often than it worked; never offered again
 Users can see, pin (active), retire or delete any skill. Skills are plain JSON, so they can be
 exported and shared.
+
+Recipe candidates (Batch D, delta.learning.repair): when a step of a replayed recipe fails and self-heal finds
+a way that works, the repaired recipe is saved here as a candidate. The skill's working recipe is never
+overwritten until the candidate passes the promotion gate (delta.learning.gate); a candidate traced to outside
+content is untrusted and can never be promoted.
 """
 
 from __future__ import annotations
@@ -46,7 +51,48 @@ END;
 CREATE TRIGGER IF NOT EXISTS skills_ad AFTER DELETE ON skills BEGIN
   INSERT INTO skills_fts(skills_fts, rowid, name, when_to_use) VALUES('delete', old.id, old.name, old.when_to_use);
 END;
+CREATE TABLE IF NOT EXISTS recipe_candidates(
+  id INTEGER PRIMARY KEY,
+  skill_id INTEGER NOT NULL,
+  recipe TEXT NOT NULL,          -- the repaired recipe (JSON, same shape as skills.recipe)
+  base_recipe TEXT NOT NULL,     -- the working recipe it was repaired from
+  step INTEGER NOT NULL,         -- which step (0-based) was repaired
+  failure TEXT NOT NULL DEFAULT '',
+  change TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'candidate',  -- candidate | active | rejected | retired | superseded
+  trust TEXT NOT NULL DEFAULT 'trusted',
+  task_id TEXT NOT NULL DEFAULT '',
+  successes INTEGER NOT NULL DEFAULT 0,
+  failures INTEGER NOT NULL DEFAULT 0,
+  evals_passed INTEGER NOT NULL DEFAULT 0,
+  created TEXT NOT NULL,
+  updated TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS recipe_candidates_skill ON recipe_candidates(skill_id, status);
 """
+CANDIDATE_STATUSES = {"candidate", "active", "rejected", "retired", "superseded"}
+
+
+@dataclass
+class RecipeCandidate:
+    id: int
+    skill_id: int
+    recipe: str
+    base_recipe: str
+    step: int
+    failure: str
+    change: str
+    status: str
+    trust: str
+    task_id: str
+    successes: int
+    failures: int
+    evals_passed: int
+    created: str
+    updated: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -187,7 +233,72 @@ class SkillStore:
 
     def delete(self, skill_id: int) -> bool:
         with self._lock, self._db:
+            self._db.execute("DELETE FROM recipe_candidates WHERE skill_id=?", (skill_id,))
             return self._db.execute("DELETE FROM skills WHERE id=?", (skill_id,)).rowcount > 0
+
+    # --- recipe candidates (delta.learning.repair / gate) -----------------------------------------
+    _CAND = ("id, skill_id, recipe, base_recipe, step, failure, change, status, trust, task_id, successes, failures, "
+             "evals_passed, created, updated")
+
+    def add_candidate(self, skill_id: int, recipe: str, base_recipe: str, step: int, failure: str, change: str,
+                      trust: str = "trusted", task_id: str = "") -> RecipeCandidate:
+        """Save a repaired recipe as a candidate; the same repair again returns the existing candidate."""
+        for c in self.candidates(skill_id, status="candidate"):
+            if c.recipe == recipe:
+                return c
+        now = _now()
+        with self._lock, self._db:
+            cur = self._db.execute(
+                "INSERT INTO recipe_candidates(skill_id, recipe, base_recipe, step, failure, change, status, trust, "
+                "task_id, created, updated) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (skill_id, recipe, base_recipe, step, failure, change[:300], "candidate", trust, task_id, now, now))
+        found = self.get_candidate(int(cur.lastrowid or 0))
+        assert found
+        return found
+
+    def get_candidate(self, cand_id: int) -> RecipeCandidate | None:
+        with self._lock:
+            r = self._db.execute(f"SELECT {self._CAND} FROM recipe_candidates WHERE id=?", (cand_id,)).fetchone()
+        return RecipeCandidate(*r) if r else None
+
+    def candidates(self, skill_id: int | None = None, status: str | None = None) -> builtins.list[RecipeCandidate]:
+        q, params = f"SELECT {self._CAND} FROM recipe_candidates WHERE 1=1", list[Any]()
+        if skill_id is not None:
+            q, params = q + " AND skill_id=?", [*params, skill_id]
+        if status:
+            q, params = q + " AND status=?", [*params, status]
+        with self._lock:
+            return [RecipeCandidate(*r) for r in self._db.execute(q + " ORDER BY id DESC", params)]
+
+    def count_candidate(self, cand_id: int, *, success: bool | None = None,
+                        eval_passed: bool = False) -> RecipeCandidate | None:
+        col = "evals_passed" if eval_passed else ("successes" if success else "failures")
+        reset = "" if eval_passed else (", failures=0" if success else "")
+        with self._lock, self._db:
+            self._db.execute(f"UPDATE recipe_candidates SET {col}={col}+1{reset}, updated=? WHERE id=?",
+                             (_now(), cand_id))
+        return self.get_candidate(cand_id)
+
+    def set_candidate_status(self, cand_id: int, status: str) -> RecipeCandidate | None:
+        """Change a candidate's status. Making it active puts its recipe on the skill (the old working one stays
+        in the candidate's base_recipe, so it can be told apart and restored); untrusted ones never become active."""
+        if status not in CANDIDATE_STATUSES:
+            raise ValueError(status)
+        cand = self.get_candidate(cand_id)
+        if cand is None:
+            return None
+        if status == "active":
+            from delta.learning.store import UntrustedPromotionError
+
+            if cand.trust == "untrusted":
+                raise UntrustedPromotionError(f"recipe candidate {cand_id} came from outside content")
+            with self._lock, self._db:
+                self._db.execute("UPDATE recipe_candidates SET status='superseded', updated=? "
+                                 "WHERE skill_id=? AND status='active' AND id != ?", (_now(), cand.skill_id, cand_id))
+                self._db.execute("UPDATE skills SET recipe=? WHERE id=?", (cand.recipe, cand.skill_id))
+        with self._lock, self._db:
+            self._db.execute("UPDATE recipe_candidates SET status=?, updated=? WHERE id=?", (status, _now(), cand_id))
+        return self.get_candidate(cand_id)
 
     def export(self) -> builtins.list[dict[str, Any]]:
         """Shareable form: no ids, counters or dates."""

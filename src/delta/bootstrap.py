@@ -23,7 +23,7 @@ from delta.llm.router import ModelRouter
 from delta.memory.chats import ChatStore
 from delta.memory.skills import SkillStore
 from delta.memory.store import MemoryStore
-from delta.memory.tools import memory_tools
+from delta.memory.tools import memory_tools, wire_memory_tools
 from delta.messaging.tools import ChatSessions, messaging_tools
 from delta.safety.approvals import ApprovalBroker
 from delta.safety.audit import AuditLog
@@ -309,6 +309,21 @@ def attach_perception(settings: Settings, router: ModelRouter, executor: ToolExe
     return perception
 
 
+def attach_learning(settings: Settings, orchestrator: Orchestrator, learning: LearningStore,
+                    skills: SkillStore | None) -> None:
+    """The promotion gate (delta.learning.gate): lesson candidates from self-heal and repaired recipe versions,
+    used only after they prove themselves. Off in settings (learning.enabled: false), nothing is attached."""
+    if not settings.learning.enabled:
+        return
+    from delta.learning.gate import PromotionGate
+    from delta.learning.lessons import LessonBook
+
+    gate = PromotionGate(settings.learning, learning, skills, orchestrator.engine)
+    orchestrator.gate = gate
+    if settings.learning.lessons:
+        orchestrator.lessons = LessonBook(learning, gate)
+
+
 def build(settings: Settings) -> Container:
     data = settings.data_dir
     data.mkdir(parents=True, exist_ok=True)  # first run: databases need the folder to exist
@@ -316,7 +331,7 @@ def build(settings: Settings) -> Container:
     governor = Governor(settings.governor, watch_gpu=any(p.local for p in settings.llm.providers.values()))
     router = ModelRouter(build_providers(settings), settings.llm.routes, allow_local=governor.allow_local,
                          preferred=settings.llm.preferred)
-    memory = MemoryStore(data / "memory.db")
+    memory = MemoryStore.from_config(data / "memory.db", settings.memory)
     audit = AuditLog(data / "audit.jsonl")
     approvals = ApprovalBroker(settings.agent.approval_timeout_s)
 
@@ -397,6 +412,8 @@ def build(settings: Settings) -> Container:
         await events.publish("learning.added", item=item.to_dict())
 
     executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
+    # `remember` labels what a task that read outside content saves as untrusted (delta.memory.provenance)
+    wire_memory_tools([found for n in registry.names() if (found := registry.get(n)) is not None], executor)
     sched_ctx.executor = executor
     chats.executor = executor  # each delegated reply goes through the same approval rules
     for t in writer:
@@ -415,6 +432,7 @@ def build(settings: Settings) -> Container:
     attach_selfheal(settings, router, executor, orchestrator, events)  # recovery, undo, opt-in model ladder
     attach_perception(settings, router, executor, orchestrator, browsers, ctl if desktop_ok else None, proof,
                       governor)  # set-of-marks, OCR, perception cache, opt-in read-only helpers
+    attach_learning(settings, orchestrator, learning, skills)  # promotion gate, lessons, recipe repair
     from delta.safety.remote_guard import RemoteGuard
     from delta.system.notify import notify
 

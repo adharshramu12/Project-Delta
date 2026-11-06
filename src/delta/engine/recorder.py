@@ -36,6 +36,7 @@ ALWAYS_SIDE_EFFECT = frozenset({"run_shell", "run_python", "send_message", "send
                                 "delete_schedule", "pause_schedule", "resume_schedule"})
 SUMMARY_CHARS = 300
 TEXT_CHARS = 4000
+LINE_KINDS = ("memory", "grounding", "learning")  # Batch D timeline lines
 
 
 def fingerprint(tool: str, raw_args: Any) -> str:
@@ -309,6 +310,18 @@ class TaskEngine:
         self.store.append(task_id, "recovery", tool=tool, ok=int(ok), summary=redact_text(line, SUMMARY_CHARS),
                           data=json.dumps(redact_value({"failure": failure, **data}, 200), default=str)[:2000])
 
+    def line(self, task_id: str, kind: str, summary: str, ok: bool | None = None,
+             data: dict[str, Any] | None = None) -> None:
+        """One plain-English timeline line of kind memory, grounding or learning (Batch D)."""
+        self._safe("line", self._line, task_id, kind, summary, ok, data or {})
+
+    def _line(self, task_id: str, kind: str, summary: str, ok: bool | None, data: dict[str, Any]) -> None:
+        if kind not in LINE_KINDS or self.store.get(task_id) is None:
+            return
+        self.store.append(task_id, kind, ok=None if ok is None else int(ok),
+                          summary=redact_text(summary, SUMMARY_CHARS),
+                          data=json.dumps(redact_value(data, 200), default=str)[:2000])
+
     def failure(self, task_id: str, failure: str, summary: str) -> None:
         """A failure outside a tool step (a model call), recorded with its type."""
         self._safe("failure", self._failure, task_id, failure, summary)
@@ -439,6 +452,9 @@ class TaskEngine:
         helpers = [{"ts": e["ts"], "ok": bool(e["ok"]), "summary": e["summary"],
                     **_data(e, "child", "tokens", "seconds", "sources", "refused")}
                    for e in events if e["kind"] == "helper"]
+        lines = {k: [{"ts": e["ts"], "ok": None if e["ok"] is None else bool(e["ok"]), "summary": e["summary"],
+                      **_data(e, "item", "event", "claims", "unverified", "contradicted", "hits", "untrusted")}
+                     for e in events if e["kind"] == k] for k in LINE_KINDS}
         undo = self._undo_summary(task_id)
         steps = []
         for s in steps_of(events):
@@ -450,6 +466,7 @@ class TaskEngine:
             view.update(failed.get(view["step"], {}))
         return {"task": task, "steps": steps, "states": states, "checks": checks, "notes": notes,
                 "recoveries": recoveries, "failures": failures, "undo": undo, "helpers": helpers,
+                "memory": lines["memory"], "grounding": lines["grounding"], "learning": lines["learning"],
                 "running": task["state"] in {str(s) for s in RUNNING}, "now": time.time()}
 
     def _undo_summary(self, task_id: str) -> dict[str, Any]:

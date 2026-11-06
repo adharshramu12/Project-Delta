@@ -183,11 +183,15 @@ def main() -> None:
     add_schedule_parser(sub)
     from delta.engine.cli import add_parser as add_tasks_parser
     from delta.evals.cli import add_parser as add_eval_parser
+    from delta.learning.cli import add_parser as add_learn_parser
+    from delta.memory.cli import add_parser as add_memory_parser
     from delta.selfheal.cli import add_parser as add_undo_parser
 
     add_tasks_parser(sub)
     add_undo_parser(sub)
     add_eval_parser(sub)
+    add_memory_parser(sub)
+    add_learn_parser(sub)
     args = parser.parse_args()
 
     if args.cmd == "doctor":
@@ -208,6 +212,14 @@ def main() -> None:
         from delta.selfheal.cli import run_cli as run_undo_cli
 
         sys.exit(run_undo_cli(load_settings(), args))
+    if args.cmd == "memory":
+        from delta.memory.cli import run_cli as run_memory_cli
+
+        sys.exit(run_memory_cli(load_settings(), args))
+    if args.cmd == "learn":
+        from delta.learning.cli import run_cli as run_learn_cli
+
+        sys.exit(run_learn_cli(load_settings(), args))
     if args.cmd == "eval":
         from delta.evals.cli import run_cli as run_eval_cli
 
