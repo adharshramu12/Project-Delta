@@ -42,6 +42,8 @@ asks before anything risky, and **checks the result of every task it works on be
 
 **In your browser** (your own signed-in Chrome or Edge)
 - Open sites, read pages, fill forms, play YouTube
+- **Sign in to your college ERP or LMS** with a login saved on the PC, only on that exact site, and **watch it**
+  for new exams, timetable changes and notices. See [Saved logins and portal watchers](#saved-logins-and-portal-watchers)
 - **Choose the browser from anywhere:** "My default browser", "Chrome", "Edge" (all signed in to your
   sites) or "Delta's private browser" (works in the background and is faster, signed out until you sign in
   once). Pick it in Settings, with `/browser` in Telegram, or just say it: "use Edge from now on", "switch to
@@ -233,6 +235,25 @@ anything that changes or sends something asks first, an app's results are treate
 instructions), destructive tools are off until you switch them on, and from a phone every app call needs your PIN.
 The model gets a one-line index of your apps plus `find_app_tool` and `use_app_tool`, not every tool's schema on
 every step. Details: [docs/APPS.md](docs/APPS.md).
+
+## Saved logins and portal watchers
+
+Save a login for your college ERP or LMS once, on the PC (**Settings > Logins and watchers**, or
+`delta logins add "College ERP" --site https://erp.example.edu`), then ask: *"what is on my timetable
+tomorrow?"* Delta signs in itself in its private browser. The AI never sees the user name or password.
+
+- **Only on the exact site.** A login is bound to one origin (scheme, host, port). Lookalike hosts, an http
+  downgrade, another port or a form inside a frame from another site are refused before anything is typed.
+- **Sealed with Windows DPAPI**, one file per login in Delta's protected data folder; never in a log, the audit
+  log, a chat or the model's context. No DPAPI, no saving.
+- **You decide each use**: "Ask every time" (default) or "Always allow for this site". From a phone a sign-in
+  needs your PIN. One-time codes and reCAPTCHA-type checks are handed to you on the PC; Delta never solves them.
+- **Watchers**: *"watch my ERP for exams, timetable and notifications"*. Every 6 hours by default (at most
+  hourly) Delta signs in, reads the pages with a saved recipe and **no AI**, and tells you only what is new, at
+  once or in a daily digest. New exams and deadlines are offered as reminders; one is made only when you say so.
+  `delta watch list|run|remove`, and `/logins` and `/watchers` on Telegram (read-only).
+
+Details: [docs/LOGINS.md](docs/LOGINS.md) and [docs/WATCHERS.md](docs/WATCHERS.md).
 
 ## Scheduled tasks and reminders
 
@@ -447,6 +468,7 @@ grounding: {mode: report, max_checks: 1}   # report | strict | off
 | `/screen` `/camera` | Screenshot or webcam photo (PIN protected) |
 | `/volume` `/brightness` `/theme` | Sound, screen brightness, Windows light/dark |
 | `/apps` | Your connected apps (Notion, GitHub...) and their state |
+| `/logins` `/watchers` | Your saved site logins (names and sites only) and the sites Delta watches (read-only) |
 | `/connect` `/disconnect` | Connect or disconnect an app (PIN protected; you finish a sign-in on the PC) |
 | `/windows` | What is open on the PC; tap to close one (this was `/apps` before 0.3) |
 | `/lock` `/unlock` | Lock remote control now / enter your PIN |
