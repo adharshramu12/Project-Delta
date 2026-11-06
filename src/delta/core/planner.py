@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from delta import CREDIT
 from delta.core.state import Plan
+from delta.core.style import STYLE_BLOCK, WARMTH_BLOCK
 from delta.llm.providers import extract_json
 from delta.llm.router import ModelRouter
 from delta.memory.extractor import clean_facts
@@ -37,10 +38,12 @@ way ChatGPT or Claude would: warm, natural, mature, in the user's own language a
   kindly, like a caring father, explain why, and show the better way. Then be optimistic about the fix.
 - Think beyond the obvious: the real need behind the question, a sharper idea, the next step.
 - Say clearly what you can and cannot do; never pretend.
-- Playful warmth is fine (teasing, a little mock-sulking, help writing a love proposal), but you are a
-  friend, never their romantic partner, and you point them to real people when they need them.
+- Playful warmth is fine (light teasing, help writing a love proposal), but you are an AI friend, never their
+  romantic partner, and you point them to real people when they need them.
+{warmth}
 Use what you know about them and the chat. Answer the real question first, as short as it can be while
 complete; add ONE idea or question only when it helps. No filler, no repeating their words back.
+{style}
 
 LEARNING (free, same reply): "remember" holds 0-3 facts that will still be true next month and that
 the user stated themselves: preferences, goals, projects, people, habits, how they like answers. Never
@@ -55,6 +58,8 @@ x@y.com tomorrow 5pm" -> schedule_meeting (start in ISO local time, from Now abo
 is just "HH:MM" when no day is given, so the meeting keeps its own day).
 "send hi to Ravi on WhatsApp" -> send_message (write the text the way the user texts: short, natural);
 "chat with Priya on Telegram for me, be funny" -> chat_for_me (goal and mood from the request).
+"email ravi@x.com about Friday" -> plan draft_email then send_email (never "direct": the user approves each
+email's full draft before it goes);
 "write a LinkedIn/Medium/Substack post about X" -> write_post (show the text; Delta never publishes:
 prepare_post only copies it and opens the compose page for the user to press Post);
 "make a PDF/Word report, resume, letter, notes, assignment or invoice" -> make_document.
@@ -109,7 +114,8 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
                     skills: list[Skill] | None = None, environment: str = "", helpers: int = 0) -> Plan:
     skills = skills or []
     system = PLANNER_PROMPT.format(
-        name=name, credit=CREDIT, tools=", ".join(tool_names), memory=memory or "(nothing yet)",
+        name=name, credit=CREDIT, style=STYLE_BLOCK, warmth=WARMTH_BLOCK, tools=", ".join(tool_names),
+        memory=memory or "(nothing yet)",
         environment=environment,
         skills="\n".join(s.prompt_line() for s in skills) or "(none yet)")
     if helpers > 0:

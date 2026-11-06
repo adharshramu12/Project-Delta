@@ -179,6 +179,8 @@ class PolicyEngine:
             return d(Verdict.DENY, f"tool '{tool.name}' is disabled in your boundaries")
         if risk == Risk.SYSTEM:
             return d(Verdict.DENY, "system/security/credential/payment actions are never allowed")
+        if getattr(tool, "approve_each", False):  # every email: shown in full and sent only on a human yes
+            return d(Verdict.ASK, "every email is shown to you in full and sent only when you approve it")
         if getattr(tool, "always_ask", False) and not _clearly_asked():  # e.g. alerting emergency contacts
             return d(Verdict.ASK, "always confirmed with you, whatever the autonomy level")
         if tool.name in MESSAGING_TOOLS and _help_request() and not _clearly_asked():

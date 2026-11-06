@@ -270,6 +270,10 @@ instructions), destructive tools are off until you switch them on, and from a ph
 The model gets a one-line index of your apps plus `find_app_tool` and `use_app_tool`, not every tool's schema on
 every step. Details: [docs/APPS.md](docs/APPS.md).
 
+**Email**: "email ravi@example.com that the review moves to 4 pm". Delta drafts it in your voice and shows you the
+whole email with every recipient; it sends only when you press Approve (Edit and Cancel send nothing), every email,
+at every permission level. Writing style, warmth, the "who made you?" answer and email: [docs/STYLE_AND_IDENTITY.md](docs/STYLE_AND_IDENTITY.md).
+
 ## Saved logins and portal watchers
 
 Save a login for your college ERP or LMS once, on the PC (**Settings > Logins and watchers**, or
@@ -615,3 +619,5 @@ What has not been checked on real hardware: [docs/NOT_VERIFIED.md](docs/NOT_VERI
 **Delta is created and maintained by Adharsh Kumar Bachu.**
 If you use, fork or build on Delta, keep the [NOTICE](NOTICE) file and the credit, as the
 Apache 2.0 license requires. Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+A fork changes what Delta says about itself (name, creator, the optional academy line) in one file,
+`src/delta/identity.py`; see [docs/STYLE_AND_IDENTITY.md](docs/STYLE_AND_IDENTITY.md).

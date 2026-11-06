@@ -137,6 +137,29 @@ class McpAppTool(Tool[FreeArgs]):
         return ToolResult(out.ok, out.text, out.evidence)
 
 
+# Text Delta writes INTO an app (a Slack message, a Notion comment, an Asana task description) follows the same
+# writing style as everything else: long dashes and AI phrases are fixed in code before the approval shows it.
+# Only prose fields, never in apps whose fields carry code or data (a GitHub file's content, a SQL query).
+PROSE_KEYS = {"text", "body", "message", "comment", "description", "summary", "note", "notes", "markdown"}
+CODE_APPS = {"github", "supabase", "vercel", "filesystem", "fetch", "huggingface", "figma_desktop", "sentry"}
+
+
+def style_app_text(app_id: str, arguments: dict[str, Any], depth: int = 0) -> dict[str, Any]:
+    if app_id in CODE_APPS or depth > 3:
+        return arguments
+    from delta.core.style import slop_check
+
+    out: dict[str, Any] = {}
+    for key, value in arguments.items():
+        if isinstance(value, str) and key.lower() in PROSE_KEYS:
+            out[key] = slop_check(value, "app").text
+        elif isinstance(value, dict):
+            out[key] = style_app_text(app_id, value, depth + 1)
+        else:
+            out[key] = value
+    return out
+
+
 class FindArgs(BaseModel):
     query: str = Field(description="what you want to do, e.g. 'search pages', 'create issue', 'list events'")
     app: str = Field(default="", description="optional: limit to one connected app, e.g. notion")
@@ -208,7 +231,10 @@ class UseAppTool(Tool[UseArgs]):
         if not tool.enabled:
             return (f"BLOCKED: the {tool.app_name} tool '{tool.remote_name}' is switched off on the Apps page. "
                     "Tell the user; do not try another way.")
-        return tool.name, dict(args.arguments)
+        arguments = dict(args.arguments)
+        if tool.risk != Risk.READ:
+            arguments = style_app_text(tool.app_id, arguments)
+        return tool.name, arguments
 
     async def run(self, args: UseArgs) -> ToolResult:  # never called: the executor resolves aliases
         return ToolResult(False, "use_app_tool must be resolved by the executor")

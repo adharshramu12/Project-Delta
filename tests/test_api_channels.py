@@ -114,3 +114,20 @@ def test_memory_provenance_forget_and_learning_gate_endpoints(client):
     assert tc.post(f"/api/learn/L{good.id}", json={"action": "promote"}).json()["change"] == "promoted"
     assert tc.post("/api/learn/R999", json={"action": "reject"}).status_code == 404
     assert any(h["event"] == "promoted" for h in tc.get(f"/api/learn/history?item=L{good.id}").json())
+
+
+def test_an_email_draft_can_be_edited_from_the_dashboard(client):
+    from concurrent.futures import Future
+
+    tc, c = client
+    assert {"draft_email", "send_email"} <= set(c.registry.names())
+    req = ApprovalRequest("send_email", "Send this email:\nTo: a@x.com", "external", "every email", can_edit=True)
+    fut: Future = Future()  # stands in for the waiting task's future (done / set_result / result)
+    c.approvals._pending[req.id] = (req, fut)  # a request waiting for an answer, as approvals.request leaves it
+    try:
+        listed = next(a for a in tc.get("/api/approvals").json() if a["id"] == req.id)
+        assert listed["can_edit"] is True
+        r = tc.post(f"/api/approvals/{req.id}", json={"approved": False, "edit": "say 5 pm"})
+        assert r.status_code == 200 and fut.done() and fut.result().edit == "say 5 pm" and not fut.result().approved
+    finally:
+        c.approvals._pending.pop(req.id, None)

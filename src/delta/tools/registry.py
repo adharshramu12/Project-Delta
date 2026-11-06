@@ -297,7 +297,8 @@ class ToolExecutor:
             return ""
         if guard is not None and guard.strict:
             return ""
-        if getattr(tool, "always_ask", False) or (tool.name in MESSAGING_TOOLS and _help_request()):
+        if (getattr(tool, "always_ask", False) or getattr(tool, "approve_each", False)
+                or (tool.name in MESSAGING_TOOLS and _help_request())):
             return ""
         req = CURRENT_REQUEST.get()
         if req is not None and is_remote(req.channel) and (
@@ -391,15 +392,21 @@ class ToolExecutor:
                 self.audit.record("approval", task=task_id, tool=name, approved=True, by="allowed for this task",
                                   target=grant.split("|", 2)[2])
             elif (self.learning and not tainted and decision.risk in TRUSTABLE_RISKS
+                    and not getattr(tool, "approve_each", False)  # never learned: each email gets its own yes
                     and (trust := self._learned_match("trust", key, tool, args, decision.risk))):
                 self.audit.record("approval", task=task_id, tool=name, approved=True, by="learned trust",
                                   learned=trust.id)
             else:
                 outcome = await self.approvals.request(ApprovalRequest(
                     tool=name, summary=summary, risk=decision.risk, reason=decision.reason, task_id=task_id,
-                    for_task=bool(grant)))
+                    for_task=bool(grant), can_edit=bool(getattr(tool, "can_edit", False))))
                 self.audit.record("approval", task=task_id, tool=name, approved=outcome.approved, by=outcome.by,
-                                  for_task=bool(outcome.for_task and grant))
+                                  for_task=bool(outcome.for_task and grant), edit=outcome.edit is not None)
+                if outcome.edit is not None:  # "Edit": nothing ran; the agent redrafts and asks again (no learning)
+                    changes = outcome.edit or "(no details: ask the user what to change)"
+                    return ToolResult(False, f"The user chose EDIT, so nothing was sent. Their changes: {changes}. "
+                                             "Redraft with these changes, then ask for approval again. If the "
+                                             "changes are unclear, ask the user.", {"edit": changes})
                 if outcome.approved and outcome.for_task and grant:
                     self._task_grants.setdefault(task_id, set()).add(grant)
                 if self.learning and outcome.by != "timeout" and outcome.human:  # only real human answers teach

@@ -86,6 +86,7 @@ class TelegramChannel(PCMenu):
         self._pair_fails = 0  # wrong tries against the current code
         self.bot_name = ""
         self._choices: dict[str, list[str]] = {}  # the choices last offered to each user (tap buttons)
+        self._edits: dict[str, str] = {}  # user -> email approval waiting for "what should change?"
         self._forms: dict[str, dict[str, Any]] = {}  # user -> open question form (delta.core.questions)
         self._awaiting_key: dict[str, tuple[str, float]] = {}  # user -> (key name, until) after /keys
         self._pending_pin: dict[str, tuple[Any, str, float]] = {}  # user -> (action to run, what, until)
@@ -424,6 +425,11 @@ class TelegramChannel(PCMenu):
         if await self._locked(update.message.reply_text):
             return
         if await self._take_key(update, str(user.id)):
+            return
+        if (req_id := self._edits.pop(str(user.id), None)) is not None:  # the changes after tapping Edit
+            settled, why = self.c.approvals.edit(req_id, update.message.text, by=f"telegram:{user.id}")
+            await update.message.reply_text("Got it. I'll redraft it and show you again." if settled else
+                                            f"That email is no longer waiting ({why}).")
             return
         if (form := self._forms.pop(str(user.id), None)) is not None:
             from delta.core.questions import answers_text
@@ -790,8 +796,13 @@ class TelegramChannel(PCMenu):
     async def _present(self, req: ApprovalRequest) -> None:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-        rows = [[InlineKeyboardButton("✅ Approve", callback_data=f"appr:{req.id}:y"),
-                 InlineKeyboardButton("⛔ Deny", callback_data=f"appr:{req.id}:n")]]
+        if req.can_edit:  # an email draft: Approve / Edit / Cancel
+            rows = [[InlineKeyboardButton("✅ Approve", callback_data=f"appr:{req.id}:y"),
+                     InlineKeyboardButton("✏️ Edit", callback_data=f"appr:{req.id}:e"),
+                     InlineKeyboardButton("⛔ Cancel", callback_data=f"appr:{req.id}:n")]]
+        else:
+            rows = [[InlineKeyboardButton("✅ Approve", callback_data=f"appr:{req.id}:y"),
+                     InlineKeyboardButton("⛔ Deny", callback_data=f"appr:{req.id}:n")]]
         if req.for_task:  # offered only for actions it may cover (see ToolExecutor.task_grant_key)
             rows.append([InlineKeyboardButton("🔁 Allow for this task", callback_data=f"appr:{req.id}:t")])
         kb = InlineKeyboardMarkup(rows)
@@ -804,6 +815,11 @@ class TelegramChannel(PCMenu):
             await q.answer("not authorised")
             return
         _, req_id, answer = q.data.split(":")
+        if answer == "e":  # Edit: the next message from this person says what to change
+            self._edits[str(q.from_user.id)] = req_id
+            await q.answer()
+            await q.edit_message_text(f"{q.message.text}\n\n→ ✏️ edit: send me what should change")
+            return
         # Remote Guard (lock, PIN to approve) is checked inside the broker, for every channel alike.
         settled, why = self.c.approvals.answer(req_id, answer in ("y", "t"), by=f"telegram:{q.from_user.id}",
                                                for_task=answer == "t")

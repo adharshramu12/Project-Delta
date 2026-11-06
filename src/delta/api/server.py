@@ -93,6 +93,7 @@ class ChatPatch(BaseModel):
 class ApprovalIn(BaseModel):
     approved: bool
     for_task: bool = False  # "Allow for this task" (only honoured when the request offered it)
+    edit: str | None = Field(default=None, max_length=2000)  # "Edit" (an email draft): what to change
 
 
 class SkillStatusIn(BaseModel):
@@ -141,7 +142,7 @@ class Hub:
 
 def _approval_json(r: ApprovalRequest) -> dict[str, Any]:
     return {"id": r.id, "tool": r.tool, "summary": r.summary, "risk": r.risk, "reason": r.reason,
-            "task_id": r.task_id, "for_task": r.for_task}
+            "task_id": r.task_id, "for_task": r.for_task, "can_edit": bool(getattr(r, "can_edit", False))}
 
 
 def _result_json(r: TaskResult) -> dict[str, Any]:
@@ -362,7 +363,11 @@ def create_app(c: Container, token: str) -> FastAPI:
 
     @app.post("/api/approvals/{approval_id}", dependencies=[Depends(auth)])
     async def answer_approval(approval_id: str, body: ApprovalIn) -> dict[str, bool]:
-        if not c.approvals.resolve(approval_id, body.approved, by="dashboard", for_task=body.for_task):
+        if body.edit is not None:
+            settled, why = c.approvals.edit(approval_id, body.edit, by="dashboard")
+            if not settled:
+                raise HTTPException(404 if why == "already answered or expired" else 400, why)
+        elif not c.approvals.resolve(approval_id, body.approved, by="dashboard", for_task=body.for_task):
             raise HTTPException(404, "no such pending approval")
         return {"ok": True}
 

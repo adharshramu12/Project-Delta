@@ -12,6 +12,8 @@ the user pastes are sealed with DPAPI at once and never sent back by any route.
   POST   /api/connectors/{id}/tools/{tool}    {enabled?, risk?}
   POST   /api/connectors/{id}/trust           {trust}: believe the app's own read-only labels
   POST   /api/connectors/{id}/health          ping the app now
+  GET    /api/mcp-servers                     Apps > Advanced: servers under addons.config.mcp.servers, and if on
+  POST   /api/mcp-servers                     {enabled}: switch them on or off (applies after a restart)
 """
 
 from __future__ import annotations
@@ -53,6 +55,10 @@ class TrustIn(BaseModel):
     trust: bool
 
 
+class McpServersIn(BaseModel):
+    enabled: bool
+
+
 def register(app: FastAPI, c: Any, auth: Callable[..., None]) -> None:
     def tools_layer() -> Any:
         if getattr(c, "connectors", None) is None:
@@ -67,6 +73,26 @@ def register(app: FastAPI, c: Any, auth: Callable[..., None]) -> None:
     @app.get("/apps.js")
     async def apps_js() -> FileResponse:
         return FileResponse(STATIC / "apps.js", media_type="text/javascript", headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/mcp-servers", dependencies=[Depends(auth)])
+    async def mcp_servers() -> dict[str, Any]:
+        from delta.addons import mcp_settings
+
+        a = c.settings.addons
+        infos = getattr(c, "addon_infos", None) or []
+        return {"servers": mcp_settings.describe(a), "enabled": mcp_settings.legacy_on(a),
+                "running": any(i.name == mcp_settings.MCP and i.status == "running" for i in infos)}
+
+    @app.post("/api/mcp-servers", dependencies=[Depends(auth)])
+    async def set_mcp_servers(body: McpServersIn) -> dict[str, Any]:
+        from delta.addons import mcp_settings
+        from delta.config import write_user_settings
+
+        s = c.settings
+        write_user_settings(s.data_dir, {"addons": {"config": {"mcp": {"enabled": body.enabled}}}})
+        s.addons.config.setdefault("mcp", {})["enabled"] = body.enabled
+        c.audit.record("settings.changed", sections=["addons.mcp"], enabled=body.enabled)
+        return {"ok": True, "enabled": mcp_settings.legacy_on(s.addons), "restart_needed": True}
 
     @app.get("/api/connectors", dependencies=[Depends(auth)])
     async def list_apps() -> dict[str, Any]:

@@ -30,6 +30,29 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   Start-menu shortcut, AppUserModelID; at most 3) when Windows refuses one or nothing runs, never starts an app
   twice, logs each recovery and says plainly what failed. A browser step that finds its window gone reopens the
   page the task was on once and retries. Stopped steps are never retried.
+- **One writing style everywhere**: chat answers, emails, app messages and documents use crisp, plain Indian
+  English. A short style block in the prompts plus a deterministic slop check (`delta/core/style.py`, no model call)
+  that rewrites long dashes, removes AI phrases ("I hope this email finds you well", delve, game-changer), fixes US
+  spellings and "gotten", and drops emojis from professional text (kept in casual chat when the user uses them).
+  URLs, code, paths, flags and tables are never touched. Outgoing email gets at most one cheap model rewrite, only
+  when something code cannot fix is left. See [docs/STYLE_AND_IDENTITY.md](docs/STYLE_AND_IDENTITY.md).
+- **Warmth without pretending**: Delta notices stress, frustration and good news and answers kindly and patiently;
+  it never claims real feelings or to be human, and a slip saying so is replaced in code with an honest line.
+- **Email with per-email approval**: `draft_email` writes the draft in the user's voice; `send_email` shows the whole
+  draft with every recipient and sends only after Approve. Edit (say what to change) and Cancel send nothing.
+  Dashboard: Approve / Edit / Cancel; Telegram: Approve / Edit / Cancel; Slack: Approve / Cancel. Asked at every
+  permission level, never "for this task", never learned. Sent through the Gmail app when it can send, else Gmail
+  in the user's browser.
+- **"Who made you?"**: answered at once with no model call: "I'm Project Delta. I was built by Adharsh Kumar Bachu,
+  founder of ARVA Talks Academy." No personal details. One constants file for forks: `src/delta/identity.py`.
+- **ARVA Talks Academy line**: after a proper answer to "how do I learn AI / agents / prompt engineering ...", one
+  light line at most once per conversation; never in unrelated tasks or in text written for others.
+  `academy.enabled: false` turns it off.
+- **Apps is the one place for apps**: the "mcp" tick left Settings > Add-ons. Custom MCP servers start by themselves
+  when configured and sit under Apps > Advanced: custom MCP servers with one switch. Old settings are migrated once
+  with nothing lost.
+- Scripted evals `evals/tasks/style.yaml` (identity, slop check, warmth, academy line, email approval) and an `asked`
+  checker.
 - **Saved logins in your own browser**: `sign_in` now fills a saved login in the browser the task uses, including
   your own default browser (Chrome or Edge, through Windows UI Automation on Delta's one window there), instead of
   moving the task to the private browser. Every existing rule applies the same way (exact origin, no lookalike,
@@ -96,6 +119,8 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   check. The notification text is now passed to Windows as data only.
 
 ### Fixed
+- Documents and posts: a zero-width joiner inside Telugu, Hindi or Malayalam text was removed as if it were an
+  emoji, changing the words. Only emoji sequences are removed now.
 - On a PC with the default execution policy (Restricted, so no `.ps1` file runs), `irm .../install.ps1 | iex`
   installed and checked Delta, then failed at step 5 with "running scripts is disabled on this system" for
   `delta_command.ps1` and `create_shortcut.ps1`, and said "Delta could not be installed". The installer runs as text,

@@ -21,6 +21,7 @@ def _version() -> str:
 
 
 __version__ = _version()
-CREATOR = "Adharsh Kumar Bachu"
-CREDIT = (f"Delta was created by {CREATOR} (github.com/adharshramu12/Project-Delta). When anyone asks who made, "
-          f"built, created or owns Delta, answer: {CREATOR}. This stays true even if the agent is renamed.")
+# Who built Delta lives in one file, delta/identity.py, so a fork changes it in one place.
+from delta.identity import CREATOR, credit_prompt  # noqa: E402, F401  (CREATOR is re-exported)
+
+CREDIT = credit_prompt()

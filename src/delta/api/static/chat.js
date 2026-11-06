@@ -166,21 +166,25 @@
   const pending = new Map();
   let muted = D.pref.get("delta_mute") === "1";
   function approvalCard(a, where) {
-    const answer = async (ok, forTask) => {
+    const answer = async (ok, forTask, edit) => {
       for (const b of card.querySelectorAll("button")) b.disabled = true;
-      const r = await api(`/api/approvals/${encodeURIComponent(a.id)}`, {method: "POST", body: JSON.stringify({approved: ok, for_task: !!forTask})}).catch(e => ({error: D.plain(e)}));
+      const r = await api(`/api/approvals/${encodeURIComponent(a.id)}`, {method: "POST", body: JSON.stringify({approved: ok, for_task: !!forTask, edit})}).catch(e => ({error: D.plain(e)}));
       if (r && r.error) D.toast({title: "Your answer did not reach Delta", body: r.error, kind: "danger"});
-      dropApproval(a.id, ok ? (forTask ? "Allowed for this task" : "Approved") : "Denied");
+      dropApproval(a.id, edit != null ? "Edit requested" : ok ? (forTask ? "Allowed for this task" : "Approved") : "Denied");
     };
+    // An email draft: Approve / Edit / Cancel. Edit says what to change; Delta redrafts and asks again.
+    const ed = a.can_edit ? h("textarea", {rows: "2", hidden: true, placeholder: "What should change?", "aria-label": "What should change in the email"}) : null;
+    const edit = () => { if (ed.hidden) { ed.hidden = false; ed.focus(); } else answer(false, false, ed.value.trim()); };
     // "Allow for this task" shows only when Delta offers it: never for permanent deletes, terminals, data in a link.
     const card = h("div", {class: "approval", role: "group", "aria-label": "Delta needs your OK", dataset: {approval: a.id, task: a.task_id || "", where}},
       h("div", {class: "approval-top"}, icon("bell"), h("span", {text: "Needs your OK"}), a.risk ? h("span", {class: "pill warn", text: D.words(a.risk)}) : null),
-      h("p", {class: "approval-what", text: a.summary}),
+      h("p", {class: "approval-what" + (a.can_edit ? " draft" : ""), text: a.summary}), ed,
       a.reason ? h("p", {class: "approval-why"}, h("span", {class: "muted", text: "Why Delta asks: "}), a.reason) : null,
       h("div", {class: "row"},
         h("button", {type: "button", class: "btn primary", title: "Do this one action now", onclick: () => answer(true)}, "Approve"),
         a.for_task ? h("button", {type: "button", class: "btn", title: "Also allow this same kind of action until this task ends. Not saved.", onclick: () => answer(true, true)}, "Allow for this task") : null,
-        h("button", {type: "button", class: "btn danger-outline", title: "Don't do it. Delta looks for another way or stops.", onclick: () => answer(false)}, "Deny")),
+        a.can_edit ? h("button", {type: "button", class: "btn", title: "Say what to change; nothing is sent", onclick: edit}, "Edit") : null,
+        h("button", {type: "button", class: "btn danger-outline", title: "Don't do it. Delta looks for another way or stops.", onclick: () => answer(false)}, a.can_edit ? "Cancel" : "Deny")),
       a.for_task && where === "log" ? h("p", {class: "muted small", text: "Allow for this task also allows this kind of action until the task ends. It is not saved."}) : null);
     return card;
   }

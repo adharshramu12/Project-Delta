@@ -222,6 +222,11 @@ helpers:
   read_page: true             # read pages in a fresh headless browser context (no cookies, no sign-ins)
 
 # Writer and Documents: write_post, prepare_post (Delta never presses Post), make_document.
+# One light line about ARVA Talks Academy, at most once per conversation, only when you ask to learn AI
+# (docs/STYLE_AND_IDENTITY.md). false = never.
+academy:
+  enabled: true
+
 writer:
   enabled: true
   output_dir: auto          # auto = your Documents\Delta folder, or any absolute path
@@ -251,7 +256,8 @@ connectors:
   idle_close_s: 600           # a local app server (npx/uvx) unused this long is stopped to free memory; 0 = never
 
 addons:
-  # Add-ons only run when listed here. Built-in: mcp. Community add-ons: pip packages
+  # Add-ons only run when listed here. MCP servers under config.mcp.servers start by themselves when any are
+  # listed (Apps > Advanced: custom MCP servers; config.mcp.enabled: false turns them off). Community add-ons: pip packages
   # (entry point group "delta.addons") or folders in %LOCALAPPDATA%\Delta\addons\<name>\addon.py
   enabled: []
   config:

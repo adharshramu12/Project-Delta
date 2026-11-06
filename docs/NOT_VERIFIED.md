@@ -73,6 +73,19 @@ saying what you found (it worked, or how it failed) is very welcome.
 - The local reference servers (`npx` and `uvx`) at their pinned versions on a real PC, and Node.js / uv being
   missing on a stranger's laptop (the message is tested, the install is not).
 
+## Email, writing style and identity
+
+- **Sending email** with a real Gmail account: the browser path (the compose page filled from the approved draft,
+  then Send, then Gmail's "Message sent") and the Gmail-app path are tested with fakes only. Google's official Gmail
+  MCP server has no send tool, so with it Delta sends through the browser; a third-party Gmail server with a send
+  tool is matched by its tool name and arguments and has not been tried with a real server.
+- The **Edit** button on a real phone in Telegram (Edit, then a reply with the changes) and the dashboard's Edit box
+  are tested in code, not by hand.
+- WhatsApp has no Approve / Edit / Cancel buttons: Delta does not take commands or approvals over WhatsApp (it only
+  types into the WhatsApp app for you). Approvals come to the dashboard, Telegram and Slack.
+- How well cheap real models follow the style, warmth and identity rules in other languages (Telugu, Hindi in
+  English letters): the code checks are tested; real-model answers are not measured yet.
+
 ## Saved logins and watchers
 
 - **DPAPI on a fresh laptop**: saving, opening and refusing logins and watcher snapshots with real DPAPI on a newly

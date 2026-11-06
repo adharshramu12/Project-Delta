@@ -513,6 +513,16 @@ def _app_asked(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
     return len(asked) == int(arg["count"]), f"{len(asked)} approval(s) asked: {[a.tool for a in asked]}"
 
 
+@check("asked")
+def _asked(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    """{count, tool?, shows?}: approvals the user was asked for (any tool), optionally only those whose text shows
+    every string in `shows` (an email approval shows its recipients and the whole draft)."""
+    asked = [a for a in ctx.asked if not arg.get("tool") or a.tool == arg["tool"]]
+    for text in _texts(arg.get("shows") or []):
+        asked = [a for a in asked if text in a.summary]
+    return len(asked) == int(arg["count"]), f"{len(asked)} approval(s) asked: {[a.tool for a in asked]}"
+
+
 @check("app_connect_says")
 def _app_connect_says(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
     """text: some connect / disconnect result message (or confirmation text) contains it."""

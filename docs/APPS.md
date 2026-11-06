@@ -116,10 +116,17 @@ connectors:
   sign_in_timeout_s: 300
 ```
 
-## The `mcp:` add-on still works
+## Apps is the one place for apps (custom MCP servers)
 
-Servers you configured before under `addons.config.mcp.servers` load exactly as before (they need the optional
-`mcp` extra). Connected apps are separate and need no extra: Delta speaks the protocol itself.
+MCP is how apps talk to Delta; you never switch it on. Settings > Add-ons no longer has an "mcp" tick. Servers you
+configured under `addons.config.mcp.servers` start by themselves whenever any are configured (they need the
+optional `mcp` extra), and show on the Apps page under **Advanced: custom MCP servers** with one on/off switch
+(`addons.config.mcp.enabled`, applied after a restart). "Add another MCP server" is in the same place.
+
+Older settings files are migrated once at start-up, with nothing lost: a file that ticked "mcp" keeps its servers
+on, one that has servers but left it unticked keeps them off, and "mcp" leaves `addons.enabled`. An older page or
+script that still sends "mcp" in the add-on list switches the servers on, as the tick always did. Connected apps
+need no extra: Delta speaks the protocol itself.
 
 ## For developers
 

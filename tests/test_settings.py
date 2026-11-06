@@ -70,7 +70,8 @@ def client(tmp_path, monkeypatch):
 def test_get_settings(client):
     tc, _, _ = client
     s = tc.get("/api/settings").json()
-    assert s["boundaries"]["autonomy"] == "ask-risky" and "mcp" in s["addons"]["available"]
+    # MCP is not an add-on to tick any more: Apps is the one place to connect apps (delta.addons.mcp_settings)
+    assert s["boundaries"]["autonomy"] == "ask-risky" and "mcp" not in s["addons"]["available"]
     assert s["keys"]["groq_api_key"]["set"] is True and s["save_dir_resolved"]
 
 

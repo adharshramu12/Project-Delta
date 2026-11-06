@@ -209,6 +209,12 @@ class CaptchaConfig(BaseModel):
     allowed_sites: list[str] = Field(default_factory=list)
 
 
+class AcademyConfig(BaseModel):
+    # One light line about the academy in delta/identity.py, at most once per conversation, only when the user asks
+    # to learn AI (delta.core.academy). false = never.
+    enabled: bool = True
+
+
 class WriterConfig(BaseModel):
     # Writer and Documents (write_post, prepare_post, make_document). See README "Writer and Documents".
     enabled: bool = True
@@ -441,6 +447,7 @@ class Settings(BaseModel):
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     captcha: CaptchaConfig = Field(default_factory=CaptchaConfig)
     writer: WriterConfig = Field(default_factory=WriterConfig)
+    academy: AcademyConfig = Field(default_factory=AcademyConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     engine: EngineConfig = Field(default_factory=EngineConfig)
     selfheal: SelfHealConfig = Field(default_factory=SelfHealConfig)

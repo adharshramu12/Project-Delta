@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from delta.addons.builtin import builtin_addons
 from delta.addons.loader import discover
+from delta.addons.mcp_settings import MCP
 from delta.bootstrap import Container, make_policy
 from delta.config import QuietHours, save_dir, write_user_settings
 from delta.safety.policy import ALWAYS_DENIED, norm_path
@@ -83,6 +84,10 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
     def available_addons() -> list[str]:
         return sorted({*builtin_addons(), *discover(c.settings.data_dir / "addons")})
 
+    def listed_addons() -> list[str]:
+        """What Settings > Add-ons shows: MCP lives on the Apps page now (delta.addons.mcp_settings)."""
+        return [a for a in available_addons() if a != MCP]
+
     @app.get("/api/settings", dependencies=[Depends(auth)])
     async def get_settings() -> dict[str, Any]:
         s = c.settings
@@ -99,7 +104,7 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
                        "learn_skills": s.memory.learn_skills},
             "save_dir": s.files.save_dir,
             "save_dir_resolved": str(save_dir(s.files, create=False)),
-            "addons": {"available": available_addons(), "enabled": s.addons.enabled},
+            "addons": {"available": listed_addons(), "enabled": [a for a in s.addons.enabled if a != MCP]},
             "keys": {k: {"label": KEY_INFO[k], "set": v} for k, v in keys.items()},
             "always_protected": [*ALWAYS_DENIED, str(s.data_dir)],
             "attachments": {**s.attachments.model_dump(), "providers": sorted(s.llm.providers),
@@ -170,8 +175,14 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
             unknown = set(body.addons_enabled) - set(available_addons())
             if unknown:
                 raise HTTPException(400, f"Unknown add-on(s): {', '.join(sorted(unknown))}")
-            restart = sorted(body.addons_enabled) != sorted(s.addons.enabled)
-            changes["addons"] = {"enabled": body.addons_enabled}
+            # The page no longer lists "mcp": its state is kept as it is. An older page or script that still sends
+            # "mcp" switches the MCP servers on, as that tick always did.
+            wanted = [a for a in body.addons_enabled if a != MCP]
+            restart = sorted(wanted) != sorted(a for a in s.addons.enabled if a != MCP)
+            changes["addons"] = {"enabled": wanted}
+            if MCP in body.addons_enabled and not s.addons.config.get(MCP, {}).get("enabled", False):
+                changes["addons"]["config"] = {MCP: {"enabled": True}}
+                restart = True
         if body.attachments:
             att = body.attachments.model_dump(exclude_none=True)
             if "vision" in att:
@@ -196,6 +207,8 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
             s.files.save_dir = changes["files"]["save_dir"]
         if "addons" in changes:
             s.addons.enabled = changes["addons"]["enabled"]
+            if "config" in changes["addons"]:
+                s.addons.config.setdefault(MCP, {})["enabled"] = True
         if "browser" in changes:
             for k, v in changes["browser"].items():
                 setattr(s.browser, k, v)
