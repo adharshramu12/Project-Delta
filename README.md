@@ -263,7 +263,8 @@ every step. Details: [docs/APPS.md](docs/APPS.md).
 
 Save a login for your college ERP or LMS once, on the PC (**Settings > Logins and watchers**, or
 `delta logins add "College ERP" --site https://erp.example.edu`), then ask: *"what is on my timetable
-tomorrow?"* Delta signs in itself in its private browser. The AI never sees the user name or password.
+tomorrow?"* Delta signs in itself, in whichever browser you use with Delta: its private browser or your own default
+browser (Chrome or Edge, with your real sessions). The AI never sees the user name or password.
 
 - **Only on the exact site.** A login is bound to one origin (scheme, host, port). Lookalike hosts, an http
   downgrade, another port or a form inside a frame from another site are refused before anything is typed.
@@ -271,6 +272,10 @@ tomorrow?"* Delta signs in itself in its private browser. The AI never sees the 
   log, a chat or the model's context. No DPAPI, no saving.
 - **You decide each use**: "Ask every time" (default) or "Always allow for this site". From a phone a sign-in
   needs your PIN. One-time codes and reCAPTCHA-type checks are handed to you on the PC; Delta never solves them.
+- **Your own browser asks once more.** The first time a login is filled in your everyday browser, Delta asks you,
+  naming the browser and the site, even for "Always allow". The sign-in is bound to one tab: switch tabs, use the
+  mouse, or let the page move elsewhere, and Delta stops, clears what it typed and submits nothing. It also checks
+  that the box kept what it filled (an extension can change it) and never retries.
 - **Watchers**: *"watch my ERP for exams, timetable and notifications"*. Every 6 hours by default (at most
   hourly) Delta signs in, reads the pages with a saved recipe and **no AI**, and tells you only what is new, at
   once or in a daily digest. New exams and deadlines are offered as reminders; one is made only when you say so.

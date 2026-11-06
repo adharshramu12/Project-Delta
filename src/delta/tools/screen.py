@@ -28,14 +28,24 @@ def capture_jpeg(max_width: int) -> tuple[str, tuple[int, int], tuple[int, int]]
     from PIL import Image
 
     with mss.mss() as sct:
-        shot = sct.grab(sct.monitors[1])
+        mon = sct.monitors[1]
+        shot = sct.grab(mon)
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+    _mask_screen(img, (int(mon.get("left", 0)), int(mon.get("top", 0))))
     screen = img.size
     if img.width > max_width:
         img = img.resize((max_width, round(img.height * max_width / img.width)), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=70, optimize=True)
     return base64.b64encode(buf.getvalue()).decode(), screen, img.size
+
+
+def _mask_screen(img: Any, origin: tuple[int, int]) -> None:
+    """Paint over password boxes Delta filled in the user's own browser (delta.logins.mask)."""
+    from delta.logins import mask
+
+    if mask.active():
+        mask.mask_screen(img, origin)
 
 
 def find_window_handle(title: str) -> int | None:
@@ -79,6 +89,10 @@ def capture_window_image(hwnd: int) -> tuple[Any, tuple[int, int]]:
         mem.DeleteDC()
         src.DeleteDC()
         win32gui.ReleaseDC(hwnd, hdc)
+    from delta.logins import mask
+
+    if mask.active():
+        mask.mask_window(img, hwnd)  # password boxes Delta filled in the user's own browser
     return img, (left, top)
 
 
@@ -88,8 +102,11 @@ def capture_screen_image() -> Any:
     from PIL import Image
 
     with mss.mss() as sct:
-        shot = sct.grab(sct.monitors[1])
-        return Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        mon = sct.monitors[1]
+        shot = sct.grab(mon)
+        img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+    _mask_screen(img, (int(mon.get("left", 0)), int(mon.get("top", 0))))
+    return img
 
 
 def capture_window_jpeg(hwnd: int, max_width: int) -> tuple[str, tuple[int, int], tuple[int, int], tuple[int, int]]:

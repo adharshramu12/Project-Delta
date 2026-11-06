@@ -6,8 +6,8 @@ the box is ticked, the file is attached), and fails with a plain reason and what
 Safety is the same as for the other browser tools: every call goes through ToolExecutor (policy, approvals, Remote
 Guard, ExfilGuard). Uploading a file sends it off the PC, so it is EXTERNAL (asks) and the file path is checked like
 any other path (Delta's data folder and secrets files are refused). Accepting a dialog that deletes or sends asks
-like clicking a Delete or Send button. These tools exist only in Delta's private browser; with the user's own
-browser the stand-in says so (delta.tools.browser_switch).
+like clicking a Delete or Send button. The user's own browser has the same tools, by label instead of ref
+(delta.tools.user_browser_actions); the stand-ins (delta.tools.browser_switch) pick the one the task uses.
 """
 
 from __future__ import annotations

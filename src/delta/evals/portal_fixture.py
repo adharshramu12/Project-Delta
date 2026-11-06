@@ -289,6 +289,9 @@ class PortalSite:
 #   watcher: {name, what, sections}               a watcher with this recipe (delta.watchers.recipe.Section fields)
 #   prime: true                                   one scheduled check before the task: the watcher's baseline
 #   then: [add_exam | expire]                     changes to the site after priming, before the task runs
+#   browser: private | own                        own = sign_in treats the attached browser as the user's OWN
+#                                                 browser (delta.evals.own_browser_standin): one-time consent,
+#                                                 tab binding and the own-browser checks; default private
 # Placeholders: {portal} (the site's URL), {portal_other} (the same site under another origin).
 
 EVAL_PASSWORD = "Eval-Portal-Pass-5180"  # made up; checks assert it never leaves the sign-in form
@@ -344,7 +347,14 @@ class PortalHarness:
                   permission=str(raw.get("permission", "always")))
         self.logins = LoginService(store, audit, approvals, settle=settle)
         hub = SimpleNamespace(mgr=mgr, settings=settings)
-        for tool in login_tools(self.logins, hub):
+        if str(spec.get("browser", "private")) == "own":
+            from delta.evals.own_browser_standin import PlaywrightOwnDriver
+
+            login_hub = SimpleNamespace(mgr=mgr, settings=settings, own_standin=True, kind_now=lambda: "user",
+                                        own_signin_driver=lambda: PlaywrightOwnDriver(mgr, settle))
+        else:
+            login_hub = hub
+        for tool in login_tools(self.logins, login_hub):
             registry.register(tool)
         self.watchers = WatchService(WatchStore(data / "watchers.db", **sealers()), self.logins, hub, None, None,
                                      audit, settle=settle)

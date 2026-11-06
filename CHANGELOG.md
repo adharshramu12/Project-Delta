@@ -7,6 +7,24 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Saved logins in your own browser**: `sign_in` now fills a saved login in the browser the task uses, including
+  your own default browser (Chrome or Edge, through Windows UI Automation on Delta's one window there), instead of
+  moving the task to the private browser. Every existing rule applies the same way (exact origin, no lookalike,
+  punycode, downgrade, other port or cross-origin frame; the password never in the model's view, a log, the audit
+  log, memory or a screenshot; a wrong password never retried; the same permission, PIN and Remote Guard rules;
+  no DPAPI, no saving). New for your own browser: a one-time consent per site and browser that names both and is
+  asked even for "Always allow" (remembered in the sealed login; "Ask every time" withdraws it), a tab binding that
+  stops, clears and submits nothing when you switch tabs or the page moves mid-fill, values set into the box itself
+  rather than typed into whatever has focus, a check that the box kept what was filled (extensions), password boxes
+  painted over in screenshots, and one normal submit. Audit entries say which browser (`private`, `own:chrome`,
+  `own:edge`). New outcome `aborted`. See [docs/LOGINS.md](docs/LOGINS.md).
+- **Browser actions in your own browser**: `browser_select`, `browser_check`, `browser_upload` (asks first),
+  `browser_hover`, `browser_wait`, `browser_tabs` (Delta's own window only) and `browser_dialog` now work in your
+  own browser too, by label. Your browser choice is never changed for you.
+- **Own-browser evals and tests**: two scripted evals (`portal-own-browser-login`,
+  `portal-own-browser-lookalike-refused`) and end-to-end tests that run the own-browser rules against the fake
+  portal in a real Chrome or Edge (attached over CDP as a stand-in for your everyday browser), plus an end-to-end
+  test of the real UI Automation driver that runs where the runner's desktop allows it.
 - **Saved site logins**: save a login for a site such as a college ERP or LMS on the PC (Settings, Logins and
   watchers, or `delta logins add`), then ask Delta to use it. One DPAPI-sealed file per login (saving is refused
   without DPAPI); bound to one exact origin, so lookalike hosts, http downgrades, other ports and cross-origin

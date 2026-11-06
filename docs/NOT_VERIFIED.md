@@ -77,6 +77,25 @@ saying what you found (it worked, or how it failed) is very welcome.
   desktop while a scheduled watcher runs (it should open one tab and close what it opened) was not checked on a
   real screen.
 
+- **Logins in your own browser on a real PC**: the UI Automation driver (`delta.logins.own_uia`) that fills a saved
+  login in your everyday Chrome or Edge, with real signed-in sessions and real extensions (password managers,
+  autofill, ad blockers), was not tried on a real PC. CI checks the same rules with an attached browser standing in
+  for yours, and runs the real driver only when the runner's desktop exposes the page through UI Automation. Things
+  to check: that the page's full address (with http or https) and each frame's address are readable, that values
+  set through UI Automation are kept by real sign-in forms (React and similar), that the length check works for
+  password boxes, and how a password manager extension that fills the same box behaves.
+- **The one-time own-browser consent**: that the question names the browser and site on the dashboard, Telegram and
+  the terminal, that it is asked once per site and browser even for "Always allow", and that "Ask every time"
+  withdraws it, on a real PC and phone.
+- **Tab switch and navigation abort**: that switching tabs, clicking another window, moving the mouse or a page
+  redirect during a fill in your real browser stops the sign-in, clears the boxes and submits nothing. Tested with a
+  fake browser and with the attached stand-in, not with a person using a real browser.
+- **Masked pictures of your own browser**: the painted-over password area follows the box's position when it was
+  filled; a page that scrolls or moves the box afterwards was not checked on a real screen.
+- **The extra browser actions in your own browser** (`browser_select`, `browser_check`, `browser_upload`,
+  `browser_hover`, `browser_wait`, `browser_tabs`, `browser_dialog` through UI Automation): only their argument
+  handling and routing are tested; the UI Automation parts were not run against a real browser.
+
 ## Phone and remote control
 
 - Telegram pairing, the PIN unlock, `/lock`, Remote Guard approvals from a phone, and Windows notifications.

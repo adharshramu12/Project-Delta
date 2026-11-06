@@ -45,7 +45,9 @@ def run_cli(settings: Settings, args: argparse.Namespace, ask: Callable[[str], s
             return 0
         for x in items:
             used = f", last used {x.last_used} ({x.last_outcome})" if x.last_used else ""
-            out(f"{x.name}: {x.origin} as {x.username or '(no user name)'}; {PERMISSION_WORDS[x.permission]}{used}")
+            own = f", allowed in your own {' and '.join(sorted(x.own_browser))}" if x.own_browser else ""
+            out(f"{x.name}: {x.origin} as {x.username or '(no user name)'}; {PERMISSION_WORDS[x.permission]}{own}"
+                f"{used}")
         return 0
     if not args.name:
         out(f"give the login's name, e.g. delta logins {action} \"College ERP\"")

@@ -10,8 +10,14 @@ Approving a sign-in from a phone needs the remote PIN (it is an "external" actio
 request that came from Telegram can call sign_in only after /unlock (sign_in is a REMOTE_PIN_TOOLS entry). While
 remote control is locked nothing remote signs in at all.
 
-Every use is written to the audit log: the login's name, its site, the task and the outcome. Never the user name,
-the password, a one-time code or a captcha answer.
+Every use is written to the audit log: the login's name, its site, the task, which browser and the outcome. Never
+the user name, the password, a one-time code or a captcha answer.
+
+The user's OWN browser (their everyday Chrome or Edge, delta.logins.own_browser) has one more question: the first
+time a login is filled there, Delta asks for an explicit yes that names the browser and the site, even when the login
+is "Always allow". The yes is remembered for that site and that browser (LoginStore.allow_own_browser); "Ask every
+time" in Settings withdraws it. It is a one-time consent, so it has no "Allow for this task" button, and from a phone
+it needs the PIN like any sign-in approval.
 """
 
 from __future__ import annotations
@@ -21,11 +27,14 @@ from collections.abc import Callable
 from typing import Any
 
 from delta.core.state import CURRENT_REQUEST
+from delta.logins.own_browser import OwnBrowserDriver, OwnBrowserSignIn
 from delta.logins.signin import SignInEngine, SignInResult
 from delta.logins.store import Login, LoginStore
 from delta.safety.approvals import ApprovalBroker, ApprovalRequest
 from delta.safety.remote_guard import is_remote
 from delta.system.logging import log
+
+OWN_CONSENT_TOOL = "sign_in_own_browser"  # the approval asked once per site and browser before the first own fill
 
 
 class LoginService:
@@ -49,8 +58,7 @@ class LoginService:
 
     async def allowed(self, login: Login, task_id: str = "", why: str = "") -> tuple[bool, str]:
         """(may use it now, how it was decided). 'always' needs no answer; otherwise a person decides."""
-        req = CURRENT_REQUEST.get()
-        if self.guard is not None and req is not None and is_remote(req.channel) and self.guard.locked:
+        if self._remote_locked():
             return False, "remote control is locked"
         if login.permission == "always":
             return True, "always allowed for this site"
@@ -67,6 +75,33 @@ class LoginService:
         if not outcome.approved:
             return False, f"not approved ({outcome.by})"
         return True, "allowed for this task" if outcome.for_task else f"approved by {outcome.by}"
+
+    def _remote_locked(self) -> bool:
+        req = CURRENT_REQUEST.get()
+        return bool(self.guard is not None and req is not None and is_remote(req.channel) and self.guard.locked)
+
+    async def own_browser_consent(self, login: Login, browser: str, label: str, task_id: str = "") -> tuple[bool, str]:
+        """(may fill it in the user's own browser, how it was decided). Asked once per site and browser."""
+        if browser in login.own_browser:
+            return True, ""
+        if self._remote_locked():
+            return False, "remote control is locked"
+        if self.approvals is None:
+            return False, "no one to ask"
+        outcome = await self.approvals.request(ApprovalRequest(
+            tool=OWN_CONSENT_TOOL, risk="external", task_id=task_id, for_task=False,
+            summary=(f"First time in your own browser: let Delta type your saved login for {login.name} "
+                     f"({login.origin}) into {label}, your everyday browser with your real tabs, sessions and "
+                     "extensions?"),
+            reason=(f"asked once per site in {label}, even when the login is 'Always allow'. Delta then remembers "
+                    "it for this site; 'Ask every time' in Settings > Logins withdraws it")))
+        self.audit.record("login.own_browser_consent", login=login.id, site=login.origin, browser=browser,
+                          given=outcome.approved, by=outcome.by)
+        if not outcome.approved:
+            return False, f"not approved ({outcome.by})"
+        self.store.allow_own_browser(login.id, browser)
+        login.own_browser[browser] = "now"
+        return True, f"own-browser consent given by {outcome.by}"
 
     # --- hand-offs (one-time codes, captchas the user solves) -------------------------------------------
     async def handoff(self, kind: str, host: str, text: str) -> bool:
@@ -154,7 +189,41 @@ class LoginService:
                 self.on_used(login, result.outcome)
         return result
 
-    def _audit(self, login: Login, task_id: str, outcome: str, how: str) -> None:
+    async def sign_in_own(self, ref: str, driver: OwnBrowserDriver, task_id: str = "", why: str = "") -> SignInResult:
+        """Sign in with the saved login `ref` in the user's OWN browser through `driver`. Same permission and audit
+        as sign_in, plus the one-time own-browser consent (asked first, even for "always")."""
+        login = self.store.get(ref)
+        if login is None:
+            names = ", ".join(x.name for x in self.store.list()) or "none saved yet"
+            return SignInResult("failed", f"no saved login called '{ref}' (saved: {names}). The user adds logins on "
+                                          "the PC: Settings > Logins, or `delta logins add`.")
+        browser = f"own:{driver.browser_key}"
+        ok, how = await self.own_browser_consent(login, driver.browser_key, driver.browser_label, task_id)
+        if not ok:
+            self._audit(login, task_id, "not_allowed", how, browser)
+            return SignInResult("needs_user", f"The user did not allow Delta to fill the saved login for {login.name} "
+                                              f"in their own {driver.browser_label} ({how}). Do not try another way.")
+        if not how:  # consent given before: the login's own permission decides, as in the private browser
+            ok, how = await self.allowed(login, task_id, why)
+            if not ok:
+                self._audit(login, task_id, "not_allowed", how, browser)
+                return SignInResult("needs_user", f"The user did not allow using the saved login for {login.name} "
+                                                  f"({how}). Do not try another way.")
+        # else: the consent question just answered names this site and browser, so it covers this use too
+        try:
+            result = await OwnBrowserSignIn(self.handoff).sign_in(driver, login)
+        except Exception as e:
+            log.warning("login.failed", site=login.origin, browser=browser, error=type(e).__name__)
+            result = SignInResult("failed", f"signing in to {login.name} in your {driver.browser_label} failed "
+                                            f"({type(e).__name__})")
+        self.store.touch(login.id, result.outcome)
+        self._audit(login, task_id, result.outcome, how, browser)
+        if self.on_used is not None:
+            with contextlib.suppress(Exception):
+                self.on_used(login, result.outcome)
+        return result
+
+    def _audit(self, login: Login, task_id: str, outcome: str, how: str, browser: str = "private") -> None:
         req = CURRENT_REQUEST.get()
         self.audit.record("login.use", login=login.id, site=login.origin, task=task_id, outcome=outcome,
-                          permission=how, channel=req.channel if req else "")
+                          permission=how, browser=browser, channel=req.channel if req else "")

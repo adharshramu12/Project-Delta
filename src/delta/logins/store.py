@@ -23,6 +23,7 @@ from typing import Any
 from delta.connectors.secrets import SecretBox, SecretsUnavailableError
 from delta.logins.origin import Origin, OriginError, is_loopback_host, origin_of, parse_origin, same_origin_login_url
 
+OWN_BROWSERS = ("chrome", "edge")  # the user's own browsers Delta can fill a login in (one-time consent each)
 PERMISSIONS = ("ask", "always")  # "allow for this task" is chosen at the prompt and kept in memory only
 PERMISSION_WORDS = {"ask": "Ask every time", "always": "Always allow for this site"}
 MAX_LOGINS = 50
@@ -59,6 +60,9 @@ class Login:
     created: str = ""
     last_used: str = ""
     last_outcome: str = ""
+    # The one-time consent to fill this login in the user's OWN browser (not Delta's private one): browser key
+    # (chrome | edge) -> when the user gave it. Asked once per site and browser, even with "always" (service.py).
+    own_browser: dict[str, str] = field(default_factory=dict)
 
     @property
     def site(self) -> Origin:
@@ -69,7 +73,8 @@ class Login:
         out: dict[str, Any] = {"id": self.id, "name": self.name, "origin": self.origin, "login_url": self.login_url,
                                "permission": self.permission, "permission_words": PERMISSION_WORDS[self.permission],
                                "has_password": bool(self.password), "last_used": self.last_used,
-                               "last_outcome": self.last_outcome, "insecure": not self.site.secure}
+                               "last_outcome": self.last_outcome, "insecure": not self.site.secure,
+                               "own_browser": sorted(self.own_browser)}
         if with_username:
             out["username"] = self.username
         else:
@@ -95,11 +100,14 @@ class LoginStore:
         if not data or not data.get("origin"):
             return None
         perm = str(data.get("permission") or "ask")
+        raw_own = data.get("own_browser")
+        own = ({str(k): str(v) for k, v in raw_own.items() if k in OWN_BROWSERS} if isinstance(raw_own, dict)
+               else {})
         return Login(id=lid, name=str(data.get("name") or lid), origin=str(data["origin"]),
                      username=str(data.get("username") or ""), password=str(data.get("password") or ""),
                      login_url=str(data.get("login_url") or ""), permission=perm if perm in PERMISSIONS else "ask",
                      created=str(data.get("created") or ""), last_used=str(data.get("last_used") or ""),
-                     last_outcome=str(data.get("last_outcome") or ""))
+                     last_outcome=str(data.get("last_outcome") or ""), own_browser=own)
 
     def list(self) -> list[Login]:
         if not self.folder.exists():
@@ -136,7 +144,7 @@ class LoginStore:
     def _save(self, login: Login) -> None:
         data = {"name": login.name, "origin": login.origin, "username": login.username, "password": login.password,
                 "login_url": login.login_url, "permission": login.permission, "created": login.created,
-                "last_used": login.last_used, "last_outcome": login.last_outcome}
+                "last_used": login.last_used, "last_outcome": login.last_outcome, "own_browser": login.own_browser}
         try:
             self.box.save(login.id, data)
         except SecretsUnavailableError as e:
@@ -190,6 +198,19 @@ class LoginStore:
         if login is None:
             raise LoginError(f"no saved login called '{ref}'")
         login.permission = permission
+        if permission == "ask":
+            login.own_browser = {}  # "Ask every time" also withdraws the own-browser consent (docs/LOGINS.md)
+        self._save(login)
+        return login
+
+    def allow_own_browser(self, lid: str, browser: str) -> Login | None:
+        """Record the user's one-time consent to fill this login in their own `browser` (chrome | edge)."""
+        if browser not in OWN_BROWSERS:
+            raise LoginError(f"unknown browser '{browser}'")
+        login = self._load(lid)
+        if login is None:
+            return None
+        login.own_browser[browser] = _now()
         self._save(login)
         return login
 
