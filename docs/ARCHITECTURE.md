@@ -286,11 +286,85 @@ call in a worker thread cannot be interrupted by Python: after a timeout its res
 `api/static/tasks.js`. `delta tasks [list|show|resume|discard|prune]` is the terminal version; `resume` goes to
 the running service when there is one.
 
+## Memory and learning pipeline
+
+Batch D. Everything below is local: SQLite files in Delta's data folder, standard library only (no new
+dependency, no embedding model).
+
+```
+user message / tool result
+   -> provenance (delta/memory/provenance.py): trust = trusted | agent | untrusted, origin, task id
+   -> redaction (delta/memory/redact.py): keys, tokens, Luhn-valid card numbers, "password is ..." removed
+   -> memory.db (delta/memory/store.py): DPAPI-sealed content + provenance columns, caps and retention
+recall: prompt block = trusted profile facts + matching past-task notes   (never untrusted notes)
+        recall tool  = BM25-style word scoring over all rows, each hit labelled with its provenance
+```
+
+**Taint by data flow.** The executor already marks a task tainted once it reads outside content
+(`UNTRUSTED_SOURCES`). Almost every task reads something, so taint alone would stop all learning. Instead a value
+learned in a tainted task stays trusted only when it traces to the user: none of its words that the user did not
+type appear in what the task read from outside (`ObservationLog.outside_text`). The executor's
+`ObservationLog` (`delta/core/observations.py`) keeps the full results of every call per task, in memory only, and
+the orchestrator keeps the task's taint and outside text past `forget_task` until its learning step has run
+(audit M7: taint used to be cleared before learning).
+
+Where it applies:
+- `remember`: a fact from a tainted task that does not trace to the request is stored as kind `note`, trust
+  `untrusted` (the existing taint guard also asks the user first);
+- planner facts (`plan.remember`): kept only when the user's current message says them, not earlier chat turns;
+- facts extracted after a task: dropped when they trace to outside content;
+- skills: not distilled when any argument of the successful steps traces to outside content;
+- lessons and repaired recipe steps: stored, but untrusted, and never promoted.
+
+**Stores.** `memory.db`, `learning.db` and `skills.db` get additive migrations (new columns with defaults, new
+tables; `PRAGMA user_version` for memory.db). Old files load unchanged; old memory rows are marked origin
+`legacy`. `learning.db` has an append-only `learn_events` table (an UPDATE trigger refuses changes): the full
+history of every lesson (`L<id>`), recipe candidate (`R<id>`) and refused skill.
+
+**Recipe auto-repair** (`delta/learning/repair.py`, in `Orchestrator._replay`). A failed replay step is
+classified with the Batch B taxonomy; for element not found, stale element, timeout or a banner in the way, Delta
+first tries an open candidate's version of that step, else runs self-heal's playbook (re-read and find by name,
+wait and retry, close a harmless banner, step down a rung). The call that worked becomes the repaired step (slot
+values turned back into `{slots}`) and is saved in `skills.db` `recipe_candidates`. The skill's working recipe
+is changed only when the candidate is promoted, and goes back to the old version if the promoted one is retired.
+
+**Lessons** (`delta/learning/lessons.py`). A self-heal recovery that worked on a site becomes a lesson candidate
+written only in Delta's own fixed words plus the site's host name, so no page text can enter it. Active lessons
+join the standing instructions; candidates do not.
+
+**Promotion gate** (`delta/learning/gate.py`). Candidate -> active after `learning.promote_after_runs` (3)
+verified real runs or one passing scripted eval (`promote_on_eval`); retired or rejected after
+`demote_after_failures` (2) failures in a row; untrusted items are refused in code by the stores themselves
+(`UntrustedPromotionError`), whoever asks. Every change goes to `learn_events` and, inside a task, a `learning`
+line in the run timeline. `delta learn list|show|promote|reject` and `/api/learn` expose it.
+
+## Answer grounding
+
+`delta/core/grounding.py` (audit M12), called in the attempt loop after the model says `DONE:` and before the
+verifier:
+
+1. extract claims from the answer: paths, numbers (compared by value: 70,06,652 = 7,006,652), links and sites,
+   quoted text, and "I sent / saved / deleted ..." (skipped when negated); small counts, times and dates are not
+   claims;
+2. ground each one against the evidence: full outputs and evidence of every successful call, the arguments of
+   successful calls that change something (not of read-only calls, which are questions), and the user's request;
+   a path a check found missing is contradicted;
+3. at most `grounding.max_checks` (1) extra read-only checks for unverified claims, only when the policy allows
+   them without asking: `path_info` for a file, a focused `browser_read` of the current page for a number or a
+   quote. Their output is used for grounding only and is not sent to the model;
+4. contradicted claims fail the attempt without a verifier call (the agent is told what is wrong and tries
+   again); unverified claims are listed under the answer in `report` mode or fail the attempt in `strict` mode.
+
+Cost: no model call. On a clean answer nothing is added; on an unconfirmed one, one footnote line and at most
+one read-only tool call. Counters in the usage meter (`grounding_claims`, `grounding_checks`,
+`unverified_claims`, `contradicted_claims`) and one `grounding` line in the run timeline. Conversation answers
+(no tools) and the fast paths (a tool that proves its own result) are not grounded.
+
 ## Evals
 
-`delta/evals/` runs the task specs in `evals/tasks/*.yaml` (70 tasks: files, documents, web pages on a local
+`delta/evals/` runs the task specs in `evals/tasks/*.yaml` (86 tasks: files, documents, web pages on a local
 fixture site, apps, memory, self-heal, perception on pictures drawn at run time by `evals/perception_fixtures.py`,
-and read-only helpers) through the real orchestrator, tools, policy, approvals and task engine, each in
+read-only helpers, and memory trust, learning and answer grounding in `learning.yaml`) through the real orchestrator, tools, policy, approvals and task engine, each in
 its own sandbox and data folder. Every task has deterministic checks (`evals/checkers.py`: file contents, JSON
 fields, the fixture site's recorded page state, memory, steps, leftover processes, redaction of `tasks.db`).
 The scripted model (`evals/scripted.py`) replays each task's `script` so the suite runs with no keys and no

@@ -112,6 +112,26 @@ memory:
   auto_extract: true        # suggest facts after tasks; you can view/delete with /memory
   learn_skills: true        # turn verified tasks into reusable skills (see dashboard > Learned skills)
   recall_k: 6
+  max_items: 2000                 # facts you stated yourself are never removed by the limits
+  max_item_chars: 500
+  episode_retention_days: 90      # notes on past tasks
+  untrusted_retention_days: 30    # notes from web pages, files or messages (data only, never rules)
+
+learning:
+  # Lessons from self-heal and repaired skill steps start as candidates and are used only after they prove
+  # themselves. Anything from outside content is never promoted. See `delta learn`.
+  enabled: true
+  promote_after_runs: 3
+  promote_on_eval: true
+  demote_after_failures: 2
+  repair_recipes: true
+  lessons: true
+
+grounding:
+  # Before saying "done", match each claim in the answer (files, numbers, links, quotes, "I sent/saved")
+  # against what the tools returned in this task. No AI tokens. report | strict | off
+  mode: report
+  max_checks: 1
 
 files:
   # Where Delta saves files it makes for you. "auto" = Desktop\Delta, or, when OneDrive syncs the
