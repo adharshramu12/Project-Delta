@@ -31,6 +31,9 @@ the fixture site's recorded page state, Delta's memory, the task's steps and its
   memory_absent: text                   no memory holds this text (e.g. a secret that must be redacted)
   in_prompt: text / not_in_prompt: text what the next task's prompt would carry from memory and the standing
                                         instructions (untrusted notes and candidate lessons never appear)
+  history_contains: text | [all of these]   what the request carried of its chat (setup chat / chat_filler):
+  history_not_contains: text | [...]        the recalled older lines, the outline and the no-guess line
+  history_max_chars: 3000                   that recap stays this short however long the chat is
   learn_item: {kind, status, trust, count}  lessons (kind lesson) or repaired recipes (kind recipe) in the gate
   skill_recipe: {contains | lacks}      the first saved skill's working recipe (JSON text)
   learning_history: text                some line of the learning history (learn_events) has this text
@@ -74,6 +77,7 @@ class CheckContext:
     portal: Any = None        # PortalHarness (tasks with `portal:`)
     asked: list[Any] = field(default_factory=list)  # approvals the user was asked for
     data: Path | None = None  # the task's data folder (audit log, databases)
+    history: str = ""  # what the request carried of its chat (tasks with setup chat / chat_filler)
 
 
 Check = Callable[[CheckContext, Any], tuple[bool, str]]
@@ -396,6 +400,23 @@ def _in_prompt(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
 def _not_in_prompt(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
     hit = str(arg).lower() in _prompt(ctx).lower()
     return not hit, f"the next prompt {'carries' if hit else 'does not carry'} {arg!r}"
+
+
+@check("history_contains")
+def _history_contains(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    missing = [t for t in _texts(arg) if t.lower() not in ctx.history.lower()]
+    return not missing, f"the chat recap {'lacks ' + repr(missing) if missing else 'carries it'}"
+
+
+@check("history_not_contains")
+def _history_not_contains(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    found = [t for t in _texts(arg) if t.lower() in ctx.history.lower()]
+    return not found, f"the chat recap {'carries ' + repr(found) if found else 'has none of them'}"
+
+
+@check("history_max_chars")
+def _history_max_chars(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    return len(ctx.history) <= int(arg), f"the chat recap is {len(ctx.history)} characters (limit {arg})"
 
 
 @check("learn_item")

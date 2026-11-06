@@ -118,7 +118,7 @@ async def test_stop_all_cancels_the_running_task_and_every_waiting_one(signal):
     c, orch, _ = container(s)
     tasks = [asyncio.create_task(c.submit(TaskRequest(f"job {i}", id=f"t{i}"))) for i in range(3)]
     await until(lambda: len(c.active) == 3 and orch.started == ["t0"])
-    assert stop_command(c, "/stop all", "telegram:5") == "⏹ Stopped 3 tasks."
+    assert stop_command(c, "/stop all", "telegram:5") == "Stopped 3 tasks."
     results = await asyncio.gather(*tasks, return_exceptions=True)
     assert all(isinstance(r, asyncio.CancelledError) for r in results)
     assert orch.started == ["t0"] and c.active == {}  # the waiting ones never started
@@ -130,7 +130,7 @@ async def test_stop_one_lets_the_next_task_run_with_a_clean_slate(signal):
     first = asyncio.create_task(c.submit(TaskRequest("first", id="f")))
     second = asyncio.create_task(c.submit(TaskRequest("second", id="s")))
     await until(lambda: orch.started == ["f"])
-    assert stop_command(c, "stop", "slack:U1") == "⏹ Stopped."
+    assert stop_command(c, "stop", "slack:U1") == "Stopped."
     with pytest.raises(asyncio.CancelledError):
         await first
     await until(lambda: orch.started == ["f", "s"])
@@ -232,12 +232,12 @@ async def test_telegram_stop_all_and_a_plain_stop_message(tmp_path):
     tasks = [asyncio.create_task(c.submit(TaskRequest(f"job {i}", id=f"t{i}"))) for i in range(2)]
     await until(lambda: len(c.active) == 2)
     await ch._stop_cmd(update("/stop all"), SimpleNamespace(args=["all"]))
-    assert said[-1] == "⏹ Stopped 2 tasks."
+    assert said[-1] == "Stopped 2 tasks."
     await asyncio.gather(*tasks, return_exceptions=True)
     t = asyncio.create_task(c.submit(TaskRequest("job", id="t9")))
     await until(lambda: c.running is not None)
     await ch._on_message(update("Stop"), None)  # a plain "stop" works like /stop, never queued as a task
-    assert said[-1] == "⏹ Stopped." and orch.started[-1] == "t9"
+    assert said[-1] == "Stopped." and orch.started[-1] == "t9"
     with pytest.raises(asyncio.CancelledError):
         await t
     await ch._stop_cmd(update("/stop"), SimpleNamespace(args=[]))

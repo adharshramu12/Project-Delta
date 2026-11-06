@@ -214,7 +214,7 @@ def create_app(c: Container, token: str) -> FastAPI:
             try:
                 if not chat_id or chats.get(chat_id) is None:
                     chat_id = chats.create().id
-                history = chats.context_for(chat_id)  # before this message is added
+                history = chats.context_for(chat_id, query=text)  # before this message is added
                 files = [c.orchestrator.attachments.store.move(a, chat_id) for a in files]
                 chats.add(chat_id, "user", text, {"attachments": [a.public() for a in files]} if files else None)
             except VaultUnavailableError as e:  # never stored unencrypted: say why instead of a bare 500

@@ -72,3 +72,37 @@
     - status: done
     - file_contains: {path: key.txt, text: EVALSECRET0123456789}
     - events_recorded: {min_steps: 2, absent: EVALSECRET0123456789}
+
+- id: chat-long-recalls-early-turn
+  description: a chat far past the recent window; the answer is in its first turn, so it is recalled word for word
+    with its turn number (no AI call to find it) and the recap stays short
+  request: What was the hotel wifi code I gave you?
+  setup:
+    chat:
+      - user: "My hotel wifi code is MANGO-7781, keep it handy for the trip"
+      - delta: "Noted."
+    chat_filler: 40
+  script:
+    plan: [{needs_tools: false, answer: "The hotel wifi code you gave me is MANGO-7781."}]
+  check:
+    - status: done
+    - history_contains: ["Recalled from older turns", "[#1 User] My hotel wifi code is MANGO-7781", "Never guess"]
+    - history_max_chars: 3000
+    - answer_contains: MANGO-7781
+    - max_steps: 0
+
+- id: chat-long-never-given
+  description: the same long chat, asked for something the user never said; nothing is recalled and the recap tells
+    the model to say it does not have it instead of guessing
+  request: What is my locker number?
+  setup:
+    chat_filler: 40
+  script:
+    plan: [{needs_tools: false, answer: "I don't have your locker number. You haven't told me in this chat."}]
+  check:
+    - status: done
+    - history_not_contains: ["Recalled from older turns", "locker"]
+    - history_contains: ["Summary of older turns", "say you don't have it"]
+    - history_max_chars: 3000
+    - answer_contains: "don't have"
+    - max_steps: 0

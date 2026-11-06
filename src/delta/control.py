@@ -158,8 +158,8 @@ def stop_command(c: Container, text: str, by: str) -> str | None:
         return None
     if kind == "all":
         n = stop_all(c, by)
-        return f"⏹ Stopped {n} task{'s' if n != 1 else ''}." if n else "Nothing is running right now."
-    return "⏹ Stopped." if stop_running(c, by) else "Nothing is running right now."
+        return f"Stopped {n} task{'s' if n != 1 else ''}." if n else "Nothing is running right now."
+    return "Stopped." if stop_running(c, by) else "Nothing is running right now."
 
 
 # --- which browser Delta uses (dashboard, Telegram /browser, chat set_browser) ------------------------------

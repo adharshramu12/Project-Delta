@@ -500,26 +500,43 @@ grounding: {mode: report, max_checks: 1}   # report | strict | off
 
 ## Telegram commands
 
+The "/" menu in Telegram lists every command below, grouped, and is refreshed for private chats each time Delta
+starts. `/help` (or just typing `menu`) shows the same list with a short note for each.
+
 | Command | What it does |
 |---|---|
 | *any message or voice note* | Delta does the task and replies in the chat |
-| `/ai` `/model` | See or switch the main AI and model |
-| `/keys` | Replace an API key (PIN protected) |
-| `/mode` | Permission level: ask everything → autopilot |
-| `/browser` | Which browser Delta uses: your default, Chrome, Edge or Delta's private browser (switching needs your PIN) |
-| `/signin` | Open Delta's private browser on the PC so you can sign in to your sites (PIN protected) |
+| `/new` | Start a fresh chat (the old one stays; also in the dashboard sidebar) |
+| `/chats` | Your recent chats with their date and short id; tap one to continue it |
+| `/open 2` or `/open a1b2c3` | Continue an old chat: your next message goes there |
+| `/find wifi code` | Search your past chats; shows the matching lines with an Open button |
+| `/tasks` | Recent tasks; Resume or Discard one that was interrupted (Resume needs your PIN) |
+| `/stop` `/stop all` | Stop the running task (or everything waiting too); a plain "stop" works as well |
+| `/undo` | Put back the files a task changed (needs your PIN) |
 | `/screen` `/camera` | Screenshot or webcam photo (PIN protected) |
+| `/windows` | What is open on the PC; tap to close one (this was `/apps` before 0.3) |
 | `/volume` `/brightness` `/theme` | Sound, screen brightness, Windows light/dark |
 | `/apps` | Your connected apps (Notion, GitHub...) and their state |
-| `/logins` `/watchers` | Your saved site logins (names and sites only) and the sites Delta watches (read-only) |
 | `/connect` `/disconnect` | Connect or disconnect an app (PIN protected; you finish a sign-in on the PC) |
-| `/windows` | What is open on the PC; tap to close one (this was `/apps` before 0.3) |
-| `/lock` `/unlock` | Lock remote control now / enter your PIN |
+| `/logins` `/watchers` | Your saved site logins (names and sites only) and the sites Delta watches (read-only) |
+| `/signin` | Open Delta's private browser on the PC so you can sign in to your sites (PIN protected) |
+| `/ai` `/model` | See or switch the main AI and model |
+| `/mode` | Permission level: ask everything → autopilot |
+| `/browser` | Which browser Delta uses: your default, Chrome, Edge or Delta's private browser (switching needs your PIN) |
+| `/keys` | Replace an API key (PIN protected) |
+| `/unlock` `/lock` | Enter your PIN / lock remote control now |
+| `/status` `/help` `/start` | PC health and AIs, all commands, start or pair |
 | *"every day at 9 am check my attendance"* | A scheduled task; the result comes back here (making one needs your PIN) |
 | *"I'm not well, message Ravi now"* | 🆘 Emergency alert to your saved contacts (WhatsApp message or call) |
-| `/tasks` | Recent tasks; Resume or Discard one that was interrupted (Resume needs your PIN) |
-| `/undo` | Put back the files a task changed (needs your PIN) |
-| `/stop` `/stop all` `/status` `/help` | Stop the task (or everything waiting too; a plain "stop" works), PC health and AIs, all commands |
+
+**Old chats are yours only.** `/chats`, `/open` and `/find` see only the chats you had with Delta from your own
+Telegram account: never the PC's dashboard chats and never another paired person's. They do nothing while remote
+control is locked.
+
+**Long chats.** Each request carries the last few turns of its chat. When a chat grows past that, Delta also keeps
+a short outline of the older turns and quotes, word for word, only the older lines that match the new request,
+each with its turn number. Anything not in those lines is treated as unknown: Delta says it doesn't have it
+instead of guessing. No extra AI call is made for this, and it adds a few hundred characters at most.
 
 ## Safety by design
 
