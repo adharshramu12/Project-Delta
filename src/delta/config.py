@@ -205,6 +205,19 @@ class SchedulerConfig(BaseModel):
     timezone: str = ""  # IANA name like "Asia/Kolkata"; empty = this PC's own time zone
 
 
+class EngineConfig(BaseModel):
+    """Durable task engine (delta.engine): task states, the step log, crash resume and the tool watchdog.
+    Added later: older settings files load unchanged and get these defaults."""
+    enabled: bool = True  # off = tasks run exactly as before, nothing is written to tasks.db
+    retention_days: float = Field(default=30, ge=0)  # finished tasks older than this are removed (0 = keep)
+    max_mb: float = Field(default=50, ge=0)  # tasks.db above this: oldest finished tasks go first (0 = no cap)
+    max_events_per_task: int = Field(default=2000, ge=10, le=100_000)
+    # Watchdog: seconds one tool call may take before it is stopped (with every process it started).
+    # 0 = no limit. A tool's own timeout_s argument (run_shell, run_python) is honoured plus a grace period.
+    default_tool_timeout_s: float = Field(default=600, ge=0)
+    tool_timeouts: dict[str, float] = Field(default_factory=dict)  # per tool name, e.g. {"web_search": 60}
+
+
 Autonomy = Literal["ask-everything", "ask-risky", "trusted", "autopilot"]
 
 
@@ -239,6 +252,7 @@ class Settings(BaseModel):
     captcha: CaptchaConfig = Field(default_factory=CaptchaConfig)
     writer: WriterConfig = Field(default_factory=WriterConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    engine: EngineConfig = Field(default_factory=EngineConfig)
     boundaries: Boundaries = Field(default_factory=Boundaries)
     apps: dict[str, AppEntry] = Field(default_factory=dict)
     config_dir: Path = REPO_ROOT / "config"

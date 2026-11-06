@@ -1,0 +1,118 @@
+# Web pages on the local fixture site ({site}, served on 127.0.0.1; nothing reaches the internet).
+# fetch_page tasks run everywhere. Tasks that need a real browser (needs: [browser]) drive Delta's own
+# Chrome/Edge profile and are skipped when neither is installed.
+
+- id: web-article-fact
+  request: Open {site}/article.html and tell me when construction of the Kestrel Bridge began.
+  script:
+    plan: [{needs_tools: true, goal: read the article, tools: [fetch_page], success_criteria: ["the year is reported"]}]
+    chat:
+      - call: {tool: fetch_page, args: {url: "{site}/article.html"}}
+      - text: "DONE: Construction began in 1998."
+  check:
+    - status: done
+    - step_output_contains: {tool: fetch_page, text: "1998"}
+    - answer_contains: "1998"
+
+- id: web-product-price
+  request: What does the desk lamp cost on {site}/products.html?
+  script:
+    plan: [{needs_tools: true, goal: find the price, tools: [fetch_page], success_criteria: ["the price is reported"]}]
+    chat:
+      - call: {tool: fetch_page, args: {url: "{site}/products.html"}}
+      - text: "DONE: The desk lamp costs 249 rupees."
+  check:
+    - status: done
+    - step_output_contains: {tool: fetch_page, text: "249"}
+    - answer_contains: "249"
+
+- id: web-follow-link
+  request: Start at {site}/index.html, find the About page and tell me who leads the eval team.
+  script:
+    plan: [{needs_tools: true, goal: follow the link, tools: [fetch_page], success_criteria: ["the lead is named"]}]
+    chat:
+      - call: {tool: fetch_page, args: {url: "{site}/index.html"}}
+      - call: {tool: fetch_page, args: {url: "{site}/about.html"}}
+      - text: "DONE: Arjun Varma leads the eval team."
+  check:
+    - status: done
+    - step_output_contains: {tool: fetch_page, text: Arjun Varma}
+    - steps_ok: true
+
+- id: web-submit-query
+  request: Send the contact form on {site} with my name Ada and the topic evals.
+  script:
+    plan: [{needs_tools: true, goal: submit the form, tools: [fetch_page], success_criteria: ["the site thanks the user"]}]
+    chat:
+      - call: {tool: fetch_page, args: {url: "{site}/submit?name=Ada&topic=evals"}}
+      - text: "DONE: Sent. The site says thank you."
+  check:
+    - status: done
+    - page_state: {submit.name: Ada, submit.topic: evals}
+
+- id: web-mark-task
+  request: Mark the task as done on the {site} task board API.
+  script:
+    plan: [{needs_tools: true, goal: mark done, tools: [fetch_page], success_criteria: ["the task is marked"]}]
+    chat:
+      - call: {tool: fetch_page, args: {url: "{site}/api/mark?step=done"}}
+      - text: "DONE: Marked."
+  check:
+    - status: done
+    - page_state: {step: done}
+
+- id: web-save-summary
+  request: Read {site}/article.html and save a one line summary in {sandbox}/bridge.txt.
+  script:
+    plan: [{needs_tools: true, goal: summarise to a file, tools: [fetch_page, write_file], success_criteria: ["bridge.txt has a summary"]}]
+    chat:
+      - call: {tool: fetch_page, args: {url: "{site}/article.html"}}
+      - call: {tool: write_file, args: {path: "{sandbox}/bridge.txt", content: "Kestrel Bridge: begun 1998, opened 2003, main span 1,412 m."}}
+      - text: "DONE: Saved the summary."
+  check:
+    - status: done
+    - file_contains: {path: bridge.txt, text: ["1998", "2003"]}
+
+- id: browser-click-button
+  needs: [browser]
+  request: Open {site}/button.html in the browser and press Mark done.
+  timeout_s: 180
+  script:
+    plan: [{needs_tools: true, goal: press the button, tools: [browser_open, browser_click], success_criteria: ["the page says the task is done"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/button.html"}}
+      - call: {tool: browser_click, args: {text: Mark done}}
+      - text: "DONE: The page says the task is done."
+  check:
+    - status: done
+    - page_state: {clicked: "yes"}
+
+- id: browser-fill-form
+  needs: [browser]
+  request: Fill the form on {site}/form.html with name Grace and topic browsers, then send it.
+  timeout_s: 180
+  script:
+    plan: [{needs_tools: true, goal: send the form, tools: [browser_open, browser_fill, browser_click], success_criteria: ["the thank you page shows"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/form.html"}}
+      - call: {tool: browser_fill, args: {field: Name, value: Grace}}
+      - call: {tool: browser_fill, args: {field: Topic, value: browsers}}
+      - call: {tool: browser_click, args: {text: Send}}
+      - text: "DONE: Sent the form."
+  check:
+    - status: done
+    - page_state: {submit.name: Grace, submit.topic: browsers}
+
+- id: browser-read-heading
+  needs: [browser]
+  request: Open {site}/about.html in the browser and tell me when the team meets.
+  timeout_s: 180
+  script:
+    plan: [{needs_tools: true, goal: read the page, tools: [browser_open, browser_read], success_criteria: ["the day is reported"]}]
+    chat:
+      - call: {tool: browser_open, args: {url: "{site}/about.html"}}
+      - text: "DONE: The team meets every Thursday."
+  check:
+    - status: done
+    - any_output_contains: Thursday
+    - steps_include: [browser_open]

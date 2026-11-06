@@ -44,6 +44,7 @@ HELP = (
     "<b>Schedules</b>: \"every day at 9 am check my attendance\", \"remind me at 6 pm to call Ravi\", "
     "\"what's scheduled?\" (making or turning on a schedule from here needs your PIN)\n\n"
     "/stop - stop what I'm doing now\n"
+    "/tasks - recent tasks; resume or discard one that was interrupted\n"
     "/unlock - enter your PIN (screen, camera, files, commands, approving deletes or sends,\n"
     "  closing apps and keys need it)\n"
     "/lock - lock all remote control now (only the PC can unlock it)\n"
@@ -99,6 +100,9 @@ class TelegramChannel(PCMenu):
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
         self.app.add_handler(CallbackQueryHandler(self._on_button, pattern=r"^appr:"))
+        from delta.channels.telegram_tasks import attach as attach_tasks
+
+        attach_tasks(self)  # /tasks and Resume / Discard for interrupted tasks (delta.engine)
 
     async def start(self) -> None:
         self.c.approvals.add_presenter(self.name, self._present)

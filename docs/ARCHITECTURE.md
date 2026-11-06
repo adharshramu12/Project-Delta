@@ -93,9 +93,82 @@ loop attempts ≤ max_attempts:
 ## Failure handling
 - A task always ends with a result. Any exception in a task (not only an AI error) becomes a *failed* task with a plain message (details in the log and the audit log as `task.error`); the run record is closed, the UI is told and the one-task lock is released. A Stop is cleaned up the same way and still ends as *cancelled*.
 
+## Durable task engine
+
+`delta/engine/` keeps every task as a state machine in `tasks.db` (SQLite, WAL, standard library only) next to
+an append-only log of what happened in it. The orchestrator and the tool executor write to it through
+`TaskEngine`; every write is fail-safe (a full disk is logged, never raised), so recording can never fail a task.
+`engine.enabled: false` detaches it and Delta runs exactly as before.
+
+**States.** `queued -> planning -> acting <-> verifying -> done`, plus `waiting_user` (Delta asked a question),
+`failed`, `cancelled` and `interrupted`. The allowed transitions are a table in `engine/states.py`, enforced by
+`TaskStore.transition` (an illegal one raises and is recorded as a note). `done`, `failed` and `cancelled` are
+final; `interrupted` can only go to `queued` (Resume), `cancelled` (Discard) or `failed`.
+
+| Who writes | When |
+|---|---|
+| `Orchestrator._run` | `begin`: the task row, its permission level (after any scheduled cap), `planning` |
+| `ToolExecutor._run` | `step_start` right before the tool really runs (first one moves the task to `acting`) |
+| `ToolExecutor.execute` | `step_end` with the result, or `step_blocked` for a call refused before it ran |
+| `Orchestrator._run` / `_replay` | `verifying` before the check |
+| `Orchestrator.run` | the final state from `TaskResult.status` (`needs_user` = `waiting_user`), also on Stop |
+
+**Event log.** `events` rows are append-only (an `UPDATE` trigger aborts). A step records the tool, its
+arguments redacted by `engine/redact.py` (secret-named keys and token-shaped values masked with
+`system.secrets.mask`, each value and the whole capped), a 300-character result summary, the model, the tokens
+of the model call that chose the step, the duration, any new proof screenshot, whether it is side-effecting, and
+a hash of its exact arguments (never the arguments themselves). Bounded by `max_events_per_task`; tasks older
+than `retention_days` and, above `max_mb`, the oldest finished tasks are pruned at start-up (never a running
+one). Schema changes are numbered migrations on `PRAGMA user_version`; a file from a newer Delta is read but
+never changed.
+
+**Crash resume.** At start-up (`Container.start`, after the single-instance lock) tasks still in `queued`,
+`planning`, `acting` or `verifying` become `interrupted`, a warning names how many, Telegram tells the owner of
+each one that came from Telegram (once), and the dashboard and `delta tasks` list them. Nothing resumes on its
+own. `engine/resume.py` applies the same rules to every channel:
+
+- only an `interrupted` task resumes, in place (same task id, same proof folder);
+- from a remote channel: refused while remote control is locked, without a PIN set, or unless the PIN was
+  entered (`/unlock`) within its window; the resumed run is a request from that channel, so Remote Guard covers
+  each tool as usual;
+- the run is submitted with `autonomy_cap` = the level the task started with (`Container._cap_autonomy` only
+  ever lowers it);
+- the last step is *unconfirmed* when it is side-effecting and has a start but no end: the user must say whether
+  it happened before anything runs;
+- the model gets the original request and the step list, with side effects marked `ALREADY DONE`, as context;
+- `TaskEngine.repeat_reason` makes `ToolExecutor` ask a human for any call whose tool and arguments are identical
+  to a side effect that already happened (or that the user said happened). That question never offers
+  "Allow for this task" and learned trust cannot answer it, at every permission level.
+
+Side-effecting means the tool's risk for those arguments is anything but `read`, or the tool is a shell, code,
+messaging, file-changing or memory tool, whatever its arguments look like.
+
+**Watchdog** (`engine/watchdog.py`, around every `tool.run`): a time limit per tool (`default_tool_timeout_s`,
+`tool_timeouts`, shorter built-in limits for quick tools, a tool's own `timeout_s` plus 30 s); on a timeout or a
+Stop, every process the call registered with `system/proctree.track` (shell, Python, PowerShell helpers, LaTeX)
+is ended with its whole tree, matched by pid and start time. `run_shell` and `run_python` also end their tree on
+their own timeout (audit M5). A Delta-profile browser that died or stopped answering is closed (only the copy
+Delta started) and opened again, once per task; the step is reported failed, never silently re-run. A blocking
+call in a worker thread cannot be interrupted by Python: after a timeout its result is ignored.
+
+**Run timeline.** `GET /api/tasks` (filters `state`, `channel`, `q`, `since_hours`), `GET
+/api/tasks/{id}/timeline`, `POST /api/tasks/{id}/resume` and `/discard`; the dashboard's Tasks panel is
+`api/static/tasks.js`. `delta tasks [list|show|resume|discard|prune]` is the terminal version; `resume` goes to
+the running service when there is one.
+
+## Evals
+
+`delta/evals/` runs the task specs in `evals/tasks/*.yaml` (40 tasks: files, documents, web pages on a local
+fixture site, apps, memory) through the real orchestrator, tools, policy, approvals and task engine, each in
+its own sandbox and data folder. Every task has deterministic checks (`evals/checkers.py`: file contents, JSON
+fields, the fixture site's recorded page state, memory, steps, leftover processes, redaction of `tasks.db`).
+The scripted model (`evals/scripted.py`) replays each task's `script` so the suite runs with no keys and no
+network; it tests the harness and Delta's plumbing, not a model's judgment. `--model <provider>` uses a real
+provider from the user's settings for manual runs. CI job `evals-scripted` runs the scripted suite on Windows.
+
 ## Run control
 - **Stop.** Every task runs as its own asyncio task; `POST /api/tasks/{id}/cancel` cancels it. Clean-up still runs: live CLI sessions closed, run record closed, audit entry written, its approval cards withdrawn.
-- **Interrupted runs.** A run with progress but no `run.json` (Delta or the PC stopped) is offered once on the next start: *Resume* (with the finished steps listed, so nothing is repeated blindly) or *Dismiss*. Never resumed silently, because a half-done task may already have sent something.
+- **Interrupted runs.** With the task engine on (the default), interrupted tasks come from `tasks.db` (see *Durable task engine*). Older runs without an engine record still use the run folder: a run with progress but no `run.json` is offered once on the next start: *Resume* or *Dismiss*. Never resumed silently, because a half-done task may already have sent something.
 - **Live checklist.** The plan's steps are shown as a checklist; each tool call ticks the step that names it; a passed verification ticks the rest. No tokens.
 
 ## Chats

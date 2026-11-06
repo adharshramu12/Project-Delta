@@ -6,6 +6,8 @@
   delta audit verify
   delta captcha allow|remove|list [host]
   delta schedule add|list|pause|resume|remove|run [text | id]
+  delta tasks [list|show|resume|discard|prune] [id]
+  delta eval run [--suite S] [--model M] [--scripted]
 """
 
 from __future__ import annotations
@@ -178,6 +180,11 @@ def main() -> None:
     from delta.scheduler.cli import add_parser as add_schedule_parser
 
     add_schedule_parser(sub)
+    from delta.engine.cli import add_parser as add_tasks_parser
+    from delta.evals.cli import add_parser as add_eval_parser
+
+    add_tasks_parser(sub)
+    add_eval_parser(sub)
     args = parser.parse_args()
 
     if args.cmd == "doctor":
@@ -190,6 +197,14 @@ def main() -> None:
         from delta.scheduler.cli import run_cli
 
         sys.exit(run_cli(load_settings(), args))
+    if args.cmd == "tasks":
+        from delta.engine.cli import run_cli as run_tasks_cli
+
+        sys.exit(run_tasks_cli(load_settings(), args))
+    if args.cmd == "eval":
+        from delta.evals.cli import run_cli as run_eval_cli
+
+        sys.exit(run_eval_cli(args))
     if args.cmd == "captcha":
         from delta.tools.captcha import manage_allowlist
 

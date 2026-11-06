@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import difflib
 import json
+import time
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any
 
@@ -149,6 +151,8 @@ def needs_taint_check(tool_name: str, risk: str, autonomy: str = "") -> bool:
 NEVER_FOR_TASK = {"run_shell", "run_python", "remember"}
 # ...nor anything that cannot be undone or is hard-blocked anyway.
 NEVER_FOR_TASK_RISKS = {Risk.DESTRUCTIVE, Risk.SYSTEM}
+# The step number of the call being executed, so its end event pairs with its start (task engine).
+_STEP: ContextVar[dict[str, Any] | None] = ContextVar("delta_tool_step", default=None)
 
 
 class ToolExecutor:
@@ -170,6 +174,9 @@ class ToolExecutor:
         # task_id -> "tool|risk|target class" the user allowed for the rest of that task. Memory only:
         # never saved, dropped in forget_task, so a new task asks again.
         self._task_grants: dict[str, set[str]] = {}
+        # Durable task engine (delta.engine), set at start-up; None keeps the executor exactly as before.
+        self.recorder: Any = None  # TaskEngine: each step's start and end go to the task's event log
+        self.watchdog: Any = None  # Watchdog: time limit per call, ends the processes a stopped call started
 
     @staticmethod
     def action_key(tool: Tool, args: BaseModel, risk: str) -> str:
@@ -229,6 +236,8 @@ class ToolExecutor:
         self._tainted.pop(task_id, None)
         self._task_grants.pop(task_id, None)
         self.exfil.forget(task_id)
+        if self.watchdog is not None:
+            self.watchdog.forget(task_id)
 
     @staticmethod
     def target_class(tool: Tool, args: BaseModel) -> str:
@@ -268,6 +277,24 @@ class ToolExecutor:
         return f"{tool.name}|{decision.risk}|{cls}" if cls else ""
 
     async def execute(self, name: str, raw_args: dict[str, Any], task_id: str = "") -> ToolResult:
+        """Run one tool call through every check (below). With the task engine on, the call is also
+        recorded: a start event right before the tool really runs, an end event with its result."""
+        recorder = self.recorder if task_id else None
+        if recorder is None:
+            return await self._execute(name, raw_args, task_id)
+        mark: dict[str, Any] = {}
+        token = _STEP.set(mark)
+        started = time.monotonic()
+        result: ToolResult | None = None
+        try:
+            result = await self._execute(name, raw_args, task_id)
+            return result
+        finally:
+            _STEP.reset(token)
+            recorder.step_finished(task_id, mark.get("step"), name, raw_args, result, time.monotonic() - started,
+                                   self.registry.get(name))
+
+    async def _execute(self, name: str, raw_args: dict[str, Any], task_id: str = "") -> ToolResult:
         tool = self.registry.get(name)
         if tool is None:
             return ToolResult(False, f"unknown tool '{name}'. Available: {', '.join(self.registry.names())}")
@@ -296,6 +323,12 @@ class ToolExecutor:
         if decision.verdict != Verdict.DENY and (guard := self.exfil.check(
                 tool, args, task_id, source, self.policy.b.allowed_domains, autonomy)):
             decision, tainted = replace(decision, verdict=Verdict.ASK, reason=guard.reason), True  # never learned trust
+        if (decision.verdict != Verdict.DENY and task_id and self.recorder is not None
+                and (repeat := self.recorder.repeat_reason(task_id, name, args.model_dump()))):
+            # A resumed task about to repeat a side effect that already happened before the interruption:
+            # a human yes every time (no learned trust, no "Allow for this task", whatever the autonomy level).
+            decision, tainted = replace(decision, verdict=Verdict.ASK, reason=repeat), True
+            guard = guard or GuardAsk(repeat, "unknown_target")  # a strict kind: never "Allow for this task"
         summary = tool.summary(args)
         self.audit.record("policy", task=task_id, tool=name, summary=summary,
                           verdict=decision.verdict, risk=decision.risk, reason=decision.reason)
@@ -364,8 +397,10 @@ class ToolExecutor:
         return tool_refusal(self.guard, req.channel, req.user, tool.name, outside)
 
     async def _run(self, tool: Tool, args: BaseModel, name: str, task_id: str) -> ToolResult:
+        if self.recorder is not None and task_id and (mark := _STEP.get()) is not None:
+            mark["step"] = self.recorder.step_started(task_id, name, args.model_dump(), tool)
         try:
-            result = await tool.run(args)
+            result = await (self.watchdog.run(tool, args, task_id) if self.watchdog is not None else tool.run(args))
         except Exception as e:
             log.exception("tool.crashed", tool=name)
             result = ToolResult(False, f"{type(e).__name__}: {e}")
