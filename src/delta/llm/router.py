@@ -81,6 +81,11 @@ class ModelRouter:
         self.last_provider: str | None = None
         self.why_down: dict[str, str] = {}  # last reason each provider failed, in plain words
         self.skipped: dict[str, str] = {}   # providers passed over since reset_meter(): name -> why
+        # Opt-in failover (settings router.fallbacks, empty by default): extra providers of the user's own,
+        # tried only when every provider on the route failed because of a rate limit, outage or quota.
+        self.fallbacks: list[str] = []
+        self.fallback_used: str = ""  # the fallback provider that answered this task, if any
+        self.model_calls: dict[str, int] = {}  # calls per provider since reset_meter() (token meter: which model)
 
     def refresh(self) -> None:
         """Pick up new or changed keys immediately and forget earlier failures."""
@@ -125,16 +130,60 @@ class ModelRouter:
             out.append(p)
         return out
 
+    def _first(self, name: str | None, task: str) -> Provider | None:
+        """An opt-in ladder rung (one of the user's own providers) usable for this call right now."""
+        if not name:
+            return None
+        p = self.providers.get(name)
+        if p is None or not p.supports(task) or not self.breakers[name].available():
+            return None
+        if p.local and not self.allow_local():
+            return None
+        return p
+
     async def complete(
         self,
         messages: list[Message],
         tools: list[dict] | None = None,
         task: str = "chat",
         json_mode: bool = False,
+        prefer: str | None = None,
     ) -> LLMResponse:
+        """prefer: a provider to try first for this one call (the opt-in model ladder); on any failure the
+        normal route follows. None (the default) = the normal route only, exactly as before."""
         errors: list[str] = []
         kinds: list[str] = []
         candidates = self.candidates(task)
+        if (first := self._first(prefer, task)) is not None:
+            candidates = [first, *(c for c in candidates if c.name != first.name)]
+        try:
+            return await self._walk(candidates, messages, tools, task, json_mode, errors, kinds)
+        except AllProvidersFailedError:
+            extra = self._fallback_candidates(task, {c.name for c in candidates}, errors, kinds)
+            if not extra:
+                raise
+            log.warning("router.fallbacks", task=task, providers=[p.name for p in extra])
+            resp = await self._walk(extra, messages, tools, task, json_mode, errors, kinds)
+            self.fallback_used = self.last_provider or ""
+            return resp
+
+    def _fallback_candidates(self, task: str, tried: set[str], errors: list[str], kinds: list[str]) -> list[Provider]:
+        """router.fallbacks (opt-in), only after outage-type failures: rate limit, unreachable, quota."""
+        if not self.fallbacks or not kinds:
+            return []
+        from delta.selfheal.taxonomy import is_outage
+
+        if not all(is_outage(k, e) for k, e in zip(kinds, errors, strict=False)):
+            return []
+        out = []
+        for name in self.fallbacks:
+            p = self._first(name, task)
+            if p is not None and name not in tried:
+                out.append(p)
+        return out
+
+    async def _walk(self, candidates: list[Provider], messages: list[Message], tools: list[dict] | None, task: str,
+                    json_mode: bool, errors: list[str], kinds: list[str]) -> LLMResponse:
         for i, p in enumerate(candidates):
             started = time.perf_counter()
             # With nothing left to fall back to, waiting longer beats failing the user's task.
@@ -190,6 +239,7 @@ class ModelRouter:
         """Add one call to the task's meter: the provider's own usage when it gave one, else an
         estimate for API providers, or "not reported" for CLI providers (usage.py)."""
         usage.add(self.meter, "calls", 1)
+        self.model_calls[p.name] = self.model_calls.get(p.name, 0) + 1
         if resp.usage:
             usage.add(self.meter, "reported_calls", 1)
             for k, v in resp.usage.items():
@@ -211,12 +261,17 @@ class ModelRouter:
     def reset_meter(self) -> None:
         self.meter = {}
         self.skipped = {}
+        self.model_calls = {}
+        self.fallback_used = ""
 
     def fallback_note(self) -> str:
         """Why the user's chosen main AI did not answer this task (e.g. out of credits), or ""."""
+        note = ""
         if self.preferred in self.skipped and self.last_provider != self.preferred:
-            return f"{self.preferred} skipped: {self.skipped[self.preferred]}"
-        return ""
+            note = f"{self.preferred} skipped: {self.skipped[self.preferred]}"
+        if self.fallback_used:  # opt-in failover answered: always said, never silent
+            note = (note + "; " if note else "") + f"answered by your fallback provider {self.fallback_used}"
+        return note
 
     async def prewarm(self, task: str) -> None:
         """Let the provider that will answer `task` start up now (Claude Code boots in ~6 s)."""

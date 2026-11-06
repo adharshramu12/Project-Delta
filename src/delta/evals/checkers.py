@@ -20,6 +20,13 @@ the fixture site's recorded page state, Delta's memory, the task's steps and its
   step_failed_with: {tool, text}        that tool ran and failed with this text (e.g. a watchdog stop)
   no_process: marker                    no running process has this text in its command line
   events_recorded: {min_steps, absent}  tasks.db holds the steps; `absent` (a secret) is not in the file
+  recovered: {failure, ok}              a self-heal line of that failure type (ok: it worked / it did not)
+  recovery_says: text                   some self-heal line has this text
+  no_recovery: true                     no self-heal line at all
+  tool_runs: {tool, count, text?}       that tool ran exactly `count` times (only calls whose arguments contain
+                                        `text`, if given): proves a step was or was not retried
+  undo_restores: {path, text}           `delta undo` for this task puts the file back with this text
+  undo_skipped: true                    the timeline says a change could not be undone (e.g. too big)
 """
 
 from __future__ import annotations
@@ -43,6 +50,9 @@ class CheckContext:
     memories: list[str] = field(default_factory=list)
     tasks_db: Path | None = None
     timeline: dict[str, Any] | None = None
+    undo: Any = None      # UndoStore of the task (delta.selfheal.undo)
+    policy: Any = None    # the task's PolicyEngine (undo restores follow it)
+    task_id: str = ""
 
 
 Check = Callable[[CheckContext, Any], tuple[bool, str]]
@@ -224,6 +234,59 @@ def _events(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
         if str(secret).encode() in raw:
             return False, "a secret reached tasks.db"
     return True, f"{len(steps)} step(s) recorded, final state {ctx.timeline['task']['state']}"
+
+
+def _recoveries(ctx: CheckContext) -> list[dict[str, Any]]:
+    return list((ctx.timeline or {}).get("recoveries") or [])
+
+
+@check("recovered")
+def _recovered(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    want_ok = arg.get("ok", True)
+    hits = [r for r in _recoveries(ctx) if r.get("failure") == arg["failure"] and bool(r["ok"]) == bool(want_ok)]
+    lines = [f"{r.get('failure')}:{'ok' if r['ok'] else 'tried'}: {r['summary']}" for r in _recoveries(ctx)]
+    return bool(hits), f"self-heal lines {lines}" if not hits else f"self-heal: {hits[0]['summary']}"
+
+
+@check("recovery_says")
+def _recovery_says(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    lines = [r["summary"] for r in _recoveries(ctx)]
+    ok = any(str(arg).lower() in line.lower() for line in lines)
+    return ok, f"self-heal lines {lines}"
+
+
+@check("no_recovery")
+def _no_recovery(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    lines = [r["summary"] for r in _recoveries(ctx)]
+    return (not lines) == bool(arg), f"self-heal lines {lines}"
+
+
+@check("tool_runs")
+def _tool_runs(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    text = str(arg.get("text", "")).lower()
+    runs = [s for s in ctx.steps if s.tool == arg["tool"]
+            and (not text or text in json.dumps(s.args, default=str).lower())]
+    return len(runs) == int(arg["count"]), f"{arg['tool']} ran {len(runs)} time(s)"
+
+
+@check("undo_restores")
+def _undo_restores(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    if ctx.undo is None:
+        return False, "no undo store"
+    result = ctx.undo.restore(ctx.task_id, ctx.policy)
+    if not result["ok"]:
+        return False, result["message"]
+    path, text = _read(ctx, arg["path"])
+    if path is None:
+        return False, f"{arg['path']} not found after undo"
+    ok = text == str(arg["text"])
+    return ok, f"after undo {arg['path']} = {text[:80]!r}"
+
+
+@check("undo_skipped")
+def _undo_skipped(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    skipped = ((ctx.timeline or {}).get("undo") or {}).get("skipped") or []
+    return bool(skipped) == bool(arg), f"not undoable: {skipped}"
 
 
 def run_checks(ctx: CheckContext, checks: list[dict[str, Any]]) -> list[dict[str, Any]]:

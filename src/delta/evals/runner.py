@@ -34,6 +34,7 @@ from delta.config import (
     Boundaries,
     EngineConfig,
     MemoryConfig,
+    SelfHealConfig,
     Settings,
     WriterConfig,
 )
@@ -141,6 +142,9 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     from delta.safety.approvals import ApprovalBroker
     from delta.safety.audit import AuditLog
     from delta.safety.policy import PolicyEngine
+    from delta.selfheal.healer import Healer
+    from delta.selfheal.inject import FaultInjector
+    from delta.selfheal.undo import UndoStore
     from delta.tools.apps import app_tools
     from delta.tools.filesystem import filesystem_tools
     from delta.tools.power import power_tools
@@ -166,6 +170,7 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
 
     apps = {"evalmarker": AppEntry(command=Path(sys.executable).name, aliases=["eval marker"])}
     settings = Settings(agent=AgentConfig(max_steps=12, max_attempts=2, approval_timeout_s=30),
+                        selfheal=SelfHealConfig(max_backoff_s=0.2),
                         memory=MemoryConfig(auto_extract=True, learn_skills=False), data_dir=data, apps=apps,
                         boundaries=Boundaries(allowed_paths=[str(sandbox)]),
                         writer=WriterConfig(output_dir=str(sandbox), latex="off"))
@@ -189,7 +194,11 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     writer = writer_tools(router, settings.writer, events)
     tools += [t for t in writer if t.name == "make_document"]
     browser = None
-    if "browser" in task.needs and has_browser:
+    if task.fake_browser is not None:  # evals only: the fake browser with failure switches
+        from delta.evals.fakebrowser import FakeBrowserManager, fake_browser_tools
+
+        tools += fake_browser_tools(FakeBrowserManager(sandbox / "page_state.json", task.fake_browser))
+    elif "browser" in task.needs and has_browser:
         from delta.tools import browser as browser_mod
 
         browser_mod.PORT = _free_port()  # a private port: never attaches to a Delta browser already running
@@ -205,8 +214,15 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     engine = TaskEngine(store, router, proof, registry)
     executor.recorder = engine
     executor.watchdog = Watchdog(EngineConfig(), audit)
+    undo = UndoStore(data / "undo", settings.undo, [sandbox])
+    executor.undo = engine.undo = undo
+    if task.inject:
+        executor.faults = FaultInjector(fill(task.inject, values))
     orch = Orchestrator(settings, router, executor, memory, None, events, audit, None, None, proof)
     orch.engine = engine
+    if settings.selfheal.enabled:
+        orch.healer = Healer(settings.selfheal, executor, events, can_see=lambda: False, settle_s=0.05)
+        orch.healer.engine = engine
     req = TaskRequest(fill(task.request, values), channel="api")
     started = time.monotonic()
     try:
@@ -227,7 +243,8 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
     out.cost_usd = cost_of(out.provider or "scripted", out.tokens_in, out.tokens_out)
     ctx = CheckContext(sandbox=sandbox, status=out.status, answer=out.answer, steps=steps,
                        page_state=site.snapshot(), memories=[m.content for m in memory.list()],
-                       tasks_db=data / "tasks.db", timeline=engine.timeline(req.id))
+                       tasks_db=data / "tasks.db", timeline=engine.timeline(req.id), undo=undo,
+                       policy=executor.policy, task_id=req.id)
     out.checks = await asyncio.to_thread(run_checks, ctx, fill(task.check, values))
     out.passed = bool(out.checks) and all(c["passed"] for c in out.checks)
     if browser is not None:

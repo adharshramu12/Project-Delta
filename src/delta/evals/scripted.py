@@ -5,6 +5,8 @@ tools, policy and task engine, not a model's judgment (that is what real-model r
 Per model job (plan, chat, verify, vision), replies are used in order:
   plan / verify:  a mapping (sent as JSON) or a string
   chat:           {call: {tool, args}} | {calls: [{tool, args}, ...]} | {text: "DONE: ..."} | a string
+  any job:        {error: rate_limit | too_large | bad_tool_call | unreachable, retry_after_s: 0} raises that
+                  model error once (failure injection for the self-heal evals)
 When a job's replies run out: chat says "DONE: (script finished)", verify passes, plan fails the task.
 """
 
@@ -46,6 +48,9 @@ class ScriptedProvider:
             return self._done(LLMResponse(content=reply))
         if not isinstance(reply, dict):
             raise LLMError(f"scripted model: bad reply {reply!r}")
+        if "error" in reply:  # an injected model failure (rate limit, too large, ...)
+            raise LLMError(f"{self.name}: scripted {reply['error']}", kind=str(reply["error"]),
+                           retry_after_s=float(reply.get("retry_after_s", 0) or 0) or None)
         if task != "chat" or not ({"call", "calls", "text"} & reply.keys()):
             return self._done(LLMResponse(content=json.dumps(reply)))
         if "text" in reply:

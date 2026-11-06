@@ -368,6 +368,8 @@ WEBSITE = re.compile(r"https?://|www\.|\b[\w-]+\.(com|org|net|in|io|ai|dev|app)\
 
 class Orchestrator:
     engine: Any = None  # TaskEngine (delta.engine), set by bootstrap: task states in tasks.db. None = not recorded
+    healer: Any = None  # Healer (delta.selfheal), set by bootstrap: recovery playbooks. None = no self-heal
+    ladder: Any = None  # ModelLadder (delta.llm.ladder): opt-in cheap-first models. None or empty = off
 
     def __init__(self, settings: Settings, router: ModelRouter, executor: ToolExecutor,
                  memory: MemoryStore | None, governor: Governor | None, events: EventBus,
@@ -433,12 +435,17 @@ class Orchestrator:
         finally:
             CURRENT_REQUEST.reset(current)
             self.executor.forget_task(req.id)
+            for helper in (self.healer, self.ladder):
+                if helper is not None:
+                    helper.forget(req.id)
             try:
                 await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
             except Exception:
                 log.exception("router.release_failed", task=req.id)
         result.tokens = dict(self.router.meter)
         result.usage = usage.summary(result.tokens)
+        if models := dict(getattr(self.router, "model_calls", None) or {}):
+            result.usage["models"] = models  # which model answered how many calls (the token meter)
         result.wall_s = round(time.monotonic() - started, 2)
         result.fallback = self.router.fallback_note()
         self._finish_proof(result)
@@ -751,25 +758,52 @@ class Orchestrator:
             keep |= SCREEN_TOOLS
         return [s for s in specs if s["function"]["name"] in keep]
 
-    async def _complete_with_recovery(self, messages: list[Message], tools: list[dict[str, Any]]) -> Any:
-        """Model call that recovers from the two common, fixable failures of free/small models:
-        a request over the size limit (trim harder) and a malformed tool call (ask again)."""
+    async def _complete_with_recovery(self, messages: list[Message], tools: list[dict[str, Any]],
+                                      task_id: str = "", prefer: str | None = None) -> Any:
+        """Model call that recovers from the common, fixable failures of free/small models: a request over
+        the size limit (trim harder), a malformed tool call (ask again) and, with self-heal on, a busy AI
+        service (wait, then ask once more; capped per task). Each recovery is a line in the run timeline."""
+        from delta.selfheal.taxonomy import Failure, classify_llm_error
+
+        healed = False
         for attempt in range(3):
             try:
-                return await self.router.complete(messages, tools=tools, task="chat")
+                if prefer:
+                    resp = await self.router.complete(messages, tools=tools, task="chat", prefer=prefer)
+                else:
+                    resp = await self.router.complete(messages, tools=tools, task="chat")
+                if healed and self.healer is not None:
+                    await self.healer.record(task_id, Failure.RATE_LIMIT,
+                                             "The AI service was busy; waited and tried again.", True)
+                return resp
             except LLMError as e:
                 kinds = {e.kind, *getattr(e, "kinds", [])}
+                failure = classify_llm_error(e.kind, str(e), list(getattr(e, "kinds", [])))
+                if self.engine is not None and task_id:
+                    self.engine.failure(task_id, str(failure), str(e).split(": ", 1)[-1][:300])
+                if (attempt < 2 and failure == Failure.RATE_LIMIT and self.healer is not None
+                        and self.healer.cfg.enabled and self.healer.take(task_id, "model:rate_limit")):
+                    wait = min(self.healer.cfg.max_backoff_s,
+                               float(getattr(e, "retry_after_s", None) or 10.0) * (attempt + 1))
+                    log.info("orchestrator.rate_limit_backoff", task=task_id, seconds=wait)
+                    await asyncio.sleep(wait)
+                    healed = True
+                    continue
                 if attempt == 2 or not kinds & {"too_large", "bad_tool_call"}:
                     raise
                 if "too_large" in kinds:
                     # The provider's real limit is lower than our estimate: cut at least 30%.
                     current = sum(len(str(m.get("content") or "")) for m in messages)
                     compact_history(messages, min(CONTEXT_BUDGET_CHARS // 2, int(current * 0.7)), keep_last=1)
+                    line = "The conversation was too long for the AI; shortened it and asked again."
                 else:
                     log.info("orchestrator.retry_bad_tool_call", attempt=attempt + 1)
                     messages.append({"role": "user", "content": (
                         "Your last tool call was not valid JSON. Call the tool again with arguments as a "
                         "valid JSON object (double quotes, no comments, no trailing commas).")})
+                    line = "The AI sent a broken tool call; asked it to send it again."
+                if self.healer is not None and task_id:
+                    await self.healer.record(task_id, Failure.MODEL_ERROR, line, True)
         raise AssertionError("unreachable")
 
     async def _act(self, req: TaskRequest, messages: list[Message], steps: list[StepRecord],
@@ -778,6 +812,7 @@ class Orchestrator:
         nudges = 0
         # The previous tool result's AFTER page text, when it was sent in full: (address, text).
         prev_after: tuple[str, str] | None = None
+        since = len(steps)  # steps taken since the last model reply (the ladder's step type)
         for _ in range(budget or self.s.agent.max_steps):
             if self.governor and self.governor.health == Health.CRITICAL:
                 reasons = ", ".join(self.governor.assessment.reasons)
@@ -785,7 +820,11 @@ class Orchestrator:
             if question := self._over_budget():
                 return question, ""
             compact_history(messages, CONTEXT_BUDGET_CHARS)
-            resp = await self._complete_with_recovery(messages, tools)
+            prefer = None
+            if self.ladder is not None and self.ladder.enabled:  # opt-in cheap-first models (off by default)
+                prefer = self.ladder.pick(req.id, self.ladder.step_kind(steps, since))
+            since = len(steps)
+            resp = await self._complete_with_recovery(messages, tools, req.id, prefer)
             if not resp.tool_calls:
                 content = (resp.content or "").strip()
                 if getattr(resp, "final", False) and not content.startswith((DONE, NEED_USER)):
@@ -815,6 +854,16 @@ class Orchestrator:
                 await self.events.publish("task.step", task_id=req.id, tool=call.name, args=call.arguments)
                 result = await self.executor.execute(call.name, call.arguments, task_id=req.id)
                 steps.append(StepRecord(call.name, call.arguments, result.ok, result.output[:2000], result.evidence))
+                heal = None
+                if self.healer is not None and not result.evidence.get("user_denied"):
+                    # Self-heal (delta.selfheal): a fixed, safe recovery first; retries pass the same gate.
+                    if result.ok:
+                        heal = await self.healer.after_ok(req.id, req.text, call.name, call.arguments, result)
+                    else:
+                        heal = await self.healer.recover(req.id, call.name, call.arguments, result, steps, req.text)
+                        result = heal.result
+                if self.ladder is not None:
+                    self.ladder.record(req.id, result.ok)
                 if self.proof:
                     self.proof.checkpoint(steps)
                 if result.evidence.get("user_denied"):
@@ -822,6 +871,16 @@ class Orchestrator:
                     return "", (f"OK, I didn't do it. You declined: {result.evidence.get('denied_action', call.name)}. "
                                 "Tell me if you want something different.")
                 content = result.for_llm()
+                if heal is not None and (note := heal.note()):
+                    content += "\n\n" + note
+                if heal is not None and heal.stop:
+                    # Only the user can clear this (a sign-in, a Windows permission, every way tried): ask.
+                    messages.append({"role": "tool", "tool_call_id": call.id, "name": call.name, "content": content})
+                    for later in resp.tool_calls[resp.tool_calls.index(call) + 1:]:
+                        messages.append({"role": "tool", "tool_call_id": later.id, "name": later.name,
+                                         "content": "Not run: the task stopped to ask the user."})
+                    messages.append({"role": "assistant", "content": heal.stop})
+                    return heal.stop, ""
                 if result.ok and (seen := await self._observe(call.name, req.id, steps, req.text, result.evidence)):
                     observer, text, obs_args, shot = seen
                     if shot:
@@ -860,6 +919,8 @@ class Orchestrator:
         if used < budget:
             return ""
         log.info("orchestrator.token_budget", used=used, budget=budget)
+        if self.engine is not None and (req := CURRENT_REQUEST.get()) is not None:
+            self.engine.failure(req.id, "budget", f"token budget reached: {used} of {budget}")
         return (f"{NEED_USER} This task has used about {used:,} tokens, which passes your limit of "
                 f"{budget:,} tokens per task.\nShould I keep going?\n- Keep going\n- Stop here")
 
