@@ -1,4 +1,4 @@
-"""Telegram controls for the PC itself: /volume, /brightness, /theme, /apps, /screen, /camera.
+"""Telegram controls for the PC itself: /volume, /brightness, /theme, /windows (open windows), /screen, /camera.
 
 Instant (no AI, no tokens) and button-driven: the message updates in place to show the new state.
 Closing an app that could lose unsaved work asks first; a photo or screenshot is audit-logged."""
@@ -28,7 +28,7 @@ def _theme_text() -> str:
 class PCMenu:
     """Mixed into TelegramChannel; uses its _buttons, allowed list and audit (self.c.audit)."""
 
-    _windows_shown: dict[str, tuple[int, str, str]]  # token -> (hwnd, title, app) from the last /apps
+    _windows_shown: dict[str, tuple[int, str, str]]  # token -> (hwnd, title, app) from the last /windows
 
     def _pc_init(self) -> None:
         self._windows_shown = {}
@@ -92,13 +92,13 @@ class PCMenu:
     async def _close(self, q: Any, token: str, mode: str, uid: str) -> None:
         shown = self._windows_shown.get(token)
         if not shown:
-            await q.edit_message_text("That list is old. Send /apps again.")
+            await q.edit_message_text("That list is old. Send /windows again.")
             return
         hwnd, title, app = shown
         current = {w.hwnd: w for w in await asyncio.to_thread(pc.open_windows)}
         w = current.get(hwnd)
         if w is None or w.title != title:
-            await q.edit_message_text(f"“{title}” is already closed or has changed. Send /apps again.")
+            await q.edit_message_text(f"“{title}” is already closed or has changed. Send /windows again.")
             return
         if mode == "ask" and pc.may_lose_work(w):
             await q.edit_message_text(

@@ -28,7 +28,8 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 - **Secrets** live in Windows Credential Manager, never in config, logs or chats.
 - **Audit log** is hash-chained and, from 0.2.0, also signed with a secret key kept in Windows Credential Manager
   (an HMAC chain), so rewriting it needs that key too. `delta audit verify` checks both and names the first
-  broken line (see "What is not protected" for its limits).
+  broken line (see "What is not protected" for its limits). A record cut off by a power cut or a full disk is
+  left in place, so verify still reports it; new records chain to the last whole one, so recording never stops.
 - **Prompt injection (enforced in code):** web pages, files and tool output are data and can never grant
   approval. Once a task has read outside content (a page, search result, file, chat message or the screen),
   every send, delete, code run or memory write in that task needs a human yes, **even in Autopilot and even
@@ -155,7 +156,7 @@ Delta can help with **simple image/text captchas** on sites where you log in to 
 | PIN guessing | **5 wrong PINs in a row lock all remote control.** There is no time window: only a correct PIN or an unlock on the PC resets the count, and the count is saved in Delta's data folder, so restarting Delta or the PC does not clear it. Only someone at the PC can unlock it; the phone never can. |
 | PIN or key left in chat history | Delta deletes the message holding a PIN or API key right after reading it. |
 | PIN stolen from the PC | Never stored: only a salted **scrypt** hash in Credential Manager, compared in constant time. |
-| Something happens without the owner knowing | A **Windows notification** on the PC for every remote request and sensitive action; every unlock, failure, lock and action is in the audit log. |
+| Something happens without the owner knowing | A **Windows notification** on the PC for every remote request and sensitive action; every unlock, failure, lock and action is in the audit log. The words of a phone message are only ever shown in the notification: they are passed to Windows as data, never as part of a PowerShell command (until November 2026, text such as `$(...)` in a Telegram message could run on the PC before any PIN check; fixed). |
 | Owner suspects misuse | `/lock` from Telegram (or *Lock* in Settings → Remote security on the PC) locks all remote control at once: no request from Telegram or Slack runs, and an Approve tapped in Telegram or Slack counts as **Deny** (logged). Unlock only on the PC. |
 | Bot token leaked | Stored in Credential Manager; replace it from the PC. Pairing still stops a token holder from controlling the PC. |
 
@@ -366,6 +367,43 @@ against what the tools returned in that task, and tells you which claims it coul
 does not remove, the chance of a wrong answer: a claim can be grounded by text that is itself wrong (a page that
 lies), and conversation answers that need no tools are not checked.
 
+### Connected apps (MCP): tokens, scopes and what goes where
+
+Connected apps (`delta/connectors`, [docs/APPS.md](docs/APPS.md)) let Delta use Notion, GitHub, Slack, Gmail and
+other apps through their MCP servers.
+
+- **Token storage.** OAuth tokens, client registrations, personal access tokens, API keys and OAuth client
+  secrets are sealed with Windows DPAPI in `<data>\connectors\secrets\<app>.bin` (one file per app, written
+  atomically, inside Delta's protected data folder that no tool can read). If DPAPI is not working, Delta refuses
+  to save them: an app that needs a sign-in cannot be connected until Delta is repaired. Nothing secret is in
+  `connections.json`, the audit log, the step log or any reply. On disconnect the sign-in is revoked at the app
+  when it offers a revocation endpoint (RFC 7009), and the sealed file is overwritten and deleted.
+- **Sign-in.** The MCP authorization spec: OAuth 2.1 with PKCE (S256 only; a server without it is refused), a random
+  `state` checked in constant time, the `resource` indicator (RFC 8707), dynamic client registration where the
+  server offers it, and a one-shot listener on 127.0.0.1 for the redirect (a random port, or 8765 for vendors that
+  need a fixed redirect URL). Every sign-in endpoint must be https. The phone never handles a sign-in: Telegram
+  `/connect` opens the sign-in on the PC, and Delta never takes or sends a token over Telegram.
+- **Scopes.** Delta asks for the scopes the catalog lists for that app (for example Gmail: read-only and compose;
+  Google Calendar: read-only), else the scope the server's own challenge names, else none (the server's default).
+  It never asks for every scope a server supports.
+- **What goes to which server.** A remote app receives exactly the arguments of the tool calls your tasks make to
+  it (shown in each approval) and the bearer token for that app, nothing else: no other app's token, no files,
+  no memory. A local server is a program on your PC: it starts with your secret-looking environment variables
+  removed, plus only the secrets it declares; it is ended with everything it started on disconnect and when
+  Delta stops.
+- **Risk.** Each app tool goes through the same gate as Delta's own tools (policy, approvals, Autopilot,
+  Remote Guard, ExfilGuard, taint, audit with an `app.call` line per call). Risk comes from your choice for the
+  tool, then the server's `destructiveHint` (only ever more careful), then Delta's verified catalog default,
+  then the server's `readOnlyHint` only if you ticked "trust this app's read-only labels", otherwise `external`
+  (asks first except in Autopilot). Destructive tools are off until you switch them on. Your `denied_domains` and
+  `allowed_domains` apply to remote apps' hosts.
+- **Outside content.** Whatever an app returns taints the task like a web page. After that, every app call that
+  is not a plain read asks, at every level including Autopilot, and a read whose arguments carry a long encoded
+  value asks too (ExfilGuard). Tool descriptions from a custom or community server count as outside content.
+- **From a phone.** Every app call from Telegram or Slack needs the owner's PIN (`/unlock`), and so do
+  `/connect` and `/disconnect`.
+- **Custom servers** run or are reached only after you confirm the exact command or address Delta shows.
+
 ### What is *not* protected (honestly)
 
 - **Telegram bot chats are not end-to-end encrypted.** Messages travel encrypted, but Telegram's servers can
@@ -395,6 +433,9 @@ lies), and conversation answers that need no tools are not checked.
   Manager (another account, a copied disk, a careless edit). Malware running as your Windows user can read the
   key like any app you run. Lines cut off the very end of the log cannot be detected (nothing comes after them),
   and records written before 0.2.0 only have the plain hash chain.
+- **A connected app sees what you ask it to do.** Delta cannot control what Notion, GitHub or any other app does
+  with the requests it receives, and an app you trusted with read-only labels can mislabel a tool. A local MCP
+  server is a program you chose to run with your Windows account's rights (minus Delta's secrets).
 - **Environment scrubbing is by name.** A secret stored in a variable with an ordinary-looking name (not
   containing KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL, AUTH and similar) is passed on to commands Delta runs.
 

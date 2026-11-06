@@ -3,1399 +3,355 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Delta</title>
-<script>
-/* Theme: "system" (follows Windows), "light" or "dark". Set before the page paints: no flash. */
-(function () {
-  const dark = matchMedia("(prefers-color-scheme: dark)");
-  let mode = "system";
-  try { mode = localStorage.getItem("delta-theme") || "system"; } catch (e) {}
-  window.applyTheme = function (m) {
-    mode = m || mode;
-    try { localStorage.setItem("delta-theme", mode); } catch (e) {}
-    document.documentElement.dataset.theme = mode === "system" ? (dark.matches ? "dark" : "light") : mode;
-    document.documentElement.dataset.mode = mode;
-    const b = document.getElementById("themebtn");
-    if (b) b.title = "Theme: " + mode + " (click to change)";
-  };
-  window.nextTheme = () => applyTheme({system: "light", light: "dark", dark: "system"}[mode]);
-  dark.addEventListener("change", () => applyTheme());
-  document.addEventListener("DOMContentLoaded", () => applyTheme());
-  applyTheme();
-})();
-</script>
 <link rel="icon" href="/favicon.ico">
-<style>
-/* Delta design system: Apple's clarity, Claude's warmth.
-   One accent (terracotta), warm neutrals, soft depth, generous space. Colours are tokens so a
-   theme or brand change is one block. */
-:root{
-  --paper:#f7f5f0; --surface:#ffffff; --surface-2:#f1eee7; --ink:#1f1e1c; --ink-2:#4a4741; --muted:#7d7972;
-  --line:rgba(31,30,28,.09); --line-strong:rgba(31,30,28,.16);
-  --accent:#c96442; --accent-ink:#ffffff; --accent-soft:rgba(201,100,66,.10); --accent-ring:rgba(201,100,66,.35);
-  --ok:#2f8a57; --ok-soft:rgba(47,138,87,.10); --warn:#b7791f; --warn-soft:rgba(183,121,31,.12);
-  --bad:#c9443a; --bad-soft:rgba(201,68,58,.10);
-  --me:#efe7dc; --shadow-1:0 1px 2px rgba(31,30,28,.05),0 1px 1px rgba(31,30,28,.03);
-  --shadow-2:0 8px 28px rgba(31,30,28,.10),0 2px 6px rgba(31,30,28,.05);
-  --shadow-3:0 24px 64px rgba(31,30,28,.18);
-  --r-sm:10px; --r-md:14px; --r-lg:20px; --r-pill:999px;
-  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",Inter,system-ui,sans-serif;
-  --display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI Variable Display","Segoe UI",Inter,system-ui,sans-serif;
-  --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
-  --ease:cubic-bezier(.2,.8,.2,1);
-}
-:root[data-theme="dark"]{
-  --paper:#171615; --surface:#201f1d; --surface-2:#2a2826; --ink:#ede9e3; --ink-2:#c9c4bc; --muted:#948f87;
-  --line:rgba(237,233,227,.08); --line-strong:rgba(237,233,227,.15);
-  --accent:#d97757; --accent-soft:rgba(217,119,87,.14); --accent-ring:rgba(217,119,87,.4);
-  --ok:#5bbf86; --ok-soft:rgba(91,191,134,.12); --warn:#e0a84a; --warn-soft:rgba(224,168,74,.14);
-  --bad:#ef7268; --bad-soft:rgba(239,114,104,.12); --me:#33302c;
-  --shadow-1:0 1px 2px rgba(0,0,0,.3); --shadow-2:0 10px 30px rgba(0,0,0,.35); --shadow-3:0 24px 64px rgba(0,0,0,.5);
-}
-:root[data-theme="dark"]{color-scheme:dark} :root[data-theme="light"]{color-scheme:light}
-*{box-sizing:border-box}html,body{margin:0;height:100%}
-body{background:var(--paper);color:var(--ink);font:15px/1.55 var(--font);-webkit-font-smoothing:antialiased;
-  display:flex;flex-direction:column;letter-spacing:-.003em}
-::selection{background:var(--accent-ring)}
-button{font:inherit;color:inherit;cursor:pointer}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-
-/* --- top bar --------------------------------------------------------------------------------- */
-header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:10px 18px;
-  background:color-mix(in srgb,var(--paper) 78%,transparent);backdrop-filter:saturate(1.6) blur(18px);
-  -webkit-backdrop-filter:saturate(1.6) blur(18px);border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:center;gap:9px;font:600 16px/1 var(--display);letter-spacing:-.01em}
-.mark{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;color:#fff;font:700 15px/1 var(--display);
-  background:linear-gradient(145deg,#d9805f,#b5512f);box-shadow:inset 0 1px 0 rgba(255,255,255,.25),var(--shadow-1)}
-.status{position:relative;display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:var(--r-pill);
-  font-size:12.5px;color:var(--ink-2);background:var(--surface);box-shadow:var(--shadow-1);cursor:default}
-.status .dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}
-.pill.NORMAL .dot{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
-.pill.THROTTLE .dot{background:var(--warn);box-shadow:0 0 0 3px var(--warn-soft)}
-.pill.CRITICAL .dot{background:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
-.status .tip{position:absolute;top:calc(100% + 8px);left:0;width:max-content;max-width:420px;white-space:normal;
-  background:var(--surface);color:var(--ink-2);padding:10px 12px;border-radius:var(--r-md);box-shadow:var(--shadow-2);
-  font-size:12.5px;line-height:1.5;opacity:0;pointer-events:none;transform:translateY(-4px);transition:.18s var(--ease)}
-.status:hover .tip{opacity:1;transform:none}
-.spacer{flex:1}
-.iconbtn{position:relative;display:grid;place-items:center;width:36px;height:36px;border-radius:11px;border:0;
-  background:transparent;color:var(--ink-2);transition:background .15s,color .15s}
-.iconbtn:hover{background:var(--surface-2);color:var(--ink)}
-.iconbtn svg{width:19px;height:19px}
-.iconbtn.danger:hover{color:var(--bad);background:var(--bad-soft)}
-.iconbtn.on{color:var(--accent);background:var(--accent-soft)}
-.bell .count{position:absolute;top:3px;right:2px;min-width:17px;height:17px;padding:0 5px;border-radius:var(--r-pill);
-  background:var(--bad);color:#fff;font:700 10.5px/17px var(--font);text-align:center;box-shadow:0 0 0 2px var(--paper);
-  transform:scale(0);transition:transform .25s var(--ease)}
-.bell.has .count{transform:scale(1)}
-.bell.has{color:var(--accent)}
-.bell.ring svg{animation:ring 1s var(--ease) 2;transform-origin:50% 10%}
-@keyframes ring{0%,100%{transform:rotate(0)}15%{transform:rotate(16deg)}30%{transform:rotate(-14deg)}45%{transform:rotate(10deg)}
-  60%{transform:rotate(-6deg)}75%{transform:rotate(3deg)}}
-.sep{width:1px;height:20px;background:var(--line-strong);margin:0 4px}
-
-#warnings{margin:10px auto 0;width:min(760px,calc(100% - 32px));white-space:pre-wrap;padding:10px 14px;border-radius:var(--r-md);
-  background:var(--warn-soft);color:var(--warn);font-size:13px}
-
-/* --- toast (approval needed) ------------------------------------------------------------------- */
-.toast{position:fixed;top:66px;left:50%;z-index:20;display:flex;align-items:center;gap:12px;max-width:min(560px,calc(100% - 32px));
-  padding:10px 10px 10px 16px;border-radius:var(--r-lg);background:var(--surface);box-shadow:var(--shadow-3);
-  border:1px solid var(--accent-ring);transform:translate(-50%,-140%);opacity:0;transition:.4s var(--ease)}
-.toast.show{transform:translate(-50%,0);opacity:1}
-.toast .ic{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);flex:none}
-.toast .ic svg{width:16px;height:16px}
-.toast .tx{font-size:13.5px;line-height:1.35;min-width:0}.toast .tx b{display:block;font-weight:600}
-.toast .tx span{color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-/* --- layout ----------------------------------------------------------------------------------- */
-main{flex:1;display:flex;min-height:0;overflow:hidden}
-#chat{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
-#log{flex:1;overflow-y:auto;padding:28px 20px 140px;display:flex;flex-direction:column;gap:14px;scroll-behavior:smooth}
-#log>*{width:100%;max-width:760px;margin-left:auto;margin-right:auto}
-
-/* empty state */
-.hero{margin-top:12vh !important;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
-.hero .mark{width:52px;height:52px;border-radius:16px;font-size:26px;margin-bottom:6px}
-.hero h1{margin:0;font:600 30px/1.2 var(--display);letter-spacing:-.02em}
-.hero p{margin:0;color:var(--muted);font-size:15.5px}
-.chips{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:18px;max-width:620px}
-.chip{display:flex;align-items:center;gap:8px;padding:10px 15px;border-radius:var(--r-pill);border:1px solid var(--line);
-  background:var(--surface);box-shadow:var(--shadow-1);font-size:14px;color:var(--ink-2);transition:.18s var(--ease)}
-.chip:hover{border-color:var(--accent-ring);color:var(--ink);transform:translateY(-1px);box-shadow:var(--shadow-2)}
-
-/* messages */
-.msg{white-space:pre-wrap;word-wrap:break-word;font-size:15px;line-height:1.6;animation:rise .35s var(--ease)}
-.msg:not(.me){padding:2px 2px}
-.msg.me{align-self:flex-end;width:auto !important;max-width:min(560px,85%) !important;margin-right:max(0px,calc((100% - 760px)/2)) !important;
-  background:var(--me);padding:10px 16px;border-radius:20px 20px 6px 20px}
-.msg.failed{padding:12px 16px;border-radius:var(--r-md);background:var(--bad-soft);color:var(--ink)}
-.msg .meta{margin-top:8px;color:var(--muted);font-size:12px;letter-spacing:.01em}
-@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.step{color:var(--muted);font:12.5px/1.5 var(--mono);padding:0 2px 0 14px;position:relative;white-space:pre-wrap;word-break:break-word}
-.step::before{content:"";position:absolute;left:3px;top:.62em;width:5px;height:5px;border-radius:50%;background:var(--line-strong)}
-.step.ok{color:var(--ok)}.step.ok::before{background:var(--ok)}.step.bad{color:var(--bad)}.step.bad::before{background:var(--bad)}
-
-/* cards in the conversation */
-.checklist,.proof{background:var(--surface);border-radius:var(--r-md);padding:14px 16px;box-shadow:var(--shadow-1);border:1px solid var(--line);
-  font-size:14px;animation:rise .35s var(--ease)}
-.chead{font-weight:600;margin-bottom:8px;letter-spacing:-.005em}
-.citem{display:flex;gap:10px;align-items:flex-start;color:var(--muted);padding:3px 0;transition:color .2s}
-.citem span{flex:none;width:18px;height:18px;margin-top:1px;border-radius:50%;border:1.5px solid var(--line-strong);display:grid;place-items:center;
-  font-size:11px;color:transparent;transition:.25s var(--ease)}
-.citem.done{color:var(--ink)}.citem.done span{background:var(--ok);border-color:var(--ok);color:#fff}
-.checklist .row button,.card .row button{flex:none}
-.stopbtn{align-self:flex-start;width:auto !important;margin-left:max(0px,calc((100% - 760px)/2)) !important;display:inline-flex;gap:6px;align-items:center;
-  padding:6px 13px;border-radius:var(--r-pill);border:1px solid var(--line-strong);background:var(--surface);color:var(--ink-2);font-size:12.5px;
-  box-shadow:var(--shadow-1)}
-.stopbtn:hover{color:var(--bad);border-color:var(--bad)}
-.qopts{display:flex;gap:8px;flex-wrap:wrap}
-.qform{display:flex;flex-direction:column;gap:12px;border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px;background:var(--surface)}
-.qblock{display:flex;flex-direction:column;gap:6px}.qopts button.on{background:var(--accent);color:#fff}
-.qopts button{padding:8px 15px;border-radius:var(--r-pill);border:1px solid var(--accent-ring);background:var(--surface);color:var(--ink);
-  box-shadow:var(--shadow-1);transition:.15s var(--ease)}
-.qopts button:hover{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
-.proof .phead{color:var(--muted);font-size:12.5px;margin-bottom:8px}
-.pcheck{padding:3px 0;line-height:1.45}.pcheck b{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;font-size:11px;margin-right:6px;color:#fff}
-.pcheck.ok b{background:var(--ok)}.pcheck.bad b{background:var(--bad)}.pcheck small{color:var(--muted)}
-.pimgs{display:flex;gap:8px;overflow-x:auto;margin-top:12px;padding-bottom:4px}
-.pimgs img{height:96px;border-radius:var(--r-sm);box-shadow:var(--shadow-1);border:1px solid var(--line);transition:transform .2s var(--ease)}
-.pimgs img:hover{transform:scale(1.03)}
-
-/* approval card: the one thing that must never be missed */
-.card{background:var(--surface);border-radius:var(--r-md);padding:14px 16px;display:flex;flex-direction:column;gap:8px;
-  border:1px solid var(--accent-ring);box-shadow:0 0 0 4px var(--accent-soft),var(--shadow-1);animation:rise .35s var(--ease)}
-.card .ttl{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
-.card .ttl svg{width:14px;height:14px}
-.card b{font-weight:600;line-height:1.45}.card .why{color:var(--muted);font-size:12.5px}
-.card .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
-
-/* composer */
-form#send{position:absolute;left:0;right:0;bottom:0;padding:16px 20px 22px;
-  background:linear-gradient(to top,var(--paper) 60%,transparent);display:flex;justify-content:center}
-.composer{width:100%;max-width:760px;display:flex;align-items:flex-end;gap:8px;padding:8px 8px 8px 18px;border-radius:24px;
-  background:var(--surface);box-shadow:var(--shadow-2);border:1px solid var(--line);transition:border-color .2s,box-shadow .2s}
-.composer:focus-within{border-color:var(--accent-ring);box-shadow:0 0 0 4px var(--accent-soft),var(--shadow-2)}
-#text{flex:1;resize:none;border:0;outline:0;background:transparent;color:var(--ink);font:15px/1.5 var(--font);padding:8px 0;max-height:180px;height:40px}
-#text::placeholder{color:var(--muted)}
-.send{width:38px;height:38px;flex:none;border-radius:50%;border:0;display:grid;place-items:center;background:var(--accent);color:#fff;
-  transition:transform .15s var(--ease),opacity .2s}
-.send:hover{transform:scale(1.06)}.send svg{width:18px;height:18px}
-.hint{position:absolute;bottom:4px;left:0;right:0;text-align:center;font-size:11.5px;color:var(--muted);pointer-events:none}
-
-/* --- Activity drawer ---------------------------------------------------------------------------- */
-aside{width:340px;flex:none;border-left:1px solid var(--line);background:var(--surface);overflow-y:auto;padding:18px 18px 24px;
-  display:flex;flex-direction:column;gap:22px;transition:margin .3s var(--ease),opacity .25s,visibility .3s}
-body.drawer-closed aside{margin-right:-340px;opacity:0;pointer-events:none;visibility:hidden}
-aside .dhead{display:flex;align-items:center;justify-content:space-between}
-aside .dhead h2{margin:0;font:600 15px/1 var(--display)}
-h3{margin:0 0 10px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:flex;align-items:center;gap:6px}
-#approvals .card{box-shadow:var(--shadow-1)}
-.mem{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;padding:9px 0;border-bottom:1px solid var(--line);line-height:1.45}
-.mem:last-child{border-bottom:0}.mem span{flex:1}
-aside div.mem > button{border:0;background:none;color:var(--muted);border-radius:8px;width:26px;height:26px;flex:none;padding:0;font-size:16px;line-height:1}
-aside div.mem > button:hover{background:var(--bad-soft);color:var(--bad)}
-.count{text-transform:none;letter-spacing:0;font-weight:500}
-.badge{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:var(--r-pill);margin-left:6px;vertical-align:1px}
-.badge.untrusted{color:var(--warn);background:var(--warn-soft)}.badge.active{color:var(--ok);background:var(--ok-soft)}.badge.candidate{color:var(--warn);background:var(--warn-soft)}.badge.retired{color:var(--muted);background:var(--surface-2)}
-.skill small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
-.learn{border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px;font-size:13.5px;background:var(--surface-2)}
-.learn.pending{background:var(--accent-soft)}.learn.undone{opacity:.5}
-.learn .kind{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:2px}
-.learn .row{display:flex;gap:6px;margin-top:8px}
-.empty{color:var(--muted);font-size:13px;line-height:1.5}
-#addmem{display:flex;gap:6px;margin-top:10px}
-#memtext{flex:1;resize:none;height:38px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--paper);color:var(--ink);font:13.5px/1.4 var(--font);padding:9px 11px}
-
-/* --- shared controls --------------------------------------------------------------------------- */
-.btn,aside button:not(.iconbtn),.wiz button,.card button,.checklist button,.learn button,.app button{
-  border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);border-radius:var(--r-sm);padding:7px 14px;font-size:13.5px;
-  font-weight:500;transition:.15s var(--ease)}
-.btn:hover,.wiz button:hover,.card button:hover,.checklist button:hover,.learn button:hover,.app button:hover{background:var(--surface-2)}
-button.primary,.wiz button.primary,.card button.primary,.checklist button.primary,.learn button.primary,.app button.primary{
-  background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
-button.primary:hover{filter:brightness(1.06);background:var(--accent)}
-.mem button{padding:0}
-input,select,textarea{font:inherit}
-.time{width:70px;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px;background:var(--paper);color:var(--ink)}
-.ok-text{color:var(--ok)}
-
-/* --- dialogs (Settings, Setup) ------------------------------------------------------------------ */
-.overlay{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:20px;
-  background:rgba(20,18,16,.32);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:fade .2s}
-.overlay[hidden]{display:none}
-@keyframes fade{from{opacity:0}}
-.wiz{background:var(--surface);border-radius:22px;width:min(640px,100%);max-height:calc(100vh - 40px);overflow-y:auto;
-  padding:28px 30px;display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow-3);animation:pop .3s var(--ease)}
-@keyframes pop{from{opacity:0;transform:scale(.97) translateY(8px)}}
-.wiz h2{margin:0;font:600 22px/1.25 var(--display);letter-spacing:-.015em}
-.wiz .lead{color:var(--muted);margin:0 0 4px}
-.wiz h3{margin:16px 0 2px}
-.wiz section{display:none;flex-direction:column;gap:12px}.wiz section.on{display:flex}
-.wiz textarea,.wiz select,.field input,.kin input{padding:9px 12px;border:1px solid var(--line-strong);border-radius:var(--r-sm);
-  background:var(--paper);color:var(--ink);font:14px/1.45 var(--font)}
-.wiz textarea{font:13px/1.5 var(--mono);resize:vertical}
-.wiz textarea:focus,.wiz select:focus,.field input:focus,.kin input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-.dots{display:flex;gap:6px}.dots span{height:4px;flex:1;border-radius:4px;background:var(--surface-2);transition:background .3s}.dots span.on{background:var(--accent)}
-.box{border-radius:var(--r-md);padding:12px 14px;background:var(--surface-2);font-size:13.5px;white-space:pre-wrap;line-height:1.5}
-.tag{font-size:11px;padding:2px 8px;border-radius:var(--r-pill);background:var(--surface-2);color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0}
-.mono{font-family:var(--mono);font-size:.92em}.small{font-size:13px;color:var(--muted);margin:0;padding-left:20px}
-.keyrow,.app{border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px;display:flex;flex-direction:column;gap:8px;background:var(--surface)}
-.app{margin-bottom:10px}
-.app .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
-.app .state{font-size:12.5px}.app .state.bad{color:var(--muted)}
-.app .row{display:flex;gap:6px;flex-wrap:wrap}.app button{padding:5px 12px;font-size:12.5px}
-.app .jobs{display:grid;grid-template-columns:auto 1fr auto;gap:8px 10px;align-items:center;font-size:12.5px}
-.app .jobs select{padding:5px 8px;font-size:12.5px;border-radius:8px;border:1px solid var(--line-strong);background:var(--paper);color:var(--ink)}
-.app .jobs small{color:var(--muted)}
-.app .msg{font-size:12.5px;color:var(--muted);white-space:pre-wrap;padding:0;animation:none}.app .msg:empty{display:none}
-.keyrow small,.field small,.choice small{color:var(--muted);font-weight:400}
-.kin{display:flex;gap:8px}.kin input,.field input{flex:1;min-width:0}
-.tgstep{border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px;margin:10px 0;background:var(--surface)}
-.tgstep.done{border-color:var(--ok)}.tgstep.done .tgnum{background:var(--ok)}
-.tgnum{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;margin-right:6px}
-.tgstep .keyrow{border:0;padding:8px 0 0;background:none}
-.btnlink{display:inline-block;margin-top:6px;padding:8px 14px;border-radius:999px;background:#2aabee;color:#fff;text-decoration:none;font-weight:600}
-.keyrow .msg{font-size:13px;animation:none}.msg.ok{color:var(--ok)}.msg.bad{color:var(--bad)}
-.field{display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:500}
-.check{display:flex;gap:9px;align-items:center;font-size:14px}
-.check input,.choice input{accent-color:var(--accent);width:16px;height:16px}
-.choice{display:grid;grid-template-columns:auto 1fr;column-gap:12px;row-gap:2px;align-items:center;border:1px solid var(--line);border-radius:var(--r-md);
-  padding:12px 14px;cursor:pointer;transition:.15s var(--ease)}
-.choice small{grid-column:2}.choice:hover{border-color:var(--line-strong)}
-.choice:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
-.krow{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13.5px;padding:8px 0;border-bottom:1px solid var(--line)}
-.nav{display:flex;align-items:center;gap:10px;margin-top:8px}.nav .err{flex:1;color:var(--bad);font-size:13px}
-.nav.sticky{position:sticky;bottom:-28px;background:var(--surface);padding:14px 0 6px;margin-top:4px;border-top:1px solid var(--line)}
-
-
-/* ---- chats sidebar ---- */
-#chats{width:264px;flex:none;display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--surface);
-  transition:margin .22s var(--ease),opacity .18s;min-height:0}
-body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibility:hidden}
-#chats .ctop{display:flex;flex-direction:column;gap:8px;padding:14px 12px 8px}
-#newchat{display:flex;align-items:center;gap:8px;justify-content:flex-start;width:100%;padding:9px 12px;border-radius:var(--r-md);
-  font-weight:600;background:var(--accent-soft);color:var(--accent);border:1px solid transparent}
-#newchat:hover{border-color:var(--accent-ring)}
-#newchat svg{width:16px;height:16px}
-#newchat kbd{margin-left:auto;font:11px var(--font);color:var(--muted);font-weight:400}
-.csearch{position:relative}
-#chatsearch{width:100%;padding:8px 10px 8px 32px;border-radius:var(--r-md);border:1px solid var(--line);background:var(--surface-2);color:var(--ink);font:inherit;font-size:13.5px}
-.csearch svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--muted);pointer-events:none}
-#chatlist{flex:1;overflow-y:auto;padding:2px 8px 16px}
-#chatlist .grp{font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:14px 8px 6px}
-.citm{position:relative;display:flex;align-items:center;gap:8px;padding:8px 8px 8px 10px;border-radius:10px;cursor:pointer;color:var(--ink-2);font-size:14px}
-.citm:hover{background:var(--surface-2);color:var(--ink)}
-.citm.on{background:var(--surface-2);color:var(--ink);font-weight:550}
-.citm .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.citm .st{width:7px;height:7px;border-radius:50%;flex:none}
-.citm.running .st{background:var(--accent);animation:pulse 1.2s ease-in-out infinite}
-.citm.unread .st{background:var(--ok)}
-.citm .acts{display:none;gap:2px}
-.citm:hover .acts,.citm.on .acts{display:flex}
-.citm .acts button{width:24px;height:24px;padding:0;border-radius:6px;background:transparent;color:var(--muted);display:grid;place-items:center}
-.citm .acts button:hover{background:var(--surface);color:var(--ink)}
-.citm .acts button.del:hover{color:var(--bad)}
-.citm .acts svg{width:14px;height:14px}
-.citm input{flex:1;min-width:0;font:inherit;padding:2px 6px;border-radius:6px;border:1px solid var(--accent-ring);background:var(--surface);color:var(--ink)}
-#chatlist .none{color:var(--muted);font-size:13px;padding:16px 10px}
-.chattitle{font-weight:600;font-size:14.5px;color:var(--ink-2);max-width:40vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
-@media (max-width:820px){#chats{position:fixed;left:0;top:57px;bottom:0;z-index:16;box-shadow:var(--shadow-3)}.chattitle{display:none}}
-
-@media (max-width:980px){aside{position:fixed;right:0;top:57px;bottom:0;z-index:15;box-shadow:var(--shadow-3)}}
-@media (max-width:640px){header{padding:8px 12px}.status .lbl{display:none}#log{padding:18px 14px 140px}.hero h1{font-size:24px}
-  form#send{padding:12px 12px 20px}aside{width:100%}body.drawer-closed aside{margin-right:-100%}}
-@media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
-
-</style>
+<link rel="stylesheet" href="/ui/tokens.css">
+<link rel="stylesheet" href="/ui/app.css">
+<script src="/ui/theme.js"></script>
 </head>
 <body>
-<header>
-  <button id="chatsbtn" class="iconbtn on" title="Chats (Ctrl+B)" aria-label="Chats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18"/></svg></button>
-  <div class="brand"><span class="mark">&Delta;</span>Delta</div>
-  <span id="health" class="pill OFFLINE status"><span class="dot"></span><span class="lbl">offline</span><span id="stats" class="tip"></span></span>
-  <span class="chattitle" id="chattitle"></span>
-  <div class="spacer"></div>
-  <button id="themebtn" class="iconbtn" onclick="nextTheme()" aria-label="Theme: system, light or dark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
-  <button id="bell" class="iconbtn bell" title="Approvals" aria-label="Approvals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="count" id="bellcount">0</span></button>
-  <button id="openapps" class="iconbtn" title="Connected apps: Claude Code, Codex, LM Studio, Google" aria-label="Connected apps"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button>
-  <button id="opensettings" class="iconbtn" title="Settings: permissions, folders, learning, keys" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-  <button id="opensetup" class="iconbtn" title="Setup: models, permissions, Telegram" aria-label="Setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M17.8 6.2 19 5M3 21l9-9M12.2 6.2 11 5"/></svg></button>
-  <button id="drawerbtn" class="iconbtn on" title="Activity: approvals, learning, skills, memory" aria-label="Activity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M15 3v18"/></svg></button>
-  <span class="sep"></span>
-  <button class="iconbtn danger" id="shutdown" title="Shut Delta down and free memory/GPU" aria-label="Shut down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg></button>
-</header>
-<div class="toast" id="toast" role="alert"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span><div class="tx"><b>Delta needs your OK</b><span id="toasttext"></span></div><button class="primary" id="toastgo">Review</button></div>
-<div id="warnings" hidden></div>
-<div id="settings" class="overlay" hidden>
-  <div class="wiz">
-    <h2>Settings</h2>
-    <p class="lead">Changes apply to Delta's very next action.</p>
-    <h3 id="s_apps_h">Connected apps <span class="tag">use plans you already pay for</span></h3>
-    <label class="field">Main AI <small>used first for every step; others only if it fails. Each reply says which AI answered.</small>
-      <select id="s_main"></select></label>
-    <div id="s_appslist"><div class="empty">Checking…</div></div>
-    <h3>Permission level</h3>
-    <label class="choice"><input type="radio" name="s_autonomy" value="ask-everything"><b>Careful</b><small>Ask before anything except reading.</small></label>
-    <label class="choice"><input type="radio" name="s_autonomy" value="ask-risky"><b>Balanced</b><small>Ask before changing or sending anything.</small></label>
-    <label class="choice"><input type="radio" name="s_autonomy" value="trusted"><b>Trusted</b><small>Don't ask about everyday work that can be undone: editing, replacing or deleting files in your folders (old versions go to the Recycle Bin), keys and commands. Still asks before sending anything to anyone.</small></label>
-    <label class="choice"><input type="radio" name="s_autonomy" value="autopilot"><b>Autopilot</b><small>Trusted, and also sends messages and emails without asking. Still asks before: deleting anything that can't be undone, changing files outside your folders, typing or clicking in a terminal, the Run box or Delta itself, emergency alerts you didn't clearly ask for, and, once a task has read a web page, file or message, before sending, deleting, running code, saving to memory, or opening a link that carries hidden data.</small></label>
-    <label class="check"><input type="checkbox" id="s_quiet"> Quiet hours: only reading allowed between
-      <input id="s_qstart" class="time" placeholder="23:30"> and <input id="s_qend" class="time" placeholder="07:00"></label>
-    <h3>Remote security <span class="tag">phone control</span></h3>
-    <div class="app" id="s_guard">
-      <div class="top"><b>Delta PIN</b><span class="state" id="g_state"></span></div>
-      <small>Your phone asks for this PIN (once per 15 minutes) before the camera, a screenshot, sending files,
-        closing apps, changing keys or Autopilot. 5 wrong PINs in a row (even across restarts) lock remote control until you unlock it here.
-        Also turn on Telegram's Two-Step Verification on your phone.</small>
-      <div class="kin"><input id="g_pin" type="password" inputmode="numeric" maxlength="8" placeholder="4-8 digits" autocomplete="new-password">
-        <button id="g_save">Set PIN</button></div>
-      <div class="row"><button id="g_unlock" class="primary" hidden>Unlock remote control</button><button id="g_lock">Lock remote control now</button></div>
-      <div class="msg" id="g_msg"></div>
+<a class="skip" href="#views">Skip to content</a>
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+  <div class="sb-head">
+    <span class="logo" data-icon="logo" aria-hidden="true"></span>
+    <span class="brand">Delta</span>
+    <button id="sbcollapse" class="icon-btn" data-icon="sidebar" aria-label="Collapse sidebar" title="Collapse sidebar (Ctrl+B)"></button>
+  </div>
+  <nav class="nav" aria-label="Sections">
+    <button class="nav-item" data-go="chat" title="Chat (Alt+1)"><span data-icon="chat"></span><span class="label">Chat</span><span class="badge" id="nb_chat" hidden></span></button>
+    <button class="nav-item" data-go="tasks" title="Tasks (Alt+2)"><span data-icon="tasks"></span><span class="label">Tasks</span><span class="badge warn" id="nb_tasks" hidden></span></button>
+    <button class="nav-item" data-go="apps" title="Apps (Alt+3)"><span data-icon="apps"></span><span class="label">Apps</span></button>
+    <button class="nav-item" data-go="schedules" title="Schedules (Alt+4)"><span data-icon="clock"></span><span class="label">Schedules</span></button>
+    <button class="nav-item" data-go="documents" title="Documents (Alt+5)"><span data-icon="doc"></span><span class="label">Documents</span></button>
+    <button class="nav-item" data-go="memory" title="Memory (Alt+6)"><span data-icon="memory"></span><span class="label">Memory</span><span class="badge" id="nb_memory" hidden></span></button>
+    <button class="nav-item" data-go="settings" title="Settings (Alt+7)"><span data-icon="settings"></span><span class="label">Settings</span></button>
+  </nav>
+  <div class="sb-chats">
+    <div class="sb-label"><span>Chats</span>
+    <button id="newchat" class="icon-btn sm" data-icon="plus" aria-label="New chat" title="New chat (Ctrl+Shift+O)"></button></div>
+    <label class="search"><span data-icon="search"></span><input id="chatsearch" type="search" placeholder="Search chats" autocomplete="off" aria-label="Search chats"></label>
+    <div id="chatlist" class="chatlist" role="list" aria-label="Chats"></div>
+  </div>
+  <div class="sb-foot">
+    <button id="themebtn" class="nav-item" title="Theme: follows Windows, light or dark"><span data-icon="theme"></span><span class="label" id="themelabel">Theme: System</span></button>
+    <button id="shutdown" class="nav-item danger" title="Shut Delta down and free memory"><span data-icon="power"></span><span class="label">Shut down</span></button>
+  </div>
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+
+  <div class="main">
+  <header class="topbar">
+    <button id="menubtn" class="icon-btn only-narrow" data-icon="menu" aria-label="Open navigation"></button>
+    <h1 class="page-title" id="pagetitle">Chat</h1>
+    <div class="status-bar" aria-label="Status">
+    <button class="chip" id="st_model" title="AI model Delta uses first"><span data-icon="cpu"></span><span class="v">Model</span></button>
+    <button class="chip" id="st_browser" title="Browser Delta uses for websites"><span data-icon="globe"></span><span class="v">Browser</span></button>
+    <button class="chip" id="st_remote" title="Phone control and PIN"><span data-icon="phone"></span><span class="v">Remote</span></button>
+    <button class="chip" id="st_conn" aria-haspopup="true" aria-expanded="false" title="Connection and this PC's load"><span class="dot"></span><span class="v">Connecting</span></button>
     </div>
-    <h3>Emergency contacts <span class="tag">SOS</span></h3>
-    <div class="app" id="s_sos">
-      <small>If you tell Delta you're unwell or in trouble, it can send these people a WhatsApp message in your
-        name and start a WhatsApp call. It always asks you first. Stored encrypted on this PC.
-        For anything life-threatening, call <b>112</b>.</small>
-      <div id="sos_list"></div>
-      <div class="row"><button id="sos_add">+ Add contact</button><button id="sos_save" class="primary">Save</button></div>
-      <div class="msg" id="sos_msg"></div>
+    <button id="panelbtn" class="icon-btn" data-icon="panel" aria-label="Show task progress" title="Task progress"></button>
+    <button id="bell" class="icon-btn bell" data-icon="bell" aria-label="Approvals" title="Approvals"><span class="count" id="bellcount" hidden>0</span></button>
+    <div class="popover" id="sysinfo" hidden role="dialog" aria-label="System status"></div>
+  </header>
+  <div id="warnings" class="banner warn" role="status" hidden></div>
+
+  <div class="views" id="views" tabindex="-1">
+    <!-- Chat -->
+    <section class="view view-chat" data-view="chat" aria-label="Chat">
+    <div class="chat-main">
+    <div id="log" class="log" aria-live="polite" aria-relevant="additions">
+    <div class="hero" id="hero">
+    <span class="hero-mark" data-icon="logo" aria-hidden="true"></span>
+    <h2 id="greet">What should we get done?</h2>
+    <p class="muted">Ask in plain words. Anything that changes or sends something waits for your OK.</p>
+    <div class="getstarted" id="getstarted" hidden>
+    <div class="gs-head"><b>Get started</b><button class="link sm" id="gs_hide">Hide</button></div>
+    <ol class="gs-steps">
+    <li id="gs_model"><span class="gs-dot"></span><div><b>Connect an AI model</b><small>A free Groq key takes a minute. Or use an AI app you already have.</small></div><button class="btn sm" id="gs_model_go">Connect</button></li>
+    <li id="gs_browser"><span class="gs-dot"></span><div><b>Pick a browser</b><small>Your everyday browser, or Delta's own private one.</small></div><button class="btn sm" id="gs_browser_go">Choose</button></li>
+    <li id="gs_try"><span class="gs-dot"></span><div><b>Try an example task</b><small>Pick one below. Nothing risky runs without asking you.</small></div></li>
+    </ol>
     </div>
-    <h3>Browser</h3>
-    <small>Which browser Delta uses for websites. You can also change it from Telegram (/browser) or just say it,
-      e.g. "use Edge from now on" or "do this in Chrome". A change applies from the next task, never in the middle of one.</small>
-    <div id="s_browsers"></div>
-    <label class="field" id="s_engine_row" hidden>Delta's private browser runs in <small>which installed browser runs it (each keeps its own sign-ins)</small>
-      <select id="s_engine"></select></label>
-    <div class="app">
-      <b>Sign in to my sites</b>
-      <small>Opens Delta's private browser on this PC so you sign in once; it remembers you for later tasks. Delta never types your passwords there.</small>
-      <div class="kin"><input id="s_signin_url" placeholder="Site to sign in to (optional), e.g. mail.google.com"><button id="s_signin">Open to sign in</button></div>
-      <div class="msg" id="s_bmsg"></div>
+    <div class="examples" id="examples">
+    <button class="example" data-q="Create a note on my desktop with today's to-dos"><span data-icon="edit"></span><span>Write a note on my desktop</span></button>
+    <button class="example" data-q="What's new in Python 3.15? Keep it short."><span data-icon="search"></span><span>Research a question</span></button>
+    <button class="example" data-q="Play some calm piano music on YouTube"><span data-icon="play"></span><span>Play music on YouTube</span></button>
+    <button class="example" data-q="Schedule a meeting"><span data-icon="clock"></span><span>Schedule a meeting</span></button>
+    <button class="example" data-q="Send a message on WhatsApp to "><span data-icon="send"></span><span>Send a WhatsApp message</span></button>
+    <button class="example" data-q="Start a Google Meet"><span data-icon="video"></span><span>Start a Google Meet</span></button>
+    </div>
+    </div>
+    </div>
+    <form id="send" class="composer-wrap">
+    <div class="composer">
+    <textarea id="text" rows="1" placeholder="Ask Delta to do something" aria-label="Message Delta"></textarea>
+    <button type="submit" class="send" id="sendbtn" data-icon="arrow-up" aria-label="Send" title="Send (Enter)"></button>
+    </div>
+    <div class="hint">Enter to send. Shift+Enter for a new line.</div>
+    </form>
+    </div>
+    <aside class="panel" id="panel" aria-label="Task progress">
+    <div class="panel-head"><h2>Task progress</h2>
+    <button id="mute" class="icon-btn sm" data-icon="sound" aria-label="Approval sound" aria-pressed="true" title="Approval sound on"></button></div>
+    <div class="panel-body">
+    <section aria-labelledby="ph_now"><h3 id="ph_now">Current task</h3><div id="progress"></div></section>
+    <section aria-labelledby="ph_wait"><h3 id="ph_wait">Waiting for you</h3><div id="approvals"></div></section>
+    <section aria-labelledby="ph_usage"><h3 id="ph_usage">Usage in this chat</h3><div id="usage" class="usage"></div></section>
+    </div>
+    </aside>
+    </section>
+
+    <!-- Tasks -->
+    <section class="view" data-view="tasks" aria-label="Tasks" hidden>
+    <header class="view-head"><div><h2>Tasks</h2><p class="muted">Everything Delta has worked on, from here, your phone and schedules. Open a task to see each step.</p></div></header>
+    <div id="tasks" class="view-body"></div>
+    </section>
+
+    <!-- Apps -->
+    <section class="view" data-view="apps" aria-label="Apps" hidden>
+    <header class="view-head"><div><h2>Apps</h2><p class="muted">AI models Delta thinks with, and apps it can work in for you.</p></div></header>
+    <div class="view-body">
+    <section class="group" id="ai_models" aria-labelledby="h_ai">
+    <div class="group-head"><h3 id="h_ai">AI models</h3><p class="muted">Use plans you already pay for, or a free cloud key. Each reply says which AI answered.</p></div>
+    <label class="field inline-field">Main AI <small>Used first for every step. Others only if it fails.</small><select id="s_main"></select></label>
+    <div id="s_appslist" class="cards"></div>
+    <div class="row"><button class="btn" id="apps_keys">Add or check a model key</button></div>
+    </section>
+    <section class="group" aria-labelledby="h_mcp">
+    <div class="group-head"><h3 id="h_mcp">Connected apps</h3><p class="muted">Connect once, then just ask: "find my notes about the launch in Notion". Sign-ins are encrypted on this PC with Windows DPAPI. Anything that changes or sends something asks you first.</p></div>
+    <div id="mcpapps"></div>
+    </section>
+    </div>
+    </section>
+
+    <!-- Schedules -->
+    <section class="view" data-view="schedules" aria-label="Schedules" hidden>
+    <header class="view-head"><div><h2>Schedules</h2><p class="muted">Reminders and tasks that run by themselves. You see the plain-words schedule before anything is saved.</p></div></header>
+    <div id="schedules" class="view-body"></div>
+    </section>
+
+    <!-- Documents -->
+    <section class="view" data-view="documents" aria-label="Documents" hidden>
+    <header class="view-head"><div><h2>Documents</h2><p class="muted" id="docfolder">Reports, notes and files Delta made for you.</p></div>
+    <button class="btn" id="docs_refresh"><span data-icon="refresh"></span>Refresh</button></header>
+    <div id="documents" class="view-body"></div>
+    </section>
+
+    <!-- Memory -->
+    <section class="view" data-view="memory" aria-label="Memory" hidden>
+    <header class="view-head"><div><h2>Memory</h2><p class="muted">What Delta remembers and has learned. Everything here is stored on this PC and can be forgotten.</p></div></header>
+    <div class="view-body">
+    <div class="tabs" role="tablist" aria-label="Memory sections">
+    <button role="tab" class="tab" data-tab="mem" aria-selected="true">Memory <span class="count" id="memcount"></span></button>
+    <button role="tab" class="tab" data-tab="learned" aria-selected="false">Learned <span class="count" id="learnedcount"></span></button>
+    <button role="tab" class="tab" data-tab="skills" aria-selected="false">Skills <span class="count" id="skillcount"></span></button>
+    <button role="tab" class="tab" data-tab="cands" aria-selected="false">Being tested <span class="count" id="candcount"></span></button>
+    </div>
+    <div class="tabpanel" data-panel="mem" role="tabpanel">
+    <form id="addmem" class="inline-form"><input id="memtext" placeholder="Remember that..." aria-label="Something for Delta to remember" maxlength="500"><button type="submit" class="btn primary">Remember</button></form>
+    <div class="toolbar"><label class="search"><span data-icon="search"></span><input id="memsearch" type="search" placeholder="Filter memories" aria-label="Filter memories"></label>
+    <select id="memtrust" aria-label="Where it came from"><option value="">All sources</option><option value="trusted">From you</option><option value="agent">Delta's notes</option><option value="untrusted">From outside content</option></select>
+    <button class="btn" id="forget_outside">Forget all outside content</button></div>
+    <div id="memory" class="list"></div>
+    </div>
+    <div class="tabpanel" data-panel="learned" role="tabpanel" hidden><p class="muted small">Corrections like "keep it short" and your approve or deny choices teach Delta. Suggestions wait for your OK.</p><div id="learned" class="list"></div></div>
+    <div class="tabpanel" data-panel="skills" role="tabpanel" hidden><p class="muted small">Delta learns a skill each time it verifiably finishes a multi-step task, then reuses it.</p><div id="skills" class="list"></div></div>
+    <div class="tabpanel" data-panel="cands" role="tabpanel" hidden><p class="muted small">Lessons from recoveries and repaired skill steps wait here until they have worked a few times.</p><div id="candidates" class="list"></div></div>
+    </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="view view-settings" data-view="settings" aria-label="Settings" hidden>
+    <nav class="settings-nav" aria-label="Settings sections">
+    <a href="#set_perm">Permissions</a><a href="#set_browser">Browser</a><a href="#set_folders">Folders</a>
+    <a href="#set_sites">Apps and websites</a><a href="#set_learning">Learning and memory</a><a href="#set_remote">Phone and PIN</a>
+    <a href="#set_sos">Emergency contacts</a><a href="#set_notify">Notifications</a><a href="#set_look">Appearance</a>
+    <a href="#set_addons">Add-ons</a><a href="#set_keys">Keys</a><a href="#set_about">Setup and shutdown</a>
+    </nav>
+    <div class="settings-body" id="settingsbody">
+    <header class="view-head"><div><h2>Settings</h2><p class="muted">Changes apply to Delta's very next action.</p></div></header>
+    <div id="settingserr" class="banner danger" hidden></div>
+    <section class="group" id="set_perm"><h3>Permissions</h3>
+    <fieldset class="choices"><legend class="sr-only">Permission level</legend>
+    <label class="choice"><input type="radio" name="s_autonomy" value="ask-everything"><span><b>Careful</b><small>Ask before anything except reading.</small></span></label>
+    <label class="choice"><input type="radio" name="s_autonomy" value="ask-risky"><span><b>Balanced</b><small>Ask before changing or sending anything.</small></span></label>
+    <label class="choice"><input type="radio" name="s_autonomy" value="trusted"><span><b>Trusted</b><small>Don't ask about everyday work that can be undone: editing, replacing or deleting files in your folders (old versions go to the Recycle Bin), keys and commands. Still asks before sending anything to anyone.</small></span></label>
+    <label class="choice"><input type="radio" name="s_autonomy" value="autopilot"><span><b>Autopilot</b><small>Trusted, and also sends messages and emails without asking. Still asks before: deleting anything that can't be undone, changing files outside your folders, typing or clicking in a terminal, the Run box or Delta itself, emergency alerts you didn't clearly ask for, and, once a task has read a web page, file or message, before sending, deleting, running code, saving to memory, or opening a link that carries hidden data.</small></span></label>
+    </fieldset>
+    <div class="check-row"><label class="check"><input type="checkbox" id="s_quiet"> Quiet hours: only reading allowed between</label>
+    <input id="s_qstart" class="time" placeholder="23:30" aria-label="Quiet hours start"> <span>and</span> <input id="s_qend" class="time" placeholder="07:00" aria-label="Quiet hours end"></div>
+    </section>
+    <section class="group" id="set_browser"><h3>Browser</h3>
+    <p class="muted small">Which browser Delta uses for websites. You can also change it from Telegram (/browser) or just say it, for example "use Edge from now on". A change applies from the next task, never in the middle of one.</p>
+    <div id="s_browsers" class="choices"></div>
+    <label class="field" id="s_engine_row" hidden>Delta's private browser runs in <small>Which installed browser runs it. Each keeps its own sign-ins.</small><select id="s_engine"></select></label>
+    <div class="card">
+    <b>Sign in to my sites</b>
+    <small class="muted">Opens Delta's private browser on this PC so you sign in once. It remembers you for later tasks. Delta never types your passwords there.</small>
+    <div class="inline-form"><input id="s_signin_url" placeholder="Site to sign in to (optional), for example mail.google.com" aria-label="Site to sign in to"><button class="btn" id="s_signin">Open to sign in</button></div>
+    <div class="msg" id="s_bmsg" role="status"></div>
     </div>
     <label class="check"><input type="checkbox" id="s_orange"> Show an orange mouse pointer while Delta controls the mouse or keyboard</label>
-    <h3>Folders</h3>
-    <label class="field">Allowed folders <small>one per line: in "Trusted" mode Delta edits files here without asking</small><textarea id="s_allowed" rows="4"></textarea></label>
-    <label class="field">Blocked folders <small>Delta never reads or changes anything here</small><textarea id="s_denied" rows="3"></textarea></label>
-    <label class="field">Save new files in <small>"auto" = a Delta folder you can open from your Desktop</small><input id="s_savedir"></label>
-    <div class="box small" id="s_protected"></div>
-    <h3>Apps and websites</h3>
-    <label class="field">Blocked apps <small>one per line, e.g. regedit</small><textarea id="s_apps" rows="2"></textarea></label>
-    <label class="field">Blocked websites <small>one per line, e.g. example.com</small><textarea id="s_domains" rows="2"></textarea></label>
-    <label class="field">Only these websites <small>leave empty to allow all</small><textarea id="s_onlydomains" rows="2"></textarea></label>
-    <h3>Learning and memory</h3>
+    </section>
+    <section class="group" id="set_folders"><h3>Folders</h3>
+    <label class="field">Allowed folders <small>One per line. In Trusted mode Delta edits files here without asking.</small><textarea id="s_allowed" rows="4"></textarea></label>
+    <label class="field">Blocked folders <small>Delta never reads or changes anything here.</small><textarea id="s_denied" rows="3"></textarea></label>
+    <label class="field">Save new files in <small>"auto" means a Delta folder you can open from your Desktop.</small><input id="s_savedir"></label>
+    <div class="note" id="s_protected"></div>
+    </section>
+    <section class="group" id="set_sites"><h3>Apps and websites</h3>
+    <label class="field">Blocked apps <small>One per line, for example regedit.</small><textarea id="s_apps" rows="2"></textarea></label>
+    <label class="field">Blocked websites <small>One per line, for example example.com.</small><textarea id="s_domains" rows="2"></textarea></label>
+    <label class="field">Only these websites <small>Leave empty to allow all.</small><textarea id="s_onlydomains" rows="2"></textarea></label>
+    </section>
+    <section class="group" id="set_learning"><h3>Learning and memory</h3>
     <label class="check"><input type="checkbox" id="s_mem"> Remember things about me</label>
     <label class="check"><input type="checkbox" id="s_extract"> Learn facts from our chats automatically</label>
     <label class="check"><input type="checkbox" id="s_skills"> Learn reusable skills from tasks that worked</label>
-    <h3>Add-ons</h3>
-    <div id="s_addons"></div>
-    <h3>Keys</h3>
-    <div id="s_keys"></div>
-    <div class="nav sticky"><button id="s_close">Close</button><span class="err" id="s_err"></span><button class="primary" id="s_save">Save</button></div>
+    </section>
+    <section class="group" id="set_remote"><h3>Phone and PIN</h3>
+    <div class="card" id="s_guard">
+    <div class="card-top"><b>Delta PIN</b><span class="pill" id="g_state"></span></div>
+    <small class="muted">Your phone asks for this PIN (once per 15 minutes) before the camera, a screenshot, sending files, closing apps, changing keys or Autopilot. 5 wrong PINs in a row (even across restarts) lock remote control until you unlock it here. Also turn on Telegram's Two-Step Verification on your phone.</small>
+    <div class="inline-form"><input id="g_pin" type="password" inputmode="numeric" maxlength="8" placeholder="4 to 8 digits" autocomplete="new-password" aria-label="New PIN"><button class="btn" id="g_save">Set PIN</button></div>
+    <div class="row"><button id="g_unlock" class="btn primary" hidden>Unlock remote control</button><button class="btn" id="g_lock">Lock remote control now</button></div>
+    <div class="msg" id="g_msg" role="status"></div>
+    </div>
+    <div class="card"><div class="card-top"><b>Telegram</b><span class="pill" id="tg_state"></span></div>
+    <small class="muted">Message Delta from your phone and approve actions with a tap.</small>
+    <div class="row"><button class="btn" id="tg_setup">Set up Telegram</button></div></div>
+    </section>
+    <section class="group" id="set_sos"><h3>Emergency contacts</h3>
+    <div class="card" id="s_sos">
+    <small class="muted">If you tell Delta you're unwell or in trouble, it can send these people a WhatsApp message in your name and start a WhatsApp call. It always asks you first. Stored encrypted on this PC. For anything life-threatening, call <b>112</b>.</small>
+    <div id="sos_list" class="sos-list"></div>
+    <div class="row"><button class="btn" id="sos_add"><span data-icon="plus"></span>Add contact</button><button id="sos_save" class="btn primary">Save contacts</button></div>
+    <div class="msg" id="sos_msg" role="status"></div>
+    </div>
+    </section>
+    <section class="group" id="set_notify"><h3>Notifications</h3>
+    <label class="check"><input type="checkbox" id="n_sound"> Play a sound when Delta needs your OK</label>
+    <div class="row"><span class="muted small" id="n_state"></span><button class="btn" id="n_allow">Allow desktop notifications</button></div>
+    </section>
+    <section class="group" id="set_look"><h3>Appearance</h3>
+    <fieldset class="segmented" id="themeseg"><legend class="sr-only">Theme</legend>
+    <label><input type="radio" name="theme" value="system"><span>Follow Windows</span></label>
+    <label><input type="radio" name="theme" value="light"><span>Light</span></label>
+    <label><input type="radio" name="theme" value="dark"><span>Dark</span></label>
+    </fieldset>
+    </section>
+    <section class="group" id="set_addons"><h3>Add-ons</h3><div id="s_addons"></div></section>
+    <section class="group" id="set_keys"><h3>Keys</h3><p class="muted small">Stored in Windows Credential Manager, never in files.</p><div id="s_keys" class="keys"></div></section>
+    <section class="group" id="set_about"><h3>Setup and shutdown</h3>
+    <div class="row"><button class="btn" id="opensetup">Run setup again</button><button class="btn danger-outline" id="shutdown2">Shut Delta down</button></div>
+    </section>
+    <div class="savebar"><span class="msg" id="s_err" role="status"></span><button class="btn" id="s_reset">Undo changes</button><button class="btn primary" id="s_save">Save changes</button></div>
+    </div>
+    </section>
+  </div>
   </div>
 </div>
-<div id="setup" class="overlay" hidden>
-  <div class="wiz">
-    <div class="dots" id="dots"></div>
-    <section data-step="welcome">
-      <h2>Welcome to Delta</h2>
-      <p class="lead">Let's get you set up. It takes about two minutes, and you can change everything later.</p>
-      <div class="box" id="hw">Checking this PC…</div>
-    </section>
-    <section data-step="models">
-      <h2>Choose an AI brain</h2>
-      <p class="lead">Delta needs at least one AI model. Free options work well. Keys are checked right away and stored in Windows Credential Manager, never in files.</p>
-      <div class="keyrow" data-key="groq_api_key">
-        <label><b>Groq</b> <span class="tag">free · recommended</span><br><small>Get a key at <span class="mono">console.groq.com/keys</span></small></label>
-        <div class="kin"><input type="password" placeholder="gsk_…" autocomplete="off"><button>Check &amp; save</button></div>
-        <div class="msg"></div>
-      </div>
-      <div class="keyrow" data-key="nvidia_api_key">
-        <label><b>NVIDIA NIM</b> <span class="tag">free · backup</span><br><small>Get a key at <span class="mono">build.nvidia.com</span></small></label>
-        <div class="kin"><input type="password" placeholder="nvapi-…" autocomplete="off"><button>Check &amp; save</button></div>
-        <div class="msg"></div>
-      </div>
-      <h3>Or use an AI app you already have <span class="tag">no key needed</span></h3>
-      <div id="w_apps"></div>
-      <div class="box" id="localbox"></div>
-    </section>
-    <section data-step="trust">
-      <h2>How careful should Delta be?</h2>
-      <p class="lead">Deleting files for good always needs your OK, and security and payment changes are never made, whatever you pick here.</p>
-      <label class="choice"><input type="radio" name="autonomy" value="ask-everything"><b>Careful</b><small>Ask before anything except reading. Best for your first days.</small></label>
-      <label class="choice"><input type="radio" name="autonomy" value="ask-risky" checked><b>Balanced</b> <span class="tag">recommended</span><small>Open apps and read freely; ask before changing or sending anything.</small></label>
-      <label class="choice"><input type="radio" name="autonomy" value="trusted"><b>Trusted</b><small>Don't ask about everyday work that can be undone (files go to the Recycle Bin). Still asks before sending anything.</small></label>
-      <label class="choice"><input type="radio" name="autonomy" value="autopilot"><b>Autopilot</b><small>Like Trusted, and also sends messages and emails without asking. Still asks before: deleting anything that can't be undone, changing files outside your folders, typing or clicking in a terminal, the Run box or Delta itself, emergency alerts you didn't clearly ask for, and, once a task has read a web page, file or message, before sending, deleting, running code, saving to memory, or opening a link that carries hidden data.</small></label>
-    </section>
-    <section data-step="telegram">
-      <h2>Talk to Delta from your phone <span class="tag">optional</span></h2>
-      <p class="lead">Message Delta on Telegram and approve actions with a tap.</p>
-      <div class="tgstep" id="tgs1"><b><span class="tgnum">1</span> Create your own bot <small>(1 minute, free)</small></b>
-        <ol class="small"><li>Tap <a href="https://t.me/BotFather" target="_blank"><b>Open @BotFather</b></a> (the one with the blue tick) and press <b>Start</b>.</li>
-          <li>Send <span class="mono">/newbot</span>.</li>
-          <li>Send a name, e.g. <span class="mono">Delta</span>.</li>
-          <li>Send a username ending in <span class="mono">bot</span>, e.g. <span class="mono">yourname_delta_bot</span>.</li>
-          <li>BotFather replies with a long <b>token</b> like <span class="mono">7123456789:AAH…</span>. Copy it.</li></ol>
-        <a class="btnlink" href="https://t.me/BotFather" target="_blank">Open @BotFather in Telegram</a></div>
-      <div class="tgstep" id="tgs2"><b><span class="tgnum">2</span> Paste the token here</b> <small>(it is checked and saved by itself)</small>
-        <div class="keyrow" data-key="telegram_bot_token">
-          <div class="kin"><input type="password" placeholder="7123456789:AAH…" autocomplete="off"><button>Check &amp; save</button></div>
-          <div class="msg"></div>
-        </div></div>
-      <div class="tgstep" id="tgs3"><b><span class="tgnum">3</span> Connect your phone</b>
-        <p class="small">Press the button, then send the code it shows to your new bot. Delta adds your phone by itself.</p>
-        <div class="row"><button id="tgpair" class="primary">Connect my phone</button></div>
-        <div id="tgcode" class="msg"></div></div>
-      <label class="field">Allowed Telegram user ids <small>(filled in when you connect; only these can control Delta)</small><input id="tgid" placeholder="filled in automatically" inputmode="numeric"></label>
-      <label class="check"><input type="checkbox" id="tgon"> Turn on Telegram</label>
-    </section>
-    <section data-step="name">
-      <h2>What should Delta call you?</h2>
-      <label class="field">Your name <small>(optional)</small><input id="ownername" maxlength="60" placeholder="e.g. Adharsh"></label>
-    </section>
-    <section data-step="done">
-      <h2>You're all set 🎉</h2>
-      <div class="box" id="summary"></div>
-      <p class="lead">Try: <i>"Create a note on my desktop with today's to-dos"</i> or <i>"What's new in Python 3.15?"</i></p>
-    </section>
-    <div class="nav"><button id="wback">Back</button><span class="err" id="werr"></span><button class="primary" id="wnext">Next</button></div>
-  </div>
-</div>
-<main>
-  <nav id="chats" aria-label="Chats">
-    <div class="ctop">
-      <button id="newchat" title="New chat (Ctrl+Shift+O)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>New chat<kbd>Ctrl+Shift+O</kbd></button>
-      <div class="csearch"><input id="chatsearch" placeholder="Search chats" autocomplete="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
-    </div>
-    <div id="chatlist"></div>
-  </nav>
-  <section id="chat">
-    <div id="log">
-      <div class="hero" id="hero">
-        <span class="mark">&Delta;</span>
-        <h1 id="greet">What should we get done?</h1>
-        <p>Ask in plain words. Anything risky waits for your OK.</p>
-        <div class="chips">
-          <button class="chip" data-q="Play Oh Sita Hey Rama from Sita Ramam on YouTube">&#9835; Play a song</button>
-          <button class="chip" data-q="Start a Google Meet">&#127909; Start a Google Meet</button>
-          <button class="chip" data-q="Schedule a meeting">&#128197; Schedule a meeting</button>
-          <button class="chip" data-q="Send a message on WhatsApp to ">&#128172; Send a WhatsApp</button>
-          <button class="chip" data-q="Open a new Notepad window and type: ">&#9998; Write a note</button>
-        </div>
-      </div>
-    </div>
-    <form id="send"><div class="composer"><textarea id="text" rows="1" placeholder="Message Delta…"></textarea>
-      <button class="send" title="Send (Enter)" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div>
-      <div class="hint">Enter to send · Shift+Enter for a new line</div></form>
+
+<!-- First-run setup -->
+<dialog id="setup" class="modal wizard" aria-labelledby="setup_title">
+  <div class="wiz-head"><span class="logo" data-icon="logo" aria-hidden="true"></span><b id="setup_title">Set up Delta</b><ol class="steps" id="dots" aria-label="Setup steps"></ol>
+  <button class="icon-btn" id="wclose" data-icon="x" aria-label="Close setup"></button></div>
+  <div class="wiz-body">
+  <section data-step="welcome">
+    <h2>Welcome to Delta</h2>
+    <p class="lead">Delta does tasks on this PC for you: files, websites, apps and messages. Setup takes about two minutes and you can change everything later.</p>
+    <div class="note" id="hw">Checking this PC...</div>
   </section>
-  <aside id="drawer">
-    <div class="dhead"><h2>Activity</h2><button class="iconbtn" id="mute" title="Approval sound on" aria-label="Approval sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg></button></div>
-    <div><h3>Approvals</h3><div id="approvals"><div class="empty">Nothing waiting.</div></div></div>
-    <div><h3>Schedules</h3><div id="schedules"></div></div>
-    <div><h3>Tasks</h3><div id="tasks"></div></div>
-    <div><h3>Delta learned</h3><div id="learned"></div></div>
-    <div><h3>Learned skills <span id="skillcount" class="count"></span></h3><div id="skills"></div></div>
-    <div><h3>Waiting to prove themselves <span id="candcount" class="count"></span></h3><div id="candidates"></div></div>
-    <div><h3>Memory</h3><div id="memory"></div>
-      <form id="addmem"><textarea id="memtext" placeholder="Remember that…"></textarea><button>Add</button></form></div>
-  </aside>
-</main>
-<script>
-// Token arrives in the URL fragment (never sent to the server); keep it for reloads when storage allows.
-let token = new URLSearchParams(location.hash.slice(1)).get("token") || "";
-try { if (token) sessionStorage.setItem("delta_token", token); else token = sessionStorage.getItem("delta_token") || ""; } catch {}
-if (location.hash) history.replaceState(null, "", "/");
-const $ = id => document.getElementById(id);
-const api = (path, opts = {}) => fetch(path, {...opts, headers: {"Authorization": "Bearer " + token, "Content-Type": "application/json"}})
-  .then(r => { if (r.status === 401) throw new Error("unauthorized"); return r.json(); });
+  <section data-step="models">
+    <h2>Connect an AI model</h2>
+    <p class="lead">Delta needs at least one AI model. Free options work well. Keys are checked right away and stored in Windows Credential Manager, never in files.</p>
+    <div class="keyrow card" data-key="groq_api_key">
+    <div class="card-top"><b>Groq</b><span class="pill accent">Free, recommended</span></div>
+    <small class="muted">Get a key at <span class="mono">console.groq.com/keys</span></small>
+    <div class="inline-form"><input type="password" placeholder="gsk_..." autocomplete="off" aria-label="Groq API key"><button class="btn primary">Check and save</button></div>
+    <div class="msg" role="status"></div>
+    </div>
+    <div class="keyrow card" data-key="nvidia_api_key">
+    <div class="card-top"><b>NVIDIA NIM</b><span class="pill">Free, backup</span></div>
+    <small class="muted">Get a key at <span class="mono">build.nvidia.com</span></small>
+    <div class="inline-form"><input type="password" placeholder="nvapi-..." autocomplete="off" aria-label="NVIDIA API key"><button class="btn">Check and save</button></div>
+    <div class="msg" role="status"></div>
+    </div>
+    <h3>Or use an AI app you already have <span class="pill">No key needed</span></h3>
+    <div id="w_apps" class="cards"></div>
+    <div class="note" id="localbox"></div>
+  </section>
+  <section data-step="trust">
+    <h2>How careful should Delta be?</h2>
+    <p class="lead">Deleting files for good always needs your OK, and security and payment changes are never made, whatever you pick here.</p>
+    <fieldset class="choices"><legend class="sr-only">Permission level</legend>
+    <label class="choice"><input type="radio" name="autonomy" value="ask-everything"><span><b>Careful</b><small>Ask before anything except reading. Best for your first days.</small></span></label>
+    <label class="choice"><input type="radio" name="autonomy" value="ask-risky" checked><span><b>Balanced <span class="pill accent">Recommended</span></b><small>Open apps and read freely. Ask before changing or sending anything.</small></span></label>
+    <label class="choice"><input type="radio" name="autonomy" value="trusted"><span><b>Trusted</b><small>Don't ask about everyday work that can be undone (files go to the Recycle Bin). Still asks before sending anything.</small></span></label>
+    <label class="choice"><input type="radio" name="autonomy" value="autopilot"><span><b>Autopilot</b><small>Like Trusted, and also sends messages and emails without asking. Still asks before anything that can't be undone, anything outside your folders, and anything a web page, file or message could have asked for. Settings lists every case.</small></span></label>
+    </fieldset>
+  </section>
+  <section data-step="telegram">
+    <h2>Talk to Delta from your phone <span class="pill">Optional</span></h2>
+    <p class="lead">Message Delta on Telegram and approve actions with a tap. You can skip this.</p>
+    <div class="tgstep" id="tgs1"><b><span class="tgnum">1</span> Create your own bot <small class="muted">(1 minute, free)</small></b>
+    <ol class="small"><li>Open <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer"><b>@BotFather</b></a> in Telegram (the one with the blue tick) and press <b>Start</b>.</li>
+    <li>Send <span class="mono">/newbot</span>.</li>
+    <li>Send a name, for example <span class="mono">Delta</span>.</li>
+    <li>Send a username ending in <span class="mono">bot</span>, for example <span class="mono">yourname_delta_bot</span>.</li>
+    <li>BotFather replies with a long <b>token</b> like <span class="mono">7123456789:AAH...</span>. Copy it.</li></ol>
+    <a class="btn" href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">Open @BotFather in Telegram</a></div>
+    <div class="tgstep" id="tgs2"><b><span class="tgnum">2</span> Paste the token here</b> <small class="muted">It is checked and saved by itself.</small>
+    <div class="keyrow" data-key="telegram_bot_token">
+    <div class="inline-form"><input type="password" placeholder="7123456789:AAH..." autocomplete="off" aria-label="Telegram bot token"><button class="btn">Check and save</button></div>
+    <div class="msg" role="status"></div>
+    </div></div>
+    <div class="tgstep" id="tgs3"><b><span class="tgnum">3</span> Connect your phone</b>
+    <p class="small muted">Press the button, then send the code it shows to your new bot. Delta adds your phone by itself.</p>
+    <div class="row"><button id="tgpair" class="btn primary">Connect my phone</button></div>
+    <div id="tgcode" class="msg" role="status"></div></div>
+    <label class="field">Allowed Telegram user ids <small>Filled in when you connect. Only these can control Delta.</small><input id="tgid" placeholder="Filled in automatically" inputmode="numeric"></label>
+    <label class="check"><input type="checkbox" id="tgon"> Turn on Telegram</label>
+  </section>
+  <section data-step="name">
+    <h2>What should Delta call you?</h2>
+    <label class="field">Your name <small>Optional.</small><input id="ownername" maxlength="60" placeholder="For example Adharsh"></label>
+  </section>
+  <section data-step="done">
+    <h2>You're all set</h2>
+    <div class="note" id="summary"></div>
+    <p class="lead">Try: <i>"Create a note on my desktop with today's to-dos"</i> or <i>"What's new in Python 3.15?"</i></p>
+  </section>
+  </div>
+  <div class="wiz-foot"><button class="btn" id="wback">Back</button><span class="err" id="werr" role="alert"></span><button class="btn primary" id="wnext" autofocus>Next</button></div>
+</dialog>
 
-// ---- chats: like Claude's sidebar. Messages are stored by Delta, per chat; memory, skills and
-// approvals are shared by every chat. Work in a chat you are not looking at keeps running and
-// marks that chat (pulsing dot = working, green dot = new answer).
-let current = "";                 // open chat id ("" = a new chat, created on the first message)
-const taskChat = {};              // task id -> chat id
-const unread = new Set(), busy = new Set();
-try { current = localStorage.getItem("delta_chat") || ""; } catch {}
-const shown = taskId => !taskChat[taskId] || taskChat[taskId] === current;
+<dialog id="confirm" class="modal small-modal" aria-labelledby="cf_title">
+  <form method="dialog">
+  <h2 id="cf_title"></h2>
+  <p id="cf_body" class="muted"></p>
+  <div class="row end"><button type="submit" class="btn" value="no" id="cf_no">Cancel</button><button type="submit" class="btn primary" value="yes" id="cf_yes">OK</button></div>
+  </form>
+</dialog>
 
-function add(cls, text, meta) {
-  $("hero")?.remove();
-  const d = document.createElement("div"); d.className = cls; d.textContent = text;
-  if (meta) { const m = document.createElement("div"); m.className = "meta"; m.textContent = meta; d.appendChild(m); }
-  $("log").appendChild(d); $("log").scrollTop = $("log").scrollHeight; return d;
-}
+<dialog id="sheet" class="sheet" aria-labelledby="sheet_title">
+  <div class="sheet-head"><h2 id="sheet_title"></h2><button class="icon-btn" id="sheet_close" data-icon="x" aria-label="Close"></button></div>
+  <div class="sheet-body" id="sheet_body"></div>
+</dialog>
 
-function setHealth(state, label) {
-  $("health").className = "pill status " + state; $("health").querySelector(".lbl").textContent = label;
-}
-async function refreshStatus() {
-  try {
-    const s = await api("/api/status"), g = s.governor;
-    setHealth(g.health, g.health === "NORMAL" ? "Ready" : g.health.toLowerCase());
-    const gpu = g.gpu_temp_c == null ? "" : ` · GPU ${g.gpu_temp_c}°C ${g.vram_pct ?? "?"}% VRAM`;
-    $("warnings").hidden = !s.warnings?.length;
-    $("warnings").textContent = (s.warnings || []).map(w => "⚠ " + w).join("\n");
-    $("stats").textContent = `RAM ${g.ram_pct}% · CPU ${g.cpu_pct}%${gpu} · Delta ${g.process_rss_mb} MB · models: ${s.providers.join(" › ") || "none"}`
-      + (g.reasons.length ? " · " + g.reasons.join(", ") : "");
-  } catch (e) { setHealth("OFFLINE", e.message === "unauthorized" ? "no token" : "offline"); }
-}
+<div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
 
-const BELL_SVG = $("bell").querySelector("svg").outerHTML;
-function approvalCard(a) {
-  const c = document.createElement("div"); c.className = "card"; c.dataset.approval = a.id; if (a.task_id) c.dataset.task = a.task_id;
-  // "Allow for this task" shows only when Delta offers it: never for permanent deletes, terminals, data in a link.
-  const task = a.for_task ? '<button class="task" title="Also allow this same kind of action here until this task ends. Not saved.">Allow for this task</button>' : "";
-  c.innerHTML = `<div class="ttl">${BELL_SVG} Needs your OK</div><b></b><div class="why"></div><div class="row"><button class="primary">Approve</button>${task}<button class="deny">Deny</button></div>`;
-  c.querySelector("b").textContent = a.summary; c.querySelector(".why").textContent = `${a.risk} · ${a.reason}`;
-  const buttons = c.querySelectorAll("button"), yes = c.querySelector(".primary"), no = c.querySelector(".deny"), all = c.querySelector(".task");
-  const answer = (ok, forTask) => { buttons.forEach(b => b.disabled = true);
-    api(`/api/approvals/${a.id}`, {method: "POST", body: JSON.stringify({approved: ok, for_task: !!forTask})}).finally(() => dropApproval(a.id)); };
-  yes.onclick = () => answer(true); no.onclick = () => answer(false); if (all) all.onclick = () => answer(true, true);
-  return c;
-}
-function renderApproval(a) {
-  if (document.querySelector(`[data-approval="${a.id}"]`)) return;
-  $("approvals").querySelector(".empty")?.remove();
-  $("approvals").appendChild(approvalCard(a));
-  $("hero")?.remove();
-  if (shown(a.task_id)) { const inline = approvalCard(a); $("log").appendChild(inline); inline.scrollIntoView({block: "end", behavior: "smooth"}); }
-  alertApproval(a);
-}
-// A task Delta was doing when it (or the PC) stopped: offer to resume. Never resumed silently:
-// a half-done task may already have sent something.
-async function checkInterrupted() {
-  // The task engine knows every interrupted task (tasks.js shows them with Resume / Discard).
-  const t = await api("/api/tasks?state=interrupted&limit=5").catch(() => null);
-  if (t && t.enabled && t.tasks.length && window.showInterruptedTasks) { window.showInterruptedTasks(t.tasks); return; }
-  const u = await api("/api/runs/unfinished").catch(() => null); const run = u && u.run; if (!run) return;
-  const done = (run.steps || []).filter(s => s.ok).map(s => s.tool);
-  const box = document.createElement("div"); box.className = "checklist";
-  box.innerHTML = '<div class="chead">I was interrupted while working on this:</div><div class="citem"></div><div class="citem"></div><div class="row" style="margin-top:6px;display:flex;gap:8px"><button class="primary">Resume</button><button>Dismiss</button></div>';
-  const [req, steps] = box.querySelectorAll(".citem");
-  req.textContent = "“" + run.request + "”"; steps.textContent = done.length ? `${done.length} step(s) were already done: ${done.join(", ")}` : "No steps had finished yet.";
-  const [resume, dismiss] = box.querySelectorAll("button");
-  const close = () => api(`/api/runs/${run.task_id}/dismiss`, {method: "POST"}).catch(() => {}).finally(() => box.remove());
-  dismiss.onclick = close;
-  resume.onclick = async () => {
-    await close();
-    $("text").value = done.length ? `${run.request} (resume: these steps already ran before you stopped: ${done.join(", ")}; check the current state before doing anything again)` : run.request;
-    $("send").requestSubmit();
-  };
-  $("log").appendChild(box);
-}
-
-// The plan as a live checklist: each tool call ticks the first open step that names it.
-const lists = {};
-function showChecklist(taskId, plan) {
-  const steps = (plan.steps || []).filter(Boolean); if (!steps.length) return;
-  const box = document.createElement("div"); box.className = "checklist";
-  const head = document.createElement("div"); head.className = "chead";
-  head.textContent = plan.replay ? `Using learned skill: ${plan.replay}` : (plan.goal || "Plan");
-  box.appendChild(head);
-  const items = steps.map(s => { const r = document.createElement("div"); r.className = "citem"; r.innerHTML = "<span>○</span> "; r.append(s); box.appendChild(r); return {el: r, text: s.toLowerCase(), done: false}; });
-  lists[taskId] = items; $("log").appendChild(box); box.scrollIntoView({block: "end"});
-}
-function tickStep(taskId, tool) {
-  const items = lists[taskId]; if (!items) return;
-  let i = items.findIndex(it => !it.done && it.text.includes(tool.toLowerCase()));
-  // Plans written in plain words ("open Notepad") name no tool: then each action (not a read
-  // or a check) moves the list on by one step; the last step waits for the final check.
-  const looking = /^(read_|list_|look_|browser_read|media_status|path_info|recall|screenshot)/.test(tool);
-  if (i === -1 && !looking) { i = items.findIndex(it => !it.done); if (i === items.length - 1) i = -1; }
-  if (i === -1) return;
-  for (let k = 0; k <= i; k++) if (!items[k].done) { items[k].done = true; items[k].el.classList.add("done"); items[k].el.firstChild.textContent = "✓"; }
-}
-function tickAll(taskId) { (lists[taskId] || []).forEach(it => { it.done = true; it.el.classList.add("done"); it.el.firstChild.textContent = "✓"; }); }
-
-// While a task runs, a Stop button cancels it (approvals it was waiting on are withdrawn too).
-const stops = {};
-function showStop(taskId) {
-  const b = document.createElement("button"); b.className = "stopbtn"; b.textContent = "■ Stop";
-  b.title = "Stop this task now";
-  b.onclick = async () => { b.disabled = true; b.textContent = "Stopping…"; await api(`/api/tasks/${taskId}/cancel`, {method: "POST"}).catch(() => {}); };
-  stops[taskId] = b; $("log").appendChild(b); b.scrollIntoView({block: "end"});
-}
-function taskEnded(taskId) {
-  stops[taskId]?.remove(); delete stops[taskId];
-  document.querySelectorAll(`[data-task="${taskId}"]`).forEach(c => dropApproval(c.dataset.approval));
-}
-function dropApproval(id) {
-  document.querySelectorAll(`[data-approval="${id}"]`).forEach(el => el.remove());
-  if (!$("approvals").children.length) $("approvals").innerHTML = '<div class="empty">Nothing waiting.</div>';
-  updateBell();
-}
-
-// --- the approval bell: count badge, ring, chime, toast, tab title, system notification -------
-let muted = false; try { muted = localStorage.getItem("delta_mute") === "1"; } catch {}
-function pendingCount() { return $("approvals").querySelectorAll("[data-approval]").length; }
-function updateBell() {
-  const n = pendingCount();
-  $("bell").classList.toggle("has", n > 0); $("bellcount").textContent = n > 9 ? "9+" : String(n);
-  $("bell").title = n ? `${n} approval${n > 1 ? "s" : ""} waiting` : "Approvals";
-  document.title = n ? `(${n}) Approval needed · Delta` : "Delta";
-  if (!n) $("toast").classList.remove("show");
-}
-let audio;
-function chime() {
-  if (muted) return;
-  try {
-    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-    const t = audio.currentTime;
-    [[659.25, 0], [880, .14]].forEach(([f, d]) => {   // E5 then A5: a soft, friendly two-note bell
-      const o = audio.createOscillator(), g = audio.createGain();
-      o.type = "sine"; o.frequency.value = f; o.connect(g); g.connect(audio.destination);
-      g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.18, t + d + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.55); o.start(t + d); o.stop(t + d + 0.6);
-    });
-  } catch {}
-}
-function alertApproval(a) {
-  updateBell();
-  const bell = $("bell"); bell.classList.remove("ring"); void bell.offsetWidth; bell.classList.add("ring");
-  chime();
-  $("toasttext").textContent = a.summary; $("toast").classList.add("show");
-  clearTimeout(alertApproval.t); alertApproval.t = setTimeout(() => $("toast").classList.remove("show"), 9000);
-  if ((document.hidden || !document.hasFocus()) && "Notification" in window && Notification.permission === "granted") {
-    const n = new Notification("Delta needs your OK", {body: a.summary, tag: "delta-approval-" + a.id, requireInteraction: true});
-    n.onclick = () => { window.focus(); openApprovals(); n.close(); };
-  }
-}
-function openApprovals() {
-  document.body.classList.remove("drawer-closed"); $("drawerbtn").classList.add("on");
-  $("toast").classList.remove("show");
-  const first = document.querySelector("#log [data-approval]") || document.querySelector("#approvals [data-approval]");
-  first?.scrollIntoView({block: "center", behavior: "smooth"});
-}
-$("bell").onclick = openApprovals; $("toastgo").onclick = openApprovals;
-$("mute").onclick = () => { muted = !muted; try { localStorage.setItem("delta_mute", muted ? "1" : "0"); } catch {}
-  $("mute").classList.toggle("on", !muted); $("mute").title = muted ? "Approval sound off" : "Approval sound on"; };
-$("mute").classList.toggle("on", !muted);
-$("drawerbtn").onclick = () => { const closed = document.body.classList.toggle("drawer-closed"); $("drawerbtn").classList.toggle("on", !closed);
-  try { localStorage.setItem("delta_drawer", closed ? "closed" : "open"); } catch {} };
-try { if (localStorage.getItem("delta_drawer") === "closed" || (!localStorage.getItem("delta_drawer") && innerWidth < 980)) {
-  document.body.classList.add("drawer-closed"); $("drawerbtn").classList.remove("on"); } } catch {}
-
-async function refreshMemory() {
-  const items = await api("/api/memory").catch(() => []);
-  $("memory").innerHTML = items.length ? "" : '<div class="empty">Delta has not learned anything yet.</div>';
-  for (const m of items) {
-    // Where each memory came from: notes from web pages, files or messages are kept as data only.
-    const row = document.createElement("div"); row.className = "mem";
-    row.innerHTML = "<span><span class='t'></span><span class='badge'></span><small></small></span><button title='Forget'>×</button>";
-    row.querySelector(".t").textContent = m.content + (m.kind === "episode" ? " (task)" : "");
-    const b = row.querySelector(".badge");
-    if (m.trust === "untrusted") { b.className = "badge untrusted"; b.textContent = "from outside: data only"; } else b.remove();
-    row.querySelector("small").textContent = " " + (m.provenance || "");
-    row.querySelector("button").onclick = () => api(`/api/memory/${m.id}`, {method: "DELETE"}).then(refreshMemory);
-    $("memory").appendChild(row);
-  }
-}
-
-async function refreshCandidates() {
-  const items = (await api("/api/learn").catch(() => [])).filter(i => i.status === "candidate" || i.status === "active").slice(0, 20);
-  $("candcount").textContent = items.length ? `· ${items.filter(i => i.status === "candidate").length} waiting` : "";
-  $("candidates").innerHTML = items.length ? "" : '<div class="empty">Lessons from recoveries and repaired skill steps wait here until they have worked a few times.</div>';
-  for (const i of items) {
-    const d = document.createElement("div"); d.className = "learn " + i.status;
-    d.innerHTML = "<div class='kind'></div><div class='text'></div><div class='row'></div>";
-    const trust = i.trust === "untrusted" ? " · from outside content: never used" : "";
-    d.querySelector(".kind").textContent = `${i.ref} ${i.kind === "recipe" ? "Repaired step" : "Lesson"} · ${i.status === "candidate" ? "waiting" : "in use"} · ${i.successes}✓ ${i.failures}✗${trust}`;
-    d.querySelector(".text").textContent = i.summary;
-    const row = d.querySelector(".row");
-    const btn = (label, action, primary) => { const b = document.createElement("button"); b.textContent = label;
-      if (primary) b.className = "primary";
-      b.onclick = () => api(`/api/learn/${i.ref}`, {method: "POST", body: JSON.stringify({action})}).then(refreshCandidates);
-      row.appendChild(b); };
-    if (i.status === "candidate" && i.trust !== "untrusted") btn("Use it now", "promote", true);
-    btn("Reject", "reject", false);
-    $("candidates").appendChild(d);
-  }
-}
-
-const KIND = {preference: "Your instruction", avoid: "Won't do again", trust: "Suggestion", lesson: "Lesson"};
-async function refreshLearned() {
-  const items = (await api("/api/learned").catch(() => [])).filter(i => i.status !== "undone").slice(0, 20);
-  $("learned").innerHTML = items.length ? "" : '<div class="empty">Corrections like "keep it short" and your approve/deny choices teach Delta. They show up here.</div>';
-  for (const i of items) {
-    const d = document.createElement("div"); d.className = "learn " + i.status;
-    d.innerHTML = "<div class='kind'></div><div class='text'></div><div class='row'></div>";
-    d.querySelector(".kind").textContent = (KIND[i.kind] || i.kind) + (i.status === "pending" ? " · needs your OK" : "");
-    d.querySelector(".text").textContent = i.content;
-    const row = d.querySelector(".row");
-    const btn = (label, action, primary) => { const b = document.createElement("button"); b.textContent = label;
-      if (primary) b.className = "primary";
-      b.onclick = () => api(`/api/learned/${i.id}`, {method: "POST", body: JSON.stringify({action})}).then(refreshLearned);
-      row.appendChild(b); };
-    if (i.status === "pending") btn("Keep", "keep", true);
-    btn(i.status === "pending" ? "No thanks" : "Undo", "undo", false);
-    $("learned").appendChild(d);
-  }
-}
-
-async function refreshSkills() {
-  const items = await api("/api/skills").catch(() => []);
-  const live = items.filter(s => s.status !== "retired");
-  $("skillcount").textContent = live.length ? `· ${live.filter(s => s.status === "active").length} proven, ${live.filter(s => s.status === "candidate").length} learning` : "";
-  $("skills").innerHTML = items.length ? "" : '<div class="empty">Delta learns a skill each time it verifiably finishes a multi-step task.</div>';
-  for (const s of items) {
-    const row = document.createElement("div"); row.className = "mem skill";
-    row.innerHTML = "<span><b></b><span class='badge'></span><small></small></span><button title='Forget skill'>×</button>";
-    row.querySelector("b").textContent = s.name;
-    const b = row.querySelector(".badge"); b.className = "badge " + s.status; b.textContent = s.status === "candidate" ? "learning" : s.status;
-    row.querySelector("small").textContent = `${s.successes}✓ ${s.failures}✗ · ${s.when_to_use}`;
-    row.querySelector("button").onclick = () => api(`/api/skills/${s.id}`, {method: "DELETE"}).then(refreshSkills);
-    $("skills").appendChild(row);
-  }
-}
-
-// A question from Delta: tap an option (or type your own) to continue the same request.
-// A form of questions (tick boxes or pick-one), like Telegram's: answers go back as one message.
-function showForm(r) {
-  const box = document.createElement("div"); box.className = "qform";
-  const picks = r.questions.map(() => new Set());
-  r.questions.forEach((q, qi) => {
-    const block = document.createElement("div"); block.className = "qblock";
-    const title = document.createElement("b"); title.textContent = q.q + (q.multi ? " (tick all that apply)" : "");
-    const opts = document.createElement("div"); opts.className = "qopts";
-    q.options.forEach(o => {
-      const b = document.createElement("button"); b.textContent = (q.multi ? "☐ " : "") + o;
-      b.onclick = () => {
-        if (q.multi) { picks[qi].has(o) ? picks[qi].delete(o) : picks[qi].add(o); b.textContent = (picks[qi].has(o) ? "☑ " : "☐ ") + o; }
-        else { picks[qi] = new Set([o]); opts.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); }
-      };
-      opts.appendChild(b);
-    });
-    block.append(title, opts); box.appendChild(block);
-  });
-  const send = document.createElement("button"); send.className = "primary"; send.textContent = "Continue";
-  send.onclick = () => {
-    const lines = r.questions.map((q, qi) => `${q.q} -> ${[...picks[qi]].join(", ") || "(no preference)"}`);
-    $("text").value = `${r.asked_about}\nMy answers:\n${lines.join("\n")}`; $("send").requestSubmit(); box.remove();
-  };
-  box.appendChild(send); $("log").appendChild(box); box.scrollIntoView({block: "end"});
-}
-
-function showOptions(r) {
-  if (r.questions && r.questions.length) return showForm(r);
-  const row = document.createElement("div"); row.className = "qopts";
-  const answer = choice => { $("text").value = `${r.asked_about} (${choice})`; $("send").requestSubmit(); row.remove(); };
-  for (const o of r.options || []) {
-    const b = document.createElement("button"); b.textContent = o; b.onclick = () => answer(o); row.appendChild(b);
-  }
-  const other = document.createElement("button"); other.textContent = "Other…";
-  other.onclick = () => { $("text").value = r.asked_about + " ("; $("text").focus(); row.remove(); };
-  row.appendChild(other);
-  $("log").appendChild(row); row.scrollIntoView({block: "end"});
-}
-
-// Checkpoints judged against the final screenshot, plus the screenshots themselves.
-async function showProof(r) {
-  const box = document.createElement("div"); box.className = "proof";
-  const head = document.createElement("div"); head.className = "phead";
-  head.textContent = r.seen_screen ? "Checked against a screenshot of the final screen:" : "Checked against the tool log (no screenshot available):";
-  box.appendChild(head);
-  for (const c of r.checks) {
-    const row = document.createElement("div"); row.className = "pcheck " + (c.met ? "ok" : "bad");
-    row.innerHTML = "<b></b> <span></span><small></small>";
-    row.querySelector("b").textContent = c.met ? "✓" : "✗";
-    row.querySelector("span").textContent = c.checkpoint;
-    row.querySelector("small").textContent = c.seen ? " — " + c.seen : "";
-    box.appendChild(row);
-  }
-  const list = await api(`/api/runs/${r.task_id}`).catch(() => ({images: []}));
-  if (list.images.length) {
-    const strip = document.createElement("div"); strip.className = "pimgs";
-    for (const name of list.images) {
-      const blob = await fetch(`/api/runs/${r.task_id}/${name}`, {headers: {"Authorization": "Bearer " + token}}).then(x => x.blob());
-      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.target = "_blank"; a.title = name;
-      const img = document.createElement("img"); img.src = a.href; img.alt = name; a.appendChild(img); strip.appendChild(a);
-    }
-    box.appendChild(strip);
-  }
-  $("log").appendChild(box); box.scrollIntoView({block: "end"});
-}
-
-// A document Delta made (make_document): preview the PDF and offer each file to download. Files come
-// through the authenticated /api/documents route as blobs, so the token never goes into a URL.
-async function showDocument(d) {
-  const box = document.createElement("div"); box.className = "msg doc-card";
-  const head = document.createElement("b"); head.textContent = "📄 " + (d.title || "Document"); box.appendChild(head);
-  const fetchBlob = name => fetch(`/api/documents/${encodeURIComponent(name)}`, {headers: {"Authorization": "Bearer " + token}})
-    .then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); });
-  if (d.preview) {
-    try {
-      const frame = document.createElement("iframe");
-      frame.src = URL.createObjectURL(await fetchBlob(d.preview));
-      frame.title = "Preview of " + d.preview;
-      frame.style.cssText = "width:100%;height:420px;border:1px solid #ccc;border-radius:6px;margin:6px 0;background:#fff";
-      box.appendChild(frame);
-    } catch { /* no preview: the buttons below still work */ }
-  }
-  const row = document.createElement("div");
-  for (const name of d.files || []) {
-    const b = document.createElement("button"); b.textContent = "Download " + name.split(".").pop().toUpperCase();
-    b.title = name;
-    b.onclick = async () => {
-      const a = document.createElement("a"); a.href = URL.createObjectURL(await fetchBlob(name)); a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-    };
-    row.appendChild(b);
-  }
-  box.appendChild(row);
-  $("hero")?.remove(); $("log").appendChild(box); box.scrollIntoView({block: "end"});
-}
-
-function connect() {
-  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws?token=${encodeURIComponent(token)}`);
-  ws.onmessage = ev => {
-    const m = JSON.parse(ev.data);
-    if (m.type === "approval") renderApproval(m.approval);
-    else if (m.type === "result") {
-      const r = m.result;
-      taskEnded(r.task_id);
-      const chat = r.chat_id || taskChat[r.task_id];
-      if (chat) busy.delete(chat);
-      if (!chat || chat === current) renderAnswer(r, true);
-      else unread.add(chat);
-      refreshMemory(); refreshChats();
-    } else if (m.type === "event") {
-      const d = m.data;
-      if (d.task_id && !shown(d.task_id)) return;  // belongs to a chat that is not open
-      if (m.event === "task.plan" && d.plan.needs_tools) showChecklist(d.task_id, d.plan);
-      if (m.event === "task.step") { tickStep(d.task_id, d.tool); if (!(d.args && d.args.auto)) add("step", "· " + d.tool + " " + JSON.stringify(d.args).slice(0, 140)); }
-      if (m.event === "task.verify" && d.passed) tickAll(d.task_id);
-      if (m.event === "task.recovery") add("step " + (d.ok ? "ok" : ""), "· self-heal: " + d.line);
-      if (m.event === "chat.replied") add("step ok", `💬 replied to ${d.person} on ${d.app}: “${d.text}”`);
-      if (m.event === "chat.skipped") add("step", `💬 you skipped a reply to ${d.person}: “${d.text}”`);
-      if (m.event === "chat.handoff") { add("step bad", `✋ stopped chatting with ${d.person} (${d.app}): ${d.reason}. Please reply yourself.`); if (window.Notification && Notification.permission === "granted") new Notification(`Delta: ${d.person} needs you`, {body: d.reason}); }
-      if (m.event === "chat.ended") add("step", `💬 finished chatting with ${d.person} on ${d.app}: ${d.reason}`);
-      if (m.event === "task.verify") add("step " + (d.passed ? "ok" : "bad"), (d.passed ? "✓ verified: " : "✗ not verified: ") + d.reason);
-      if (m.event === "governor.health") refreshStatus();
-      if (m.event === "skill.changed") {
-        const words = {learned: "learned a new skill", promoted: "skill is now proven", retired: "retired a failing skill",
-                       reinforced: "skill worked again", weakened: "skill did not work this time"};
-        add("step ok", `★ Delta ${words[d.change] || d.change}: ${d.skill.name}`); refreshSkills();
-      }
-      if (m.event === "memory.learned") { add("step", "★ remembered: " + d.fact); refreshMemory(); }
-      if (m.event === "task.grounding" && (d.unverified.length || d.contradicted.length))
-        add("step " + (d.contradicted.length ? "bad" : ""), "· answer check: " + (d.contradicted.length ? "not true: " + d.contradicted.join(", ") : "not confirmed: " + d.unverified.join(", ")));
-      if (m.event === "document.created") showDocument(d);
-      if (m.event === "learning.added") {
-        const i = d.item || {};
-        add("step ok", i.status === "pending" ? `★ Suggestion (needs your OK, see right): ${i.content}`
-                                               : `★ Got it, I'll remember: ${i.content}`);
-        refreshLearned();
-      }
-    }
-  };
-  ws.onclose = () => { if (!stopped) setTimeout(connect, 2000); };
-}
-
-function renderAnswer(r, live) {
-  const t = r.tokens || {}, u = r.usage || {}, k = n => n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0);
-  // Tokens per task: reported by the AI, an estimate (labelled), or "not reported" (some CLI AIs).
-  const src = u.source, tok = (u.input || 0) + (u.output || 0);
-  const amount = src === "not reported" ? "tokens not reported"
-               : src ? `${k(tok)} tokens${src === "estimate" ? " (estimate)" : src === "mixed" ? " (part estimate)" : ""}`
-               : `${k((t.input || 0) + (t.output || 0))} tokens`;
-  const calls = u.calls || t.calls;
-  const cost = calls ? ` · ${calls} AI calls · ${amount}${t.cached ? " (+" + k(t.cached) + " cached)" : ""}`
-             : r.status === "done" ? " · instant, 0 tokens" : "";
-  const took = r.wall_s ? ` · ${r.wall_s < 60 ? r.wall_s.toFixed(1) + " s" : Math.floor(r.wall_s / 60) + " min " + Math.round(r.wall_s % 60) + " s"}` : "";
-  add("msg" + (r.status === "done" || r.status === "needs_user" ? "" : " failed"), (r.status === "needs_user" ? "❓ " : "") + r.answer, `${r.status}${r.provider ? " · via " + r.provider : ""}${r.fallback ? " · " + r.fallback : ""}${r.attempts ? " · " + r.attempts + " attempt(s)" : ""}${cost}${took}`);
-  if (r.checks && r.checks.length) showProof(r);
-  if (live && r.status === "needs_user" && r.asked_about) showOptions(r);
-}
-
-const HERO = $("hero").outerHTML;
-function showHero() {
-  $("log").innerHTML = HERO;
-  const h = new Date().getHours();
-  $("greet").textContent = (h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening") + ". What should we get done?";
-  bindChips();
-}
-function setCurrent(id, title) {
-  current = id; unread.delete(id);
-  try { id ? localStorage.setItem("delta_chat", id) : localStorage.removeItem("delta_chat"); } catch {}
-  $("chattitle").textContent = id ? (title || "") : "";
-  document.title = id && title ? `${title} · Delta` : "Delta";
-  document.querySelectorAll(".citm").forEach(el => el.classList.toggle("on", el.dataset.id === id));
-}
-function newChat() {
-  setCurrent(""); showHero(); $("text").focus(); refreshChats();
-  if (innerWidth < 820) toggleChats(false);
-}
-async function openChat(id) {
-  const data = await api(`/api/chats/${id}`).catch(() => null);
-  if (!data || !data.chat) { newChat(); return; }
-  setCurrent(id, data.chat.title);
-  $("log").innerHTML = "";
-  if (!data.messages.length) showHero();
-  for (const m of data.messages) {
-    if (m.role === "user") add("msg me", m.text);
-    else renderAnswer({...m.meta, answer: m.text}, false);
-  }
-  const last = data.messages[data.messages.length - 1];
-  if (last && last.role === "delta" && last.meta.status === "needs_user" && last.meta.asked_about) showOptions({...last.meta, answer: last.text});
-  for (const tid of data.running || []) { taskChat[tid] = id; add("step", "· still working on this…"); showStop(tid); }
-  refreshChats();
-  if (innerWidth < 820) toggleChats(false);
-}
-
-const DAY = 86400e3;
-function groupOf(c) {
-  if (c.pinned) return "Pinned";
-  const start = new Date(); start.setHours(0, 0, 0, 0);
-  const t = c.updated * 1000;
-  return t >= start ? "Today" : t >= start - DAY ? "Yesterday" : t >= start - 7 * DAY ? "Previous 7 days"
-       : t >= start - 30 * DAY ? "Previous 30 days" : "Older";
-}
-const SVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
-const PIN = SVG('<path d="M12 17v5M9 3h6l-1 6 4 4H6l4-4z"/>'), EDIT = SVG('<path d="M12 20h9M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4z"/>'),
-      BIN = SVG('<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>');
-let chatTimer = null;
-function refreshChats() { clearTimeout(chatTimer); chatTimer = setTimeout(loadChats, 120); }
-async function loadChats() {
-  const q = $("chatsearch").value.trim();
-  const list = await api("/api/chats" + (q ? "?q=" + encodeURIComponent(q) : "")).catch(() => null);
-  if (!list) return;
-  const box = $("chatlist"); box.innerHTML = "";
-  if (!list.length) { box.innerHTML = `<div class="none">${q ? "No chats match." : "Your chats will show up here."}</div>`; return; }
-  let group = "";
-  for (const c of list) {
-    if (c.running) busy.add(c.id); else busy.delete(c.id);
-    const g = groupOf(c);
-    if (g !== group) { group = g; const h = document.createElement("div"); h.className = "grp"; h.textContent = g; box.appendChild(h); }
-    const el = document.createElement("div");
-    el.className = "citm" + (c.id === current ? " on" : "") + (busy.has(c.id) ? " running" : unread.has(c.id) ? " unread" : "");
-    el.dataset.id = c.id; el.title = c.preview || c.title;
-    el.innerHTML = `<span class="st"></span><span class="t"></span><span class="acts"><button title="${c.pinned ? "Unpin" : "Pin"}">${PIN}</button><button title="Rename">${EDIT}</button><button class="del" title="Delete">${BIN}</button></span>`;
-    el.querySelector(".t").textContent = c.title;
-    const [pin, ren, del] = el.querySelectorAll(".acts button");
-    el.onclick = () => openChat(c.id);
-    pin.onclick = e => { e.stopPropagation(); api(`/api/chats/${c.id}`, {method: "PATCH", body: JSON.stringify({pinned: !c.pinned})}).then(refreshChats); };
-    ren.onclick = e => {
-      e.stopPropagation();
-      const inp = document.createElement("input"); inp.value = c.title; el.querySelector(".t").replaceWith(inp); inp.focus(); inp.select();
-      const save = () => api(`/api/chats/${c.id}`, {method: "PATCH", body: JSON.stringify({title: inp.value})})
-        .then(ch => { if (c.id === current) setCurrent(c.id, ch.title); refreshChats(); });
-      inp.onkeydown = ev => { if (ev.key === "Enter") inp.blur(); if (ev.key === "Escape") { inp.onblur = null; refreshChats(); } };
-      inp.onblur = save; inp.onclick = ev => ev.stopPropagation();
-    };
-    del.onclick = async e => {
-      e.stopPropagation();
-      if (!confirm(`Delete "${c.title}"? ${c.running ? "Its running task is stopped too. " : ""}This can't be undone.`)) return;
-      await api(`/api/chats/${c.id}`, {method: "DELETE"}).catch(() => {});
-      if (c.id === current) newChat(); else refreshChats();
-    };
-    if (c.id === current) $("chattitle").textContent = c.title;
-    box.appendChild(el);
-  }
-}
-function toggleChats(open) {
-  const closed = open === undefined ? !document.body.classList.contains("chats-closed") : !open;
-  document.body.classList.toggle("chats-closed", closed); $("chatsbtn").classList.toggle("on", !closed);
-  try { localStorage.setItem("delta_chats", closed ? "closed" : "open"); } catch {}
-}
-$("chatsbtn").onclick = () => toggleChats();
-$("newchat").onclick = newChat;
-$("chatsearch").oninput = refreshChats;
-document.addEventListener("keydown", e => {
-  if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); newChat(); }
-  else if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "b") { e.preventDefault(); toggleChats(); }
-});
-try { if (localStorage.getItem("delta_chats") === "closed" || innerWidth < 820) toggleChats(false); } catch {}
-
-$("send").onsubmit = async e => {
-  e.preventDefault(); const text = $("text").value.trim(); if (!text) return;
-  $("text").value = ""; $("text").oninput(); add("msg me", text);
-  const sentFrom = current;
-  const started = await api("/api/tasks", {method: "POST", body: JSON.stringify({text, chat_id: current})}).catch(err => { add("msg failed", "Could not reach Delta: " + err.message); return null; });
-  if (!started || !started.task_id) return;
-  taskChat[started.task_id] = started.chat_id; busy.add(started.chat_id);
-  if (sentFrom === current && started.chat_id !== current) setCurrent(started.chat_id);  // a new chat was just created
-  if (started.chat_id === current) showStop(started.task_id);
-  refreshChats();
-};
-$("text").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("send").requestSubmit(); } };
-$("text").oninput = () => { const t = $("text"); t.style.height = "40px"; t.style.height = Math.min(t.scrollHeight, 180) + "px"; };
-function bindChips() {
-  document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
-    const q = c.dataset.q; $("text").value = q; $("text").focus(); $("text").oninput();
-    if (!q.endsWith(" ")) $("send").requestSubmit();
-  });
-}
-bindChips();
-(() => { const h = new Date().getHours();
-  $("greet").textContent = (h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening") + ". What should we get done?"; })();
-$("addmem").onsubmit = e => { e.preventDefault(); const t = $("memtext").value.trim(); if (!t) return; $("memtext").value = "";
-  api("/api/memory", {method: "POST", body: JSON.stringify({content: t})}).then(refreshMemory); };
-let stopped = false, ws = null;
-$("shutdown").onclick = async () => {
-  if (!confirm("Shut Delta down completely? Models are unloaded and nothing keeps running.")) return;
-  stopped = true; setHealth("OFFLINE", "stopping");
-  await api("/api/shutdown", {method: "POST"}).catch(() => {});
-  if (ws) ws.close();
-  document.body.innerHTML = '<div style="height:100vh;display:grid;place-items:center;font:15px system-ui;color:#6b6358;background:#faf9f5;text-align:center"><div><div style="font-size:44px;color:#c96442">&Delta;</div><h2 style="color:#1f1e1d;margin:8px 0">Delta is off</h2><p>Everything is stopped and memory is freed.<br>Open Delta from your Desktop or Start menu to start again.</p></div></div>';
-  setTimeout(() => window.close(), 1500);
-};
-// ---- first-run setup wizard ---------------------------------------------------------------
-const STEPS = ["welcome", "models", "trust", "telegram", "name", "done"];
-let step = 0, setupState = null;
-function showStep(i) {
-  step = Math.max(0, Math.min(STEPS.length - 1, i));
-  document.querySelectorAll("#setup section").forEach(s => s.classList.toggle("on", s.dataset.step === STEPS[step]));
-  if (STEPS[step] === "telegram") tgSteps();
-  $("dots").innerHTML = STEPS.map((_, j) => `<span class="${j <= step ? "on" : ""}"></span>`).join("");
-  $("wback").style.visibility = step === 0 || step === STEPS.length - 1 ? "hidden" : "visible";
-  $("wnext").textContent = step === STEPS.length - 2 ? "Finish" : step === STEPS.length - 1 ? "Start using Delta" : "Next";
-  $("werr").textContent = "";
-}
-function renderSetup(s) {
-  setupState = s;
-  const h = s.hardware;
-  $("hw").textContent = `This PC: ${h.ram_gb} GB RAM (${h.ram_free_gb} GB free)` +
-    (h.gpu ? `, ${h.gpu} with ${h.vram_gb} GB` : ", no NVIDIA GPU found") + `\n\n${h.recommendation}`;
-  $("localbox").textContent = h.ollama_running ? "✓ A local model server (Ollama or LM Studio) is running on this PC: private, free, offline."
-    : h.can_run_local ? "Optional: install Ollama (ollama.com) later to also run a model privately on this PC."
-    : "Local models are not recommended on this PC; a cloud key is all you need.";
-  for (const row of document.querySelectorAll(".keyrow")) {
-    const k = s.keys[row.dataset.key];
-    if (k && k.set && !row.querySelector(".msg").textContent) { row.querySelector(".msg").textContent = "✓ Already saved"; row.querySelector(".msg").className = "msg ok"; }
-  }
-  const a = document.querySelector(`input[name=autonomy][value="${s.autonomy}"]`); if (a) a.checked = true;
-  $("ownername").value = $("ownername").value || s.owner_name || "";
-  $("tgid").value = $("tgid").value || (s.telegram.user_ids || []).join(", ");
-  $("tgon").checked = $("tgon").checked || s.telegram.enabled;
-}
-async function openSetup() {
-  renderApps($("w_apps"));
-  $("setup").hidden = false; showStep(0);
-  renderSetup(await api("/api/setup"));
-}
-for (const row of document.querySelectorAll(".keyrow")) {
-  const btn = row.querySelector("button"), input = row.querySelector("input"), msg = row.querySelector(".msg");
-  btn.onclick = async () => {
-    if (!input.value.trim()) return;
-    btn.disabled = true; msg.className = "msg"; msg.textContent = "Checking with the service…";
-    const r = await api("/api/setup/key", {method: "POST", body: JSON.stringify({name: row.dataset.key, value: input.value})})
-      .catch(() => ({ok: false, message: "Delta is not reachable."}));
-    btn.disabled = false; msg.className = "msg " + (r.ok ? "ok" : "bad"); msg.textContent = (r.ok ? "✓ " : "✗ ") + r.message;
-    if (r.ok) { input.value = ""; if (row.dataset.key === "telegram_bot_token") { $("tgon").checked = true; tgSteps(); } refreshStatus(); }
-  };
-  // A pasted Telegram token is saved at once: one less button for people new to this.
-  if (row.dataset.key === "telegram_bot_token")
-    input.addEventListener("input", () => { if (/^\d{6,}:[\w-]{30,}$/.test(input.value.trim())) btn.click(); });
-}
-// Tick off the Telegram steps already done, so people see where they are.
-async function tgSteps() {
-  const s = await api("/api/telegram").catch(() => null);
-  if (!s) return;
-  for (const [id, done] of [["tgs1", s.has_token], ["tgs2", s.has_token], ["tgs3", (s.users || []).length > 0]])
-    $(id).classList.toggle("done", !!done);
-  if ((s.users || []).length) { $("tgcode").className = "msg ok";
-    $("tgcode").textContent = `✓ Connected${s.bot ? " to @" + s.bot : ""}. Message your bot from your phone; /help lists what it can do.`; }
-}
-// Telegram pairing: Delta shows a one-time code; sending it to the bot adds that phone. No user ids to look up.
-$("tgpair").onclick = async () => {
-  const out = $("tgcode"), btn = $("tgpair");
-  btn.disabled = true; out.className = "msg"; out.textContent = "Connecting to Telegram…";
-  const before = ((await api("/api/telegram").catch(() => ({}))).users || []).length;
-  const r = await api("/api/telegram/pair", {method: "POST"}).catch(e => ({detail: e.message}));
-  btn.disabled = false;
-  if (!r.code) { out.className = "msg bad"; out.textContent = "✗ " + (r.detail || "Could not connect."); return; }
-  out.innerHTML = "";
-  const big = document.createElement("div"); big.className = "mono"; big.style.fontSize = "28px";
-  big.style.letterSpacing = "6px"; big.textContent = r.code;
-  const how = document.createElement("div");
-  how.textContent = `On your phone, open @${r.bot} in Telegram and send this code (valid 10 minutes). `;
-  if (r.link) { const a = document.createElement("a"); a.href = r.link; a.target = "_blank";
-    a.textContent = "Or open it with the code filled in"; how.appendChild(a); }
-  out.append(big, how);
-  for (let i = 0; i < 300; i++) {  // up to 10 minutes
-    await new Promise(res => setTimeout(res, 2000));
-    const s = await api("/api/telegram").catch(() => null);
-    if (s && (s.users || []).length > before) {
-      out.className = "msg ok"; out.textContent = `✓ Connected. Message @${s.bot} from your phone; approvals arrive there too.`;
-      $("tgid").value = s.users.join(", "); $("tgon").checked = true; tgSteps(); return;
-    }
-  }
-  out.className = "msg bad"; out.textContent = "The code expired. Press Connect my phone again.";
-};
-$("wback").onclick = () => showStep(step - 1);
-$("wnext").onclick = async () => {
-  const name = STEPS[step];
-  if (name === "models") {
-    const s = await api("/api/setup");  renderSetup(s);
-    if (!s.models_ready.length) { $("werr").textContent = "Add at least one key (or start Ollama) so Delta has a brain."; return; }
-  }
-  if (name === "name") {
-    const ids = $("tgid").value.split(/[ ,]+/).filter(Boolean);
-    if ($("tgon").checked && !ids.length) { showStep(STEPS.indexOf("telegram")); $("werr").textContent = "Add your Telegram user id, or turn Telegram off."; return; }
-    const body = {owner_name: $("ownername").value, autonomy: document.querySelector("input[name=autonomy]:checked").value,
-                  telegram_enabled: $("tgon").checked, telegram_user_ids: ids};
-    const r = await api("/api/setup/complete", {method: "POST", body: JSON.stringify(body)}).catch(e => ({error: e.message}));
-    if (!r.ok) { $("werr").textContent = "Could not save: " + (r.detail || r.error || "unknown error"); return; }
-    const level = {"ask-everything": "Careful", "ask-risky": "Balanced", "trusted": "Trusted", "autopilot": "Autopilot"}[body.autonomy];
-    $("summary").textContent = `AI models ready: ${r.models_ready.join(", ") || "none"}\nPermission level: ${level}\n` +
-      `Telegram: ${body.telegram_enabled ? "on" : "off"}` + (r.restart_needed ? "\n\n↻ Restart Delta (Shutdown, then open it again) to connect Telegram." : "");
-  }
-  if (name === "done") { $("setup").hidden = true; refreshStatus(); return; }
-  showStep(step + 1);
-};
-$("opensetup").onclick = openSetup;
-
-// ---- settings page ------------------------------------------------------------------------
-const lines = id => $(id).value.split("\n").map(s => s.trim()).filter(Boolean);
-function sosRow(c) {
-  const d = document.createElement("div"); d.className = "kin sosrow";
-  d.innerHTML = '<input placeholder="Name (e.g. Amma)" maxlength="60"><input placeholder="Name in WhatsApp or phone number" maxlength="60">' +
-    '<input placeholder="Relation" maxlength="40"><button title="Remove">✕</button>';
-  const [n, w, r] = d.querySelectorAll("input");
-  n.value = c.name || ""; w.value = c.whatsapp || ""; r.value = c.relation || "";
-  d.querySelector("button").onclick = () => d.remove();
-  $("sos_list").appendChild(d);
-}
-async function sosCard() {
-  const r = await api("/api/emergency").catch(() => ({contacts: []}));
-  $("sos_list").innerHTML = "";
-  r.contacts.forEach(sosRow);
-  if (!r.contacts.length) sosRow({});
-}
-$("sos_add").onclick = () => { if ($("sos_list").children.length < 5) sosRow({}); };
-$("sos_save").onclick = async () => {
-  const contacts = [...document.querySelectorAll(".sosrow")].map(d => {
-    const [n, w, r] = d.querySelectorAll("input"); return {name: n.value.trim(), whatsapp: w.value.trim(), relation: r.value.trim()};
-  }).filter(c => c.name && c.whatsapp);
-  const r = await api("/api/emergency", {method: "PUT", body: JSON.stringify({contacts})}).catch(e => ({detail: e.message}));
-  $("sos_msg").className = "msg " + (r.ok ? "ok" : "bad");
-  $("sos_msg").textContent = r.ok ? "✓ " + r.message : "✗ Could not save: each contact needs a name and a WhatsApp name or number.";
-};
-async function guardCard() {
-  const s = await api("/api/security").catch(() => null); if (!s) return;
-  $("g_state").className = "state " + (s.locked ? "bad" : s.has_pin ? "ok-text" : "bad");
-  $("g_state").textContent = s.locked ? `🔒 locked: ${s.reason}` : s.has_pin ? "✓ PIN set, protecting phone control" : "no PIN: sensitive phone actions are blocked";
-  $("g_save").textContent = s.has_pin ? "Change PIN" : "Set PIN";
-  $("g_unlock").hidden = !s.locked; $("g_lock").hidden = s.locked;
-}
-$("g_save").onclick = async () => {
-  const r = await api("/api/security/pin", {method: "PUT", body: JSON.stringify({pin: $("g_pin").value.trim()})}).catch(e => ({detail: e.message}));
-  $("g_msg").className = "msg " + (r.ok ? "ok" : "bad");
-  $("g_msg").textContent = r.ok ? "✓ " + r.message : "✗ " + (typeof r.detail === "string" ? r.detail : "Use 4 to 8 digits.");
-  if (r.ok) $("g_pin").value = ""; guardCard();
-};
-$("g_unlock").onclick = async () => { const r = await api("/api/security/unlock", {method: "POST"}); $("g_msg").className = "msg ok"; $("g_msg").textContent = "✓ " + r.message; guardCard(); };
-$("g_lock").onclick = async () => { const r = await api("/api/security/lock", {method: "POST"}); $("g_msg").className = "msg ok"; $("g_msg").textContent = "✓ " + r.message; guardCard(); };
-function renderBrowsers(b) {
-  const box = $("s_browsers"); box.innerHTML = "";
-  for (const o of b.options || []) {
-    const l = document.createElement("label"); l.className = "choice";
-    l.innerHTML = '<input type="radio" name="s_browser"><b></b><small></small>';
-    const i = l.querySelector("input"); i.value = o.id; i.checked = o.current; i.disabled = !o.available;
-    l.querySelector("b").textContent = o.label;
-    l.querySelector("small").textContent = o.available ? o.help + (o.uses ? " " + o.uses : "") : "Not available: " + o.reason;
-    if (!o.available) l.style.opacity = ".55";
-    i.onchange = () => { $("s_engine_row").hidden = i.value !== "private"; };
-    box.appendChild(l);
-  }
-  const eng = $("s_engine"); eng.innerHTML = "";
-  for (const e of b.engines || []) {
-    const opt = document.createElement("option"); opt.value = e.id; opt.disabled = !e.available;
-    opt.textContent = e.label + (e.available ? "" : " (not installed)"); opt.selected = e.current; eng.appendChild(opt);
-  }
-  $("s_engine_row").hidden = b.choice !== "private";
-  $("s_signin").disabled = !b.signin_available;
-  $("s_bmsg").className = "msg"; $("s_bmsg").textContent = b.running_note || (b.signin_available ? "" : "Delta's private browser is not available on this PC.");
-}
-$("s_signin").onclick = async () => {
-  $("s_bmsg").className = "msg"; $("s_bmsg").textContent = "Opening Delta's private browser on this PC…";
-  const r = await api("/api/browser/signin", {method: "POST", body: JSON.stringify({url: $("s_signin_url").value.trim()})}).catch(e => ({message: e.message}));
-  $("s_bmsg").className = "msg " + (r.ok ? "ok" : "bad"); $("s_bmsg").textContent = (r.ok ? "✓ " : "✗ ") + (r.message || "");
-};
-async function openSettings() {
-  guardCard();
-  sosCard();
-  const s = await api("/api/settings"), b = s.boundaries;
-  renderBrowsers(s.browser); $("s_orange").checked = s.browser.orange_cursor;
-  document.querySelector(`input[name=s_autonomy][value="${b.autonomy}"]`).checked = true;
-  $("s_quiet").checked = b.quiet_hours.enabled; $("s_qstart").value = b.quiet_hours.start; $("s_qend").value = b.quiet_hours.end;
-  $("s_allowed").value = b.allowed_paths.join("\n"); $("s_denied").value = b.denied_paths.join("\n");
-  $("s_apps").value = b.denied_apps.join("\n"); $("s_domains").value = b.denied_domains.join("\n");
-  $("s_onlydomains").value = b.allowed_domains.join("\n");
-  $("s_savedir").value = s.save_dir; $("s_savedir").title = s.save_dir_resolved;
-  $("s_protected").textContent = "Always protected, whatever you set: Windows system files, saved passwords and keys, " +
-    "and Delta's own data folder (so Delta can never change its own rules).\nNew files currently go to: " + s.save_dir_resolved;
-  $("s_mem").checked = s.memory.enabled; $("s_extract").checked = s.memory.auto_extract; $("s_skills").checked = s.memory.learn_skills;
-  $("s_addons").innerHTML = s.addons.available.length ? "" : '<div class="empty">No add-ons installed.</div>';
-  for (const a of s.addons.available) {
-    const l = document.createElement("label"); l.className = "check";
-    l.innerHTML = `<input type="checkbox" data-addon><span></span>`;
-    l.querySelector("input").dataset.addon = a; l.querySelector("input").checked = s.addons.enabled.includes(a);
-    l.querySelector("span").textContent = a === "mcp" ? "mcp (connect other apps via Model Context Protocol)" : a;
-    $("s_addons").appendChild(l);
-  }
-  $("s_keys").innerHTML = "";
-  for (const [name, k] of Object.entries(s.keys)) {
-    const row = document.createElement("div"); row.className = "krow";
-    row.innerHTML = "<span></span><span></span>";
-    row.firstChild.textContent = k.label;
-    if (k.set) {
-      row.lastChild.innerHTML = "<span class='ok-text'>✓ saved</span> <button>Remove</button>";
-      row.querySelector("button").onclick = async () => {
-        if (!confirm(`Remove the ${k.label} key from this PC?`)) return;
-        await api(`/api/settings/key/${name}`, {method: "DELETE"}); openSettings(); refreshStatus();
-      };
-    } else { row.lastChild.innerHTML = "<button>Add in Setup</button>"; row.querySelector("button").onclick = () => { $("settings").hidden = true; openSetup(); }; }
-    $("s_keys").appendChild(row);
-  }
-  $("s_err").textContent = ""; $("settings").hidden = false; renderApps();
-}
-$("opensettings").onclick = openSettings;
-
-// ---- connected apps (Claude Code, Codex, LM Studio) --------------------------------------
-async function renderMain() {
-  const p = await api("/api/apps/preferred").catch(() => null); if (!p) return;
-  const sel = $("s_main"); sel.innerHTML = "";
-  const opt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); };
-  opt("auto", "Automatic (local first, then your plans, then free cloud)");
-  for (const o of p.options) opt(o.name, o.label + (o.ready ? "" : " (not ready)"));
-  sel.value = p.preferred;
-}
-$("s_main").onchange = async () => {
-  await api("/api/apps/preferred", {method: "PUT", body: JSON.stringify({name: $("s_main").value})});
-  add("step ok", "✓ Main AI: " + $("s_main").selectedOptions[0].textContent); refreshStatus();
-};
-const JOBS = [["plan", "Planning", "once per task"], ["chat", "Doing steps", "every step: most tokens"],
-              ["verify", "Checking", "once at the end"]];
-const PRESETS = {claude_code: {
-  "Save tokens": {models: {plan: "sonnet", chat: "haiku", verify: "haiku"}, efforts: {plan: "low", chat: "low", verify: "low"}},
-  "Balanced": {models: {plan: "sonnet", chat: "sonnet", verify: "haiku"}, efforts: {plan: "low", chat: "low", verify: "low"}},
-  "Best quality": {models: {plan: "opus", chat: "sonnet", verify: "haiku"}, efforts: {plan: "high", chat: "medium", verify: "low"}},
-}};
-function modelPicker(a, msg, rerender) {
-  const wrap = document.createElement("div");
-  const grid = document.createElement("div"); grid.className = "jobs";
-  const pick = {};
-  for (const [job, label, hint] of JOBS) {
-    const l = document.createElement("span"); l.innerHTML = "<b></b><br><small></small>";
-    l.querySelector("b").textContent = label; l.querySelector("small").textContent = hint;
-    const m = document.createElement("select"), e = document.createElement("select");
-    const ids = a.options.map(o => o.id);
-    if (!a.options.length || !ids.includes(a.models[job])) {
-      const o = document.createElement("option"); o.value = a.models[job]; o.textContent = a.models[job] || "app default"; m.appendChild(o);
-    }
-    for (const o of a.options) { const x = document.createElement("option"); x.value = o.id; x.textContent = o.label; m.appendChild(x); }
-    m.value = a.models[job];
-    const fillEfforts = () => {
-      const levels = (a.options.find(o => o.id === m.value) || {efforts: ["low", "medium", "high"]}).efforts;
-      const keep = e.value || a.efforts[job]; e.innerHTML = "";
-      for (const v of ["", ...levels]) { const x = document.createElement("option"); x.value = v; x.textContent = v ? "effort: " + v : "effort: default"; e.appendChild(x); }
-      e.value = levels.includes(keep) ? keep : "";
-    };
-    m.onchange = fillEfforts; e.value = a.efforts[job]; fillEfforts();
-    pick[job] = [m, e]; grid.append(l, m, e);
-  }
-  const save = async body => {
-    const r = await api(`/api/apps/${a.name}/models`, {method: "PUT", body: JSON.stringify(body)});
-    msg.textContent = r.ok ? "✓ Saved. Used from the next message." : (r.detail || "Could not save."); if (r.ok) rerender();
-  };
-  const row = document.createElement("div"); row.className = "row";
-  for (const [name, body] of Object.entries(PRESETS[a.name] || {})) {
-    const b = document.createElement("button"); b.textContent = name; b.onclick = () => save(body); row.appendChild(b);
-  }
-  const s = document.createElement("button"); s.className = "primary"; s.textContent = "Save models";
-  s.onclick = () => save({models: Object.fromEntries(JOBS.map(([j]) => [j, pick[j][0].value])),
-                          efforts: Object.fromEntries(JOBS.map(([j]) => [j, pick[j][1].value]))});
-  row.appendChild(s); wrap.append(grid, row); return wrap;
-}
-// Google: official Calendar API (exact, instant, no tokens) instead of driving its web page.
-async function googleCard(box) {
-  const g = await api("/api/google").catch(() => null); if (!g) return;
-  const el = document.createElement("div"); el.className = "app";
-  el.innerHTML = '<div class="top"><b>Google Calendar</b><span class="state"></span></div><div class="row"></div><div class="msg"></div>';
-  const state = el.querySelector(".state"), row = el.querySelector(".row"), msg = el.querySelector(".msg");
-  const act = async (path, opts) => { msg.textContent = "Working… (finish sign-in in the browser tab)"; const r = await api(path, opts); msg.textContent = r.message || (r.ok ? "Saved." : (r.detail ? "Please check the client ID." : "")); if (r.ok) renderApps(box); };
-  if (g.connected) {
-    state.className = "state ok-text"; state.textContent = "✓ connected: meetings use the official API";
-    const b = document.createElement("button"); b.textContent = "Disconnect"; b.onclick = () => act("/api/google/disconnect", {method: "POST"}); row.appendChild(b);
-  } else if (g.client) {
-    state.className = "state bad"; state.textContent = "not connected";
-    const b = document.createElement("button"); b.className = "primary"; b.textContent = "Connect Google"; b.onclick = () => act("/api/google/connect", {method: "POST"}); row.appendChild(b);
-  } else {
-    state.className = "state bad"; state.textContent = "needs a Google client ID (one-time)";
-    row.innerHTML = '<input placeholder="xxxx.apps.googleusercontent.com" style="flex:1;min-width:220px"><input type="password" placeholder="client secret" style="width:150px"><button class="primary">Save</button>';
-    const [id, secret] = row.querySelectorAll("input");
-    row.querySelector("button").onclick = () => act("/api/google/client", {method: "PUT", body: JSON.stringify({client_id: id.value.trim(), client_secret: secret.value.trim()})});
-  }
-  box.appendChild(el);
-}
-async function renderApps(box = $("s_appslist")) {
-  if (box.id === "s_appslist") renderMain();
-  const list = await api("/api/apps").catch(() => []); box.innerHTML = list.length ? "" : '<div class="empty">No connectable apps configured.</div>';
-  for (const a of list) {
-    const el = document.createElement("div"); el.className = "app";
-    el.innerHTML = '<div class="top"><b></b><span class="state"></span></div><div class="row"></div><div class="msg"></div>';
-    el.querySelector("b").textContent = a.label;
-    const state = el.querySelector(".state"), row = el.querySelector(".row"), msg = el.querySelector(".msg");
-    const button = (label, fn, primary) => {
-      const b = document.createElement("button"); b.textContent = label; if (primary) b.className = "primary";
-      b.onclick = async () => { b.disabled = true; msg.textContent = "Working…";
-        try { const r = await fn(); msg.textContent = r.message || ""; if (r.ok && r.refresh) renderApps(box); }
-        catch (e) { msg.textContent = e.message; } b.disabled = false; };
-      row.appendChild(b);
-    };
-    const post = path => api(path, {method: "POST"});
-    if (a.kind === "cli") {
-      if (!a.installed) { state.className = "state bad"; state.textContent = "not installed"; }
-      else if (a.signed_in) { state.className = "state ok-text"; state.textContent = "✓ signed in, Delta can use it"; }
-      else { state.className = "state bad"; state.textContent = "installed, not signed in"; }
-      if (a.installed) {
-        if (!a.signed_in) button("Sign in", () => post(`/api/apps/${a.name}/login`), true);
-        button("Check", async () => ({ok: true, refresh: true, message: ""}));
-        if (a.signed_in) button("Send test message", () => post(`/api/apps/${a.name}/test`));
-        if (a.signed_in) el.insertBefore(modelPicker(a, msg, () => renderApps(box)), msg);
-      } else msg.textContent = a.name === "claude_code" ? "Install Claude Code, then come back here." : "Install the Codex app or CLI, then come back here.";
-    } else {
-      state.className = a.running ? "state ok-text" : "state bad";
-      state.textContent = a.running ? `✓ server running (${a.url})` : (a.installed ? "installed, server off" : "not installed");
-      if (a.installed && !a.running) button("Start server", async () => ({...await post(`/api/apps/${a.name}/start`), refresh: true}), true);
-      if (a.running) button("Send test message", () => post(`/api/apps/${a.name}/test`));
-      if (a.running) button("⏻ Stop server", async () => ({...await post(`/api/apps/${a.name}/stop`), refresh: true}));
-      button("Check", async () => ({ok: true, refresh: true, message: ""}));
-    }
-    box.appendChild(el);
-  }
-  await googleCard(box);
-}
-$("openapps").onclick = async () => { $("setup").hidden = true; await openSettings(); $("s_apps_h").scrollIntoView(); };
-$("s_close").onclick = () => { $("settings").hidden = true; };
-$("s_save").onclick = async () => {
-  const body = {
-    browser: (() => { const picked = document.querySelector("input[name=s_browser]:checked"), b = {orange_cursor: $("s_orange").checked};
-      if (picked) { b.choice = picked.value; if (picked.value === "private" && $("s_engine").value) b.engine = $("s_engine").value; }
-      return b; })(),
-    boundaries: {autonomy: document.querySelector("input[name=s_autonomy]:checked").value,
-      allowed_paths: lines("s_allowed"), denied_paths: lines("s_denied"), denied_apps: lines("s_apps"),
-      denied_domains: lines("s_domains"), allowed_domains: lines("s_onlydomains"),
-      quiet_hours: {enabled: $("s_quiet").checked, start: $("s_qstart").value || "23:30", end: $("s_qend").value || "07:00"}},
-    memory: {enabled: $("s_mem").checked, auto_extract: $("s_extract").checked, learn_skills: $("s_skills").checked},
-    save_dir: $("s_savedir").value || "auto",
-    addons_enabled: [...document.querySelectorAll("[data-addon]")].filter(i => i.checked).map(i => i.dataset.addon),
-  };
-  const r = await api("/api/settings", {method: "PUT", body: JSON.stringify(body)}).catch(e => ({detail: e.message}));
-  if (!r.ok) { $("s_err").textContent = typeof r.detail === "string" ? r.detail : "Please check the values."; return; }
-  $("settings").hidden = true;
-  add("step ok", "✓ Settings saved and applied." + (r.browser_note ? " " + r.browser_note : "") + (r.restart_needed ? " Restart Delta for the add-on change to take effect." : ""));
-};
-api("/api/setup").then(s => { if (!s.completed) openSetup(); }).catch(() => {});
-
-if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-checkInterrupted(); refreshStatus(); refreshMemory(); refreshSkills(); refreshLearned(); refreshCandidates(); connect(); (current ? openChat(current) : refreshChats()); api("/api/approvals").then(a => a.forEach(renderApproval)).catch(() => {});
-setInterval(() => { if (!document.hidden) refreshStatus(); }, 5000);
-
-</script>
-<script src="/schedules.js"></script>
+<script src="/ui/core.js"></script>
+<script src="/ui/chat.js"></script>
 <script src="/tasks.js"></script>
+<script src="/schedules.js"></script>
+<script src="/apps.js"></script>
+<script src="/ui/documents.js"></script>
+<script src="/ui/memory.js"></script>
+<script src="/ui/settings.js"></script>
+<script src="/ui/setup.js"></script>
+<script src="/ui/main.js"></script>
 </body>
 </html>

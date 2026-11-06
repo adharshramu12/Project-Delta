@@ -30,9 +30,13 @@ def register(app: FastAPI, c: Any, auth: Any) -> None:
 
     @app.get("/api/documents/{name}", dependencies=[Depends(auth)])
     async def document_file(name: str, download: bool = False) -> FileResponse:
-        listed = {d["name"] for d in list_documents(folder(), limit=500)}
-        if name not in listed or "/" in name or "\\" in name:
-            raise HTTPException(404, "no such document")  # only listed files: no path tricks
+        # Only a file in the folder's own listing is served, by the name the listing gives (never the name from the
+        # request), so no path in a request can reach anything else.
+        listed = {str(d["name"]): str(d["name"]) for d in list_documents(folder(), limit=500)}
+        found = listed.get(name)
+        if found is None or "/" in found or "\\" in found:
+            raise HTTPException(404, "no such document")
+        name = found
         kind = name.rsplit(".", 1)[-1].lower()
         headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
         if kind == "html":  # an HTML fallback is shown inert: no scripts, nothing fetched

@@ -69,6 +69,8 @@ class CheckContext:
     learning: Any = None      # LearningStore (tasks with `learning:`)
     skills: Any = None        # SkillStore
     gate: Any = None          # PromotionGate
+    connector: Any = None     # ConnectorFixture (tasks with `connector:`)
+    registry: Any = None      # the task's ToolRegistry
 
 
 Check = Callable[[CheckContext, Any], tuple[bool, str]]
@@ -446,6 +448,88 @@ def _forget(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
     in_file = str(arg).encode() in raw
     return n == len(found) and not left and not in_file, (f"forgot {n}, {len(left)} left, "
                                                           f"text {'still' if in_file else 'not'} in the file")
+
+
+# --- connected apps (tasks with `connector:`) -----------------------------------------------------------------
+
+def _fx(ctx: CheckContext) -> Any:
+    if ctx.connector is None:
+        raise ValueError("this task has no connector")
+    return ctx.connector
+
+
+@check("app_calls")
+def _app_calls(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    """{tool, count}: the fake app received exactly this many calls of that tool."""
+    n = _fx(ctx).count(str(arg["tool"]))
+    return n == int(arg["count"]), f"{arg['tool']} called {n} time(s), want {arg['count']}"
+
+
+@check("app_state")
+def _app_state(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    """connected | needs reconnect | not connected: the Apps page state of the fake app."""
+    rows = [r for r in _fx(ctx).manager.status() if r["id"] == "fake"]
+    state = rows[0]["state"] if rows else "not connected"
+    return state == str(arg), f"state {state!r}"
+
+
+@check("app_secret")
+def _app_secret(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    """true / false: a sealed sign-in for the fake app is on disk (and never in plain text)."""
+    fx = _fx(ctx)
+    present = fx.manager.secrets.exists("fake")
+    ok = present == bool(arg)
+    if present and fx.app is not None:
+        raw = next(iter(fx.manager.secrets.folder.glob("fake.bin"))).read_text(encoding="ascii")
+        leaked = [t for t in [*fx.app.access, *fx.app.refresh_tokens] if t in raw]
+        if leaked:
+            return False, "a token is in the secrets file in plain text"
+    return ok, f"sealed sign-in present: {present}"
+
+
+@check("app_grants")
+def _app_grants(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    """N: grants still active at the fake app's OAuth server (0 after a disconnect revoked it)."""
+    n = _fx(ctx).app.active_grants()
+    return n == int(arg), f"{n} active grant(s)"
+
+
+@check("app_refreshes")
+def _app_refreshes(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    """{min}: the access token was refreshed at least this often."""
+    n = _fx(ctx).app.refreshes
+    return n >= int(arg.get("min", 1)), f"{n} refresh(es)"
+
+
+@check("app_asked")
+def _app_asked(ctx: CheckContext, arg: dict[str, Any]) -> tuple[bool, str]:
+    """{count, tool?, reason?}: approvals the user was asked for (optionally only one tool's, with a reason text)."""
+    asked = [a for a in _fx(ctx).asked if not arg.get("tool") or a.tool == arg["tool"]]
+    if arg.get("reason"):
+        asked = [a for a in asked if str(arg["reason"]) in a.reason]
+    return len(asked) == int(arg["count"]), f"{len(asked)} approval(s) asked: {[a.tool for a in asked]}"
+
+
+@check("app_connect_says")
+def _app_connect_says(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    """text: some connect / disconnect result message (or confirmation text) contains it."""
+    texts = [str(r.get("message", "")) + " " + " ".join(map(str, r.get("command") or [])) for r in _fx(ctx).results]
+    return any(str(arg) in t for t in texts), f"results: {[t[:120] for t in texts]}"
+
+
+@check("app_note_exists")
+def _app_note_exists(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    notes = _fx(ctx).app.logic.notes
+    return str(arg) in notes, f"notes: {sorted(notes)}"
+
+
+@check("app_tools_lazy")
+def _app_tools_lazy(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
+    """true: the model's tool list carries find_app_tool and use_app_tool and none of the app's own tools."""
+    names = [s["function"]["name"] for s in ctx.registry.specs()]
+    app_names = [n for n in names if "__" in n]
+    ok = "find_app_tool" in names and "use_app_tool" in names and not app_names
+    return ok == bool(arg), f"model sees {len(names)} tools; app tools among them: {app_names}"
 
 
 def run_checks(ctx: CheckContext, checks: list[dict[str, Any]]) -> list[dict[str, Any]]:

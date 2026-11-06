@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -155,11 +155,33 @@ def ensure_desktop_shortcut(folder: Path) -> Path | None:
         return link
     import subprocess
 
-    script = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{link}');"
-              f"$s.TargetPath='{folder}';$s.Description='Files made by Delta (stored on this PC)';$s.Save()")
-    subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-                   capture_output=True, timeout=15, check=False)
+    def quoted(path: Path) -> str:  # a PowerShell single-quoted string: ' is written twice (C:\Users\D'Souza)
+        return "'" + str(path).replace("'", "''") + "'"
+
+    script = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut({quoted(link)});"
+              f"$s.TargetPath={quoted(folder)};$s.Description='Files made by Delta (stored on this PC)';$s.Save()")
+    try:  # a slow first PowerShell start on a busy PC (or none at all) must not stop Delta from starting
+        subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                       capture_output=True, timeout=15, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
     return link if link.exists() else None
+
+
+class ConnectorsConfig(BaseModel):
+    """Connected apps (delta.connectors): apps that publish an MCP server, connected from the dashboard (Apps),
+    `delta apps` or Telegram /connect. Added in 0.3: older settings files load unchanged."""
+    enabled: bool = True
+    catalog: str = ""              # "" = config/mcp_catalog.yaml
+    call_timeout_s: float = Field(default=60.0, ge=5, le=600)
+    connect_timeout_s: float = Field(default=30.0, ge=5, le=300)
+    read_retries: int = Field(default=2, ge=0, le=5)      # only read tools, only transient failures
+    breaker_failures: int = Field(default=3, ge=1, le=20)  # failures in a row before an app is left alone
+    breaker_cooldown_s: float = Field(default=60.0, ge=5, le=3600)
+    sign_in_timeout_s: float = Field(default=300.0, ge=30, le=1800)
+    # A local app server (npx / uvx program) not used for this long is stopped to free its memory; the next call
+    # starts it again. 0 = keep it running until Delta stops.
+    idle_close_s: float = Field(default=600.0, ge=0, le=86400)
 
 
 class AddonsConfig(BaseModel):
@@ -394,6 +416,7 @@ class Settings(BaseModel):
     api: ApiConfig = Field(default_factory=ApiConfig)
     files: FilesConfig = Field(default_factory=FilesConfig)
     addons: AddonsConfig = Field(default_factory=AddonsConfig)
+    connectors: ConnectorsConfig = Field(default_factory=ConnectorsConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     captcha: CaptchaConfig = Field(default_factory=CaptchaConfig)
     writer: WriterConfig = Field(default_factory=WriterConfig)
@@ -428,11 +451,30 @@ def _data_dir() -> Path:
     return base
 
 
+class SettingsError(ValueError):
+    """A settings file Delta cannot use. The message is for people: which file, what is wrong, how to fix it."""
+
+
+def _fix_hint(path: Path) -> str:
+    if path.name == USER_SETTINGS:
+        return ("Fix the file, or rename or delete it to go back to the default settings (your chats, memories and "
+                "other data are kept).")
+    return "Repair Delta by running the installer again (or `delta update`)."
+
+
 def _read_yaml(path: Path) -> dict:
     if not path.exists():
         return {}
-    with path.open(encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    try:
+        with path.open(encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except (yaml.YAMLError, UnicodeDecodeError) as e:
+        why = "it is not valid YAML" if isinstance(e, yaml.YAMLError) else "it is not a text file"
+        raise SettingsError(f"Delta could not read its settings file {path}: {why}. {_fix_hint(path)}") from e
+    if not isinstance(data, dict):
+        raise SettingsError(f"Delta could not read its settings file {path}: it does not hold settings. "
+                            f"{_fix_hint(path)}")
+    return data
 
 
 USER_SETTINGS = "settings.yaml"  # in the data dir: the user's own choices (setup page, settings page)
@@ -471,4 +513,10 @@ def load_settings(config_dir: Path | None = None) -> Settings:
     raw = deep_merge(raw, read_user_settings(data))
     raw["config_dir"] = cdir
     raw["data_dir"] = data
-    return Settings.model_validate(raw)
+    try:
+        return Settings.model_validate(raw)
+    except ValidationError as e:
+        where = "; ".join(f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors()[:3])
+        raise SettingsError(f"A setting has a value Delta cannot use ({where}). Fix it in {data / USER_SETTINGS}, "
+                            "or rename or delete that file to go back to the default settings (your chats, "
+                            "memories and other data are kept).") from e

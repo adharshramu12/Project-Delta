@@ -103,6 +103,7 @@ class Container:
     running: asyncio.Task[Any] | None = None  # the task being worked on now (any channel can stop it)
     scheduler: Any = None  # delta.scheduler.service.Scheduler (its loop starts in `delta run`)
     browsers: Any = None  # delta.tools.browser_switch.BrowserHub: which browser each task uses
+    connectors: Any = None  # delta.connectors.tools.AppTools: connected apps (its .manager connects them)
 
     @property
     def engine(self) -> Any:
@@ -151,8 +152,13 @@ class Container:
 
     async def start(self) -> None:
         self.lifecycle.acquire_single_instance()
-        folder = save_dir(self.settings.files)
-        await asyncio.to_thread(ensure_desktop_shortcut, folder)
+        try:
+            folder = save_dir(self.settings.files)
+        except OSError as e:  # a save folder on a drive that is gone (USB, network) must not stop start-up
+            self.warn(f"Delta's save folder {self.settings.files.save_dir} is not available ({e.strerror or e}). "
+                      "Plug the drive back in, or choose another folder in Settings.")
+        else:
+            await asyncio.to_thread(ensure_desktop_shortcut, folder)
         await self.governor.start()
         self.lifecycle.on_shutdown("governor", self.governor.stop)
         await self._start_addons()
@@ -180,6 +186,11 @@ class Container:
             self.lifecycle.on_shutdown("engine", self._close_engine)
         for name, closer in self.closers:
             self.lifecycle.on_shutdown(name, closer)
+        from delta.system import sqlite_safe
+
+        for original, moved in sqlite_safe.SET_ASIDE:  # damaged databases: kept aside, a new one in their place
+            if original.parent == self.settings.data_dir or self.settings.data_dir in original.parents:
+                self.warn(sqlite_safe.warning_text(original, moved))
         if why := vault.problem():  # Windows without working DPAPI: chats and memories are refused, not stored plain
             self.warn(why.replace("encrypt this", "encrypt your chats and memories").replace(
                 "so it was not saved", "so they are not saved until this is fixed"))
@@ -420,6 +431,11 @@ def build(settings: Settings) -> Container:
     async def on_learned(item: Learned) -> None:
         await events.publish("learning.added", item=item.to_dict())
 
+    from delta.connectors.setup import attach as attach_connectors
+
+    connectors = attach_connectors(settings, registry, audit)  # connected apps; nothing connects at start-up
+    if connectors is not None:
+        closers.append(("connectors", connectors.manager.close))
     executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
     # `remember` labels what a task that read outside content saves as untrusted (delta.memory.provenance)
     wire_memory_tools([found for n in registry.names() if (found := registry.get(n)) is not None], executor)
@@ -432,6 +448,7 @@ def build(settings: Settings) -> Container:
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
                                 governor, events, audit, skills, learning, proof)
     orchestrator.browsers = browsers  # pins each task to its browser (switches apply at the next task)
+    orchestrator.connectors = connectors
 
     async def on_health(a: Assessment) -> None:
         await events.publish("governor.health", health=a.health.name, reasons=a.reasons)
@@ -452,6 +469,6 @@ def build(settings: Settings) -> Container:
     container = Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
                           Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"),
                           live_channels=live_channels, guard=guard, emergency=emergency, scheduler=scheduler,
-                          browsers=browsers)
+                          browsers=browsers, connectors=connectors)
     scheduler.bind(container)
     return container

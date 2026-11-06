@@ -7,6 +7,7 @@ once instead of surfacing later as a confusing task failure. Keys are never logg
 from __future__ import annotations
 
 import contextlib
+import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -61,6 +62,9 @@ def check_hardware(ollama_running: bool) -> Hardware:
                     can_local)
 
 
+TELEGRAM_TOKEN = re.compile(r"[0-9]{3,20}:[A-Za-z0-9_-]{20,100}")
+
+
 async def validate_key(name: str, value: str) -> tuple[bool, str]:
     """Check a key with a harmless read-only call to its service."""
     import httpx
@@ -76,6 +80,11 @@ async def validate_key(name: str, value: str) -> tuple[bool, str]:
                 r = await c.get("https://integrate.api.nvidia.com/v1/models",
                                 headers={"Authorization": f"Bearer {value}"})
             elif name == "telegram_bot_token":
+                # The token becomes part of the address: only the exact shape BotFather gives (digits, a colon,
+                # letters, digits, - and _) is sent, so nothing typed here can change where the request goes.
+                if not TELEGRAM_TOKEN.fullmatch(value):
+                    return False, ("That does not look like a bot token. It looks like 123456789:ABC-def_..., "
+                                   "copied from BotFather's message.")
                 r = await c.get(f"https://api.telegram.org/bot{value}/getMe")
                 if r.status_code == 200 and r.json().get("ok"):
                     return True, f"Connected to bot @{r.json()['result'].get('username', '?')}."

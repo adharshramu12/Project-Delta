@@ -1,0 +1,292 @@
+# Connected apps catalog: MCP servers Delta can connect in one step (dashboard > Apps, `delta apps connect <id>`,
+# Telegram /connect <id>). Read by delta.connectors.catalog. Plain data: nothing here runs on its own.
+#
+# Every entry was checked against the vendor's OWN documentation on the date in `checked`, and every remote
+# OAuth entry was also probed live (its 401 answer, protected resource metadata and authorization server
+# metadata) on that date. `status` says who publishes the server:
+#   official          the vendor publishes and runs it
+#   official-preview  the vendor publishes it as a preview / developer preview (may change or need sign-up)
+#   reference         a reference server from the Model Context Protocol project itself (runs on this PC)
+#   community         someone else's server: Delta shows a warning before connecting (none in this version)
+#
+# transport: http   = remote Streamable HTTP (Delta falls back to the older HTTP+SSE transport by itself)
+#            stdio  = a program on this PC started with npx (Node.js) or uvx (uv); versions are pinned
+# auth.type: oauth  = sign in in your browser (OAuth 2.1 + PKCE); client: dynamic = Delta registers itself,
+#                     client: user = you create an OAuth app at the vendor and paste its client id (and secret)
+#            token  = paste a personal access token or API key (stored encrypted with Windows DPAPI)
+#            none   = no sign-in
+# tools: Delta's own default risk for tool names it verified in the vendor's docs (read = never asks;
+#        destructive = off until you switch it on). Every other tool is "external": it asks first, except
+#        in Autopilot. You can change any tool on the Apps page. A server's own readOnlyHint is used only
+#        when you tick "trust this app's read-only labels" for that app.
+
+version: 1
+checked: "2026-11-06"
+
+apps:
+  notion:
+    name: Notion
+    publisher: Notion
+    status: official
+    description: Search, read and write pages and databases in your Notion workspace.
+    transport: http
+    url: https://mcp.notion.com/mcp
+    sse_url: https://mcp.notion.com/sse
+    auth: {type: oauth, client: dynamic}
+    docs: https://developers.notion.com/docs/get-started-with-mcp
+    checked: "2026-11-06"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  github:
+    name: GitHub
+    publisher: GitHub
+    status: official
+    description: Repositories, issues, pull requests, Actions and code search on GitHub.
+    transport: http
+    url: https://api.githubcopilot.com/mcp/
+    auth:
+      type: token
+      scheme: Bearer
+      label: GitHub personal access token (a fine-grained token limited to the repositories you choose)
+      help: https://github.com/settings/personal-access-tokens
+    docs: https://github.com/github/github-mcp-server
+    checked: "2026-11-06"
+    notes: >-
+      GitHub's OAuth for this server has no dynamic client registration (no registration_endpoint in its
+      metadata), so Delta uses a personal access token, which GitHub documents for this server.
+
+  atlassian:
+    name: Atlassian (Jira, Confluence)
+    publisher: Atlassian
+    status: official
+    description: Jira work items, Confluence pages, Jira Service Management and more.
+    transport: http
+    url: https://mcp.atlassian.com/v2/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/
+    checked: "2026-11-06"
+    notes: Rovo MCP v2 endpoint. The old /v1/sse endpoint is retired. Your site admin may need to allow it.
+
+  linear:
+    name: Linear
+    publisher: Linear
+    status: official
+    description: Find, create and update Linear issues, projects and comments.
+    transport: http
+    url: https://mcp.linear.app/mcp
+    sse_url: https://mcp.linear.app/sse
+    auth: {type: oauth, client: dynamic, scopes: [read, write]}
+    docs: https://linear.app/docs/mcp
+    checked: "2026-11-06"
+
+  slack:
+    name: Slack
+    publisher: Slack
+    status: official
+    description: Search and read messages, channels and users, and post messages in Slack.
+    transport: http
+    url: https://mcp.slack.com/mcp
+    auth:
+      type: oauth
+      client: user
+      client_secret: true
+      label: >-
+        Slack needs your own Slack app: create one at api.slack.com/apps, turn on its MCP server (Agents
+        section), add the redirect URL Delta shows you, then paste the app's client id and client secret.
+      help: https://docs.slack.dev/ai/slack-mcp-server
+      scopes: [search:read.public, channels:history, channels:read, users:read, chat:write]
+    docs: https://docs.slack.dev/ai/slack-mcp-server
+    checked: "2026-11-06"
+    notes: Slack supports confidential OAuth only (client_secret_post); no dynamic client registration.
+
+  sentry:
+    name: Sentry
+    publisher: Sentry
+    status: official
+    description: Search errors and issues, look at performance and triage problems in Sentry.
+    transport: http
+    url: https://mcp.sentry.dev/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.sentry.io/product/sentry-mcp/
+    checked: "2026-11-06"
+
+  stripe:
+    name: Stripe
+    publisher: Stripe
+    status: official
+    description: Customers, payments, invoices, products and Stripe's docs.
+    transport: http
+    url: https://mcp.stripe.com
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.stripe.com/mcp
+    checked: "2026-11-06"
+    notes: >-
+      Anything that moves money or creates charges is external (asks first). Delta never has payment
+      authority by itself: approvals still apply.
+
+  gmail:
+    name: Gmail
+    publisher: Google
+    status: official-preview
+    description: Search and read your mail, list labels and create drafts (Gmail never sends from these tools).
+    transport: http
+    url: https://gmailmcp.googleapis.com/mcp/v1
+    auth:
+      type: oauth
+      client: user
+      client_secret: true
+      redirect_port: 8765
+      label: >-
+        Google's Workspace MCP servers are a Developer Preview: join the Google Workspace Developer Preview
+        Program, enable the Gmail API and the Gmail MCP API in a Google Cloud project, create a "Web application"
+        OAuth client with "Use this client for an AI-powered agent" ticked and the redirect URL Delta shows
+        you, then paste its client id and secret.
+      help: https://developers.google.com/workspace/guides/configure-mcp-servers
+      scopes: [https://www.googleapis.com/auth/gmail.readonly, https://www.googleapis.com/auth/gmail.compose]
+      extra_params: {access_type: offline, prompt: consent}
+    docs: https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server
+    checked: "2026-11-06"
+    tools:
+      read: [get_message, get_thread, list_drafts, list_labels, search_threads]
+
+  google_drive:
+    name: Google Drive
+    publisher: Google
+    status: official-preview
+    description: Search, read and create files in Google Drive.
+    transport: http
+    url: https://drivemcp.googleapis.com/mcp/v1
+    auth:
+      type: oauth
+      client: user
+      client_secret: true
+      redirect_port: 8765
+      label: Same Google Cloud OAuth client as Gmail (Developer Preview); enable the Drive API and the Drive MCP API.
+      help: https://developers.google.com/workspace/guides/configure-mcp-servers
+      scopes: [https://www.googleapis.com/auth/drive.readonly, https://www.googleapis.com/auth/drive.file]
+      extra_params: {access_type: offline, prompt: consent}
+    docs: https://developers.google.com/workspace/guides/configure-mcp-servers
+    checked: "2026-11-06"
+    tools:
+      read: [download_file_content, get_file_metadata, get_file_permissions, list_recent_files, read_file_content,
+             search_files]
+
+  google_calendar:
+    name: Google Calendar
+    publisher: Google
+    status: official-preview
+    description: Find free time, list and create events in Google Calendar.
+    transport: http
+    url: https://calendarmcp.googleapis.com/mcp/v1
+    auth:
+      type: oauth
+      client: user
+      client_secret: true
+      redirect_port: 8765
+      label: Same Google Cloud OAuth client as Gmail (Developer Preview); enable the Calendar API and the Calendar MCP API.
+      help: https://developers.google.com/workspace/guides/configure-mcp-servers
+      scopes: [https://www.googleapis.com/auth/calendar.calendarlist.readonly,
+               https://www.googleapis.com/auth/calendar.events.freebusy,
+               https://www.googleapis.com/auth/calendar.events.readonly]
+      extra_params: {access_type: offline, prompt: consent}
+    docs: https://developers.google.com/workspace/calendar/api/v3/reference/mcp
+    checked: "2026-11-06"
+    tools:
+      read: [get_event, list_calendars, list_events, search_events, suggest_time]
+      destructive: [delete_event]
+
+  asana:
+    name: Asana
+    publisher: Asana
+    status: official
+    description: Tasks, projects and goals in Asana.
+    transport: http
+    url: https://mcp.asana.com/v2/mcp
+    auth:
+      type: oauth
+      client: user
+      client_secret: true
+      label: Asana's V2 server needs an OAuth app you create in the Asana developer console; paste its client id and secret.
+      help: https://developers.asana.com/docs/using-asanas-mcp-server
+    docs: https://developers.asana.com/docs/using-asanas-mcp-server
+    checked: "2026-11-06"
+
+  vercel:
+    name: Vercel
+    publisher: Vercel
+    status: official
+    description: Projects, deployments and logs on Vercel.
+    transport: http
+    url: https://mcp.vercel.com
+    auth: {type: oauth, client: dynamic}
+    docs: https://vercel.com/docs/mcp/vercel-mcp
+    checked: "2026-11-06"
+
+  supabase:
+    name: Supabase
+    publisher: Supabase
+    status: official
+    description: Supabase projects, databases, edge functions and logs.
+    transport: http
+    url: https://mcp.supabase.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://supabase.com/docs/guides/getting-started/mcp
+    checked: "2026-11-06"
+    notes: Database tools can change or delete data; Delta treats them as external (asks first).
+
+  huggingface:
+    name: Hugging Face
+    publisher: Hugging Face
+    status: official
+    description: Search models, datasets, Spaces and papers on the Hugging Face Hub.
+    transport: http
+    url: https://huggingface.co/mcp
+    auth: {type: none}
+    docs: https://huggingface.co/docs/hub/hf-mcp-server
+    checked: "2026-11-06"
+    notes: Works without signing in (public Hub data).
+
+  figma_desktop:
+    name: Figma (desktop app)
+    publisher: Figma
+    status: official
+    description: Design context from the Figma desktop app running on this PC.
+    transport: http
+    url: http://127.0.0.1:3845/mcp
+    auth: {type: none}
+    docs: https://developers.figma.com/docs/figma-mcp-server/local-server-installation/
+    checked: "2026-11-06"
+    notes: >-
+      Turn on the desktop MCP server in Figma (Dev Mode > MCP server). Needs a Dev or Full seat on a paid plan.
+      Figma's remote server only accepts clients listed in Figma's own catalog, so it is not offered here.
+
+  filesystem:
+    name: Files (MCP reference server)
+    publisher: Model Context Protocol
+    status: reference
+    description: Read and write files in one folder you choose, through the MCP reference file server.
+    transport: stdio
+    runtime: node
+    package: "@modelcontextprotocol/server-filesystem@2.2.0"
+    args: ["{folder}"]
+    inputs:
+      - {name: folder, label: The one folder this server may read and write}
+    auth: {type: none}
+    docs: https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem
+    checked: "2026-11-06"
+    notes: Version pinned from the npm registry on the checked date. Needs Node.js (npx).
+
+  fetch:
+    name: Web fetch (MCP reference server)
+    publisher: Model Context Protocol
+    status: reference
+    description: Fetch a web page and turn it into text, through the MCP reference fetch server.
+    transport: stdio
+    runtime: python
+    package: "mcp-server-fetch==2026.11.4"
+    auth: {type: none}
+    docs: https://github.com/modelcontextprotocol/servers/tree/main/src/fetch
+    checked: "2026-11-06"
+    notes: Version pinned from PyPI on the checked date. Needs uv (uvx).
+    tools:
+      read: [fetch]

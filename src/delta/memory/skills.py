@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import builtins
 import json
-import sqlite3
 import threading
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -25,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from delta.memory.keywords import keywords, overlap
+from delta.system import sqlite_safe
 
 PROMOTE_AFTER = 2
 RETIRE_AFTER = 3
@@ -131,7 +131,7 @@ def _now() -> str:
 
 class SkillStore:
     def __init__(self, path: Path) -> None:
-        self._db = sqlite3.connect(path, check_same_thread=False)
+        self._db = sqlite_safe.connect(path, check_same_thread=False)
         self._db.executescript(SCHEMA)
         self._migrate()
         self._lock = threading.Lock()

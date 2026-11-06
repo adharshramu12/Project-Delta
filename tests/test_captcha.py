@@ -221,7 +221,7 @@ async def test_approval_handoff_uses_the_existing_broker():
 
     broker.add_presenter("test", presenter)
     assert await approval_handoff(broker)("erp.example.edu", "03-captcha.jpg") is True
-    assert seen[0].tool == "solve_captcha" and "erp.example.edu" in seen[0].summary
+    assert seen[0].tool == "solve_captcha" and seen[0].summary.startswith("Captcha on erp.example.edu: ")
     assert "03-captcha.jpg" in seen[0].summary
 
 

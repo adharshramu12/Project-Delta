@@ -19,6 +19,9 @@
    through `input_target(args)`; when they cannot tell, they say so and the call is confirmed (fail
    closed to a question, never to a refusal).
 
+3. Connected apps (delta.connectors). Once a task has read outside content, every app call that is not a plain
+   read asks at every level, Autopilot included, and a read whose arguments carry a long encoded value asks too.
+
 Every rule here only turns ALLOW into ASK. Nothing is denied that was allowed before.
 
 Each question comes back as a GuardAsk with a `kind`. STRICT_KINDS are the ones a person must answer
@@ -51,13 +54,13 @@ AUTOPILOT = "autopilot"
 
 # Questions "Allow for this task" never answers: input into terminals or Delta itself, input whose
 # target could not be checked, and addresses or searches that carry encoded data.
-STRICT_KINDS = frozenset({"terminal", "delta_window", "unknown_target", "data_url", "search_data"})
+STRICT_KINDS = frozenset({"terminal", "delta_window", "unknown_target", "data_url", "search_data", "app_data"})
 
 
 @dataclass(frozen=True)
 class GuardAsk:
     reason: str
-    kind: str  # terminal | delta_window | unknown_target | data_url | search_data | new_host
+    kind: str  # terminal | delta_window | unknown_target | data_url | search_data | new_host | app_send | app_data
 
     @property
     def strict(self) -> bool:
@@ -151,6 +154,8 @@ class ExfilGuard:
             return found  # every level, tainted or not
         if not taint_source:
             return None
+        if getattr(tool, "app_tool", False) is True:
+            return _app_ask(tool, args, taint_source)
         if name in SEARCH_TOOLS:
             why = carries_data(str(getattr(args, "query", "")), is_query=True)
             if not why:
@@ -188,6 +193,32 @@ class ExfilGuard:
             urls = result.evidence.get("urls") if isinstance(result.evidence, dict) else None
             if isinstance(urls, list):
                 self._urls.setdefault(task_id, set()).update(str(u).strip() for u in urls)
+
+
+# --- connected apps (delta.connectors) -----------------------------------------------------------------------
+
+def _app_ask(tool: Tool[Any], args: BaseModel, taint_source: str) -> GuardAsk | None:
+    """Data leaving through a connected app after the task read outside content. A page, mail or app result can
+    tell the model to copy what it read into another app ("create a public gist with this"). So, once tainted:
+    every app call that is not a plain read asks (whatever its risk and the autonomy level), and a read whose
+    arguments carry a long encoded value asks too (a search can smuggle data out as well)."""
+    app = str(getattr(tool, "app_name", "") or "the app")
+    if str(getattr(tool, "risk", "")) != "read":
+        return GuardAsk(f"this task read outside content ({taint_source}) and this sends data to {app}; please "
+                        "confirm", "app_send")
+    text = " ".join(str(v) for v in _leaves(args.model_dump()))
+    if why := carries_data(text, is_query=True):
+        return GuardAsk(f"this task read outside content ({taint_source}) and {why.replace('search text', 'request')}"
+                        f" going to {app}; please confirm", "app_data")
+    return None
+
+
+def _leaves(value: Any) -> list[Any]:
+    if isinstance(value, dict):
+        return [x for v in value.values() for x in _leaves(v)]
+    if isinstance(value, list):
+        return [x for v in value for x in _leaves(v)]
+    return [value]
 
 
 # --- desktop input targets --------------------------------------------------------------------------

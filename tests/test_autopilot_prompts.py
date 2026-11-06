@@ -558,7 +558,8 @@ def test_remote_guard_is_untouched():
     assert remote_guard.UNLOCK_S == 15 * 60
     assert {"destructive", "external", "system"} == remote_guard.PIN_TO_APPROVE_RISKS
     assert "autopilot" in remote_guard.SENSITIVE
-    assert {"terminal", "delta_window", "unknown_target", "data_url", "search_data"} == set(STRICT_KINDS)
+    # 0.3 added app_data (connected apps): a strict kind can only be added, never dropped
+    assert {"terminal", "delta_window", "unknown_target", "data_url", "search_data", "app_data"} == set(STRICT_KINDS)
 
 
 def test_old_settings_files_still_load(tmp_path):
