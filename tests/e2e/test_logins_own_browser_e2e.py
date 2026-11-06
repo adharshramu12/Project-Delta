@@ -118,8 +118,19 @@ async def test_own_browser_tab_switch_mid_fill_aborts(mgr: BrowserManager, porta
 
 # --- the real driver: Windows UI Automation on the installed browser's own window -----------------------------------
 
+def _close(ub: Any) -> None:
+    with contextlib.suppress(Exception):
+        import win32con
+        import win32gui
+
+        if ub.handle:
+            win32gui.PostMessage(ub.handle, win32con.WM_CLOSE, 0, 0)
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="UI Automation is Windows only")
 async def test_real_own_browser_through_ui_automation(portal: PortalSite, tmp_path):
+    """The real driver on a window of the installed browser's default profile. A fresh runner's browser may show a
+    first-run page that keeps the window from navigating; then this is skipped with what was seen."""
     try:
         from delta.logins.own_uia import UIAOwnDriver
         from delta.tools.desktop import DesktopController
@@ -127,29 +138,37 @@ async def test_real_own_browser_through_ui_automation(portal: PortalSite, tmp_pa
     except ImportError as e:  # pragma: no cover - the desktop extras are part of the Windows install
         pytest.skip(f"desktop control is not installed: {e}")
     ctl = DesktopController()
-    ub = UserBrowser(ctl)
-    if not ub.exe:
-        pytest.skip("no Chrome or Edge installed for the user's own browser")
-    driver = UIAOwnDriver(ub)
+    seen: list[str] = []
+    ready: Any = None
     try:
-        try:
-            await asyncio.wait_for(driver.ensure_window(portal.url + "/login"), 40)
-            url = await asyncio.wait_for(driver.top_url(), 20)
-        except Exception as e:
-            pytest.skip(f"the browser's page is not readable through UI Automation here ({type(e).__name__})")
-        if "://" not in url:
-            pytest.skip("the page's address is not readable through UI Automation on this machine")
-        # A first-run page (edge://welcome-new-device/) may be in front: sign_in opens the saved login page itself.
+        for prefer in ("chrome", "edge"):
+            ub = UserBrowser(ctl, prefer)
+            if not ub.exe or ub.name != prefer:
+                continue
+            driver = UIAOwnDriver(ub)
+            try:
+                await asyncio.wait_for(driver.ensure_window(portal.url + "/login"), 40)
+                url = await asyncio.wait_for(driver.top_url(), 20)
+                if not url.startswith(portal.url) and "://" in url:
+                    await asyncio.wait_for(driver.navigate(portal.url + "/login"), 30)
+                    await asyncio.wait_for(driver.settle(), 15)
+                    url = await asyncio.wait_for(driver.top_url(), 20)
+            except Exception as e:
+                url = f"error {type(e).__name__}"
+            seen.append(f"{prefer}: {url[:60] or 'unreadable'}")
+            if url.startswith(portal.url):
+                ready = (ub, driver)
+                break
+            _close(ub)
+        if ready is None:
+            pytest.skip("the browser's window could not be brought to the portal through UI Automation on this "
+                        f"machine (a first-run page or no interactive desktop): {'; '.join(seen)}")
         svc, asked = make_service(tmp_path, portal)
-        result = await asyncio.wait_for(svc.sign_in_own("Fixture ERP", driver), 120)
+        result = await asyncio.wait_for(svc.sign_in_own("Fixture ERP", ready[1]), 120)
         assert result.ok, result.message
         assert portal.state.posts == [{"username": USER, "password": "<set>"}] and len(asked) == 1
         no_secret_anywhere(tmp_path)
     finally:
-        with contextlib.suppress(Exception):
-            import win32con
-            import win32gui
-
-            if ub.handle:
-                win32gui.PostMessage(ub.handle, win32con.WM_CLOSE, 0, 0)
+        if ready is not None:
+            _close(ready[0])
         ctl.close()
