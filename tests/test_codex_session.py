@@ -142,3 +142,33 @@ async def test_screenshot_turns_stay_in_the_live_session(server):
     assert turns[1]["input"][1] == {"type": "image", "url": shot}
     assert "they all work" in turns[1]["input"][0]["text"]
     await p.unload()
+
+
+async def test_a_codex_that_refuses_the_safety_overrides_is_not_run_as_configured(monkeypatch):
+    """M9: fail closed. If Codex will not start with Delta's lean overrides (plugins, MCP servers and shell off),
+    it is reported unusable, never run with the user's own setup, and the plain probe is closed at once."""
+    started = []
+
+    class Probe:
+        returncode = None
+
+        def close(self):
+            started.append("closed")
+
+    async def start(cls, exe, model, key, limit_s=30, extra=None):
+        started.append("lean" if extra else "plain")
+        if extra:
+            raise cli_providers.LLMError("unknown config key")
+        return Probe()
+
+    monkeypatch.setattr(_CodexSession, "start", classmethod(start))
+    p = CodexProvider("codex", ProviderConfig(kind="codex", models={"chat": ""}))
+    p._path = "codex"
+    with pytest.raises(cli_providers.LLMError, match="safety settings"):
+        await p.complete("chat", [{"role": "user", "content": "hi"}], None)
+    assert started == ["lean", "plain", "closed"]
+    await p.prewarm("chat")  # quiet, and never starts another plain session
+    with pytest.raises(cli_providers.LLMError):
+        await p.complete("chat", [{"role": "user", "content": "hi"}], None)
+    assert started == ["lean", "plain", "closed"]
+    assert "features.shell_tool=false" in p.command("codex", "", cli_providers.Path("o.txt"))  # exec: lean too

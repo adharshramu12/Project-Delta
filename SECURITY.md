@@ -26,7 +26,9 @@ Delta controls a real computer, so its safety rules are part of the design, not 
   break) in an ordinary app. Quiet hours pause autonomous actions at every level.
 - **Approvals** time out to *deny*.
 - **Secrets** live in Windows Credential Manager, never in config, logs or chats.
-- **Audit log** is hash-chained; `delta audit verify` detects tampering.
+- **Audit log** is hash-chained and, from 0.2.0, also signed with a secret key kept in Windows Credential Manager
+  (an HMAC chain), so rewriting it needs that key too. `delta audit verify` checks both and names the first
+  broken line (see "What is not protected" for its limits).
 - **Prompt injection (enforced in code):** web pages, files and tool output are data and can never grant
   approval. Once a task has read outside content (a page, search result, file, chat message or the screen),
   every send, delete, code run or memory write in that task needs a human yes, **even in Autopilot and even
@@ -56,13 +58,32 @@ Delta controls a real computer, so its safety rules are part of the design, not 
   level, and are never learned as trusted. If Delta cannot tell which window or button an input lands on, it
   asks you rather than guessing.
 - **Encryption at rest:** memories, chat titles and messages are encrypted with **Windows DPAPI**, tied to
-  your Windows account. Another account, a copied disk or a stolen database file cannot read them.
-- **The dashboard API** listens on this PC only (127.0.0.1) and needs a per-install secret token.
+  your Windows account. Another account, a copied disk or a stolen database file cannot read them. If DPAPI
+  does not work (pywin32 missing or broken), Delta **refuses to save** chats and memories and says so on start-up,
+  instead of writing them unencrypted (before 0.2.0 it silently fell back to plain text). Repair by running the
+  installer again.
+- **The dashboard API** listens on this PC only (loopback) and needs a per-install secret token. A settings file
+  that names any other address (0.0.0.0, a LAN address, a host name) is overridden to 127.0.0.1 and logged. The
+  token file is created once, atomically, with owner-only permissions where the file system supports them.
+- **Delta's private browser** opens its remote-control (CDP) port on a free port chosen at each launch, not on a
+  fixed one, and after a restart Delta reattaches only to a browser it started itself (its profile is inside
+  Delta's data folder). Before 0.2.0 the port was always 9223 and anything answering on it was trusted.
 - **Your own browser:** Delta never types into password or payment fields; it asks you to do that.
 - **Emergency contacts** are stored encrypted (DPAPI). During a help request, reaching anyone needs your yes
   (even in Autopilot) unless your own message clearly says to ("message Ravi now"). Delta is not an emergency service: for anything life-threatening it tells you to call 112.
 - **AI apps you sign in to** (Claude Code, Codex, Cline) are used only as text brains: their own tools are
-  switched off or read-only, so Delta's rules apply to every action whichever AI is thinking.
+  switched off or read-only, so Delta's rules apply to every action whichever AI is thinking. This fails
+  closed: if Codex will not start with those switches (plugins, MCP servers and shell off), Delta does not use
+  it and tells you, instead of running it with your own Codex setup.
+- **Programs Delta starts for a task** (`run_shell`, `run_python`) get a copy of the environment without
+  anything that looks like a secret: API keys, tokens, passwords, credentials and Delta's own `DELTA_<NAME>`
+  key overrides are removed. A variable a task really needs can be listed in `agent.child_env_allow`. MCP
+  servers are started by the MCP SDK with only a short list of safe variables plus the `env:` you give them.
+- **MCP add-on tools are not trusted on their own word.** A server describes its own tools, so its
+  `readOnlyHint` alone never makes a tool "read only": unless you set a risk for the tool (`tools:`) or the
+  server (`risk:`), or set `trust_read_only_hints: true`, an MCP tool counts as sending data outside (it asks
+  at every level except Autopilot, and always after a task read outside content). What an MCP tool returns
+  is outside content: it marks the task like a web page does.
 - **Your data stays on your PC** (`%LOCALAPPDATA%\Delta`): memory, chats, skills, audit log. Shutdown stops
   every Delta process; nothing keeps listening.
 
@@ -131,7 +152,7 @@ Delta can help with **simple image/text captchas** on sites where you log in to 
 |---|---|
 | A stranger finds or guesses the bot | Only paired Telegram accounts are served. Pairing needs a single-use 8-character code shown only on the PC's screen (10 minutes). The message must be exactly the code, and 5 wrong tries drop it until a new one is made on the PC. |
 | **The owner's Telegram account or phone is stolen** | **Remote Guard** (see below): seeing the screen or webcam, reading files, windows, messages or the clipboard, sending files, running commands or code, closing apps, changing keys, turning on Autopilot, and approving deletes or sends from the phone all need the owner's **Delta PIN** (once per 15 minutes). |
-| PIN guessing | **5 wrong PINs lock all remote control.** Only someone at the PC can unlock it; the phone never can. |
+| PIN guessing | **5 wrong PINs in a row lock all remote control.** There is no time window: only a correct PIN or an unlock on the PC resets the count, and the count is saved in Delta's data folder, so restarting Delta or the PC does not clear it. Only someone at the PC can unlock it; the phone never can. |
 | PIN or key left in chat history | Delta deletes the message holding a PIN or API key right after reading it. |
 | PIN stolen from the PC | Never stored: only a salted **scrypt** hash in Credential Manager, compared in constant time. |
 | Something happens without the owner knowing | A **Windows notification** on the PC for every remote request and sensitive action; every unlock, failure, lock and action is in the audit log. |
@@ -370,6 +391,12 @@ lies), and conversation answers that need no tools are not checked.
   still judged by its real target and risk, but an ordinary wrong click (for example the wrong tab) can happen.
 - **If you raise the permission level while a scheduled task is running**, that run follows your new level
   from then on: a change you make yourself is not treated as the schedule raising it.
+- **The audit log's signature** protects against edits by anything that cannot read your Windows Credential
+  Manager (another account, a copied disk, a careless edit). Malware running as your Windows user can read the
+  key like any app you run. Lines cut off the very end of the log cannot be detected (nothing comes after them),
+  and records written before 0.2.0 only have the plain hash chain.
+- **Environment scrubbing is by name.** A secret stored in a variable with an ordinary-looking name (not
+  containing KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL, AUTH and similar) is passed on to commands Delta runs.
 
 ## Reporting a vulnerability
 

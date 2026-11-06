@@ -39,7 +39,10 @@ BROWSERS = [  # first one found is used
     ("edge", [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
               r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"]),
 ]
-PORT = 9223
+# Remote-control (CDP) port of Delta's own browser. 0 = a free port is picked at each launch, so no fixed, well-known
+# port is left open on the PC (L16). Set a number to pin it (tests and evals do). Before 0.2.0 it was always 9223.
+PORT = 0
+LEGACY_PORT = 9223
 IDLE_CLOSE_S = 900
 SEARCH_URL = "https://duckduckgo.com/?q={q}"  # no account, no consent wall
 # Field labels that mean "search box": submitting one only runs a search, so it needs no approval.
@@ -181,9 +184,49 @@ def find_chrome() -> str | None:  # kept for scripts and older callers
     return found[1] if found else None
 
 
-def chrome_args(profile: Path, port: int = PORT) -> list[str]:
-    return [f"--remote-debugging-port={port}", f"--user-data-dir={profile}", "--no-first-run",
+def chrome_args(profile: Path, port: int | None = None) -> list[str]:
+    return [f"--remote-debugging-port={port or PORT or LEGACY_PORT}", f"--user-data-dir={profile}", "--no-first-run",
             "--no-default-browser-check", "--disable-features=Translate"]
+
+
+def free_port() -> int:
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+def _arg(cmd: list[str], name: str) -> str | None:
+    return next((a.split("=", 1)[1] for a in cmd if a.startswith(f"--{name}=")), None)
+
+
+def _listens_on(proc: Any, port: int) -> bool:
+    """True when the process listens on the port; also True when Windows will not say (never a reason to fail)."""
+    try:
+        conns = proc.net_connections(kind="tcp") if hasattr(proc, "net_connections") else proc.connections("tcp")
+    except (psutil.Error, OSError, NotImplementedError):
+        return True
+    return any(c.laddr and c.laddr.port == port and c.status == psutil.CONN_LISTEN for c in conns)
+
+
+def owned_browser_port(data_dir: Path) -> int | None:
+    """The CDP port of a browser that Delta itself started (its profile is inside Delta's data folder), when one
+    is still running: after a Delta restart it is reused instead of starting a second copy on the same profile.
+    Whatever else answers on a port is never trusted just because it answers (the old fixed-port behaviour)."""
+    root = os.path.normcase(os.path.abspath(data_dir))
+    for proc in psutil.process_iter(["cmdline"]):
+        try:
+            cmd = proc.info.get("cmdline") or []
+            port_s, profile = _arg(cmd, "remote-debugging-port"), _arg(cmd, "user-data-dir")
+            if not port_s or not profile or not port_s.isdigit() or int(port_s) == 0:
+                continue
+            inside = os.path.normcase(os.path.abspath(profile.strip('"')))
+            if (inside == root or inside.startswith(root + os.sep)) and _listens_on(proc, int(port_s)):
+                return int(port_s)
+        except (psutil.Error, OSError, ValueError, TypeError):
+            continue
+    return None
 
 
 class BrowserManager:
@@ -194,6 +237,7 @@ class BrowserManager:
         # Which installed browser runs Delta's profile: auto (Chrome, else Edge), chrome or edge.
         # Changed only between tasks (delta.tools.browser_switch), never while a task is using it.
         self.engine = "auto"
+        self.port = 0  # the CDP port of the browser in use (0 = not started)
         self.hold_until = 0.0  # monotonic time: not closed for idleness before this (the user is signing in)
         self.last_fill_was_search = False  # lets "press Enter" after typing a search run freely
         self._proc: subprocess.Popen[bytes] | None = None
@@ -233,8 +277,12 @@ class BrowserManager:
     async def _launch(self) -> None:
         from playwright.async_api import async_playwright
 
-        endpoint = f"http://127.0.0.1:{PORT}"
-        if not await self._alive(endpoint):
+        owned: int | None = None if PORT else await asyncio.to_thread(owned_browser_port, self.data_dir)
+        port = PORT or owned or 0
+        endpoint = f"http://127.0.0.1:{port}"
+        if not (port and await self._alive(endpoint)):
+            port = PORT or free_port()
+            endpoint = f"http://127.0.0.1:{port}"
             found = find_browser(self.engine)
             if not found:
                 raise RuntimeError("No supported browser found. Install Google Chrome or Microsoft Edge.")
@@ -242,13 +290,14 @@ class BrowserManager:
             self.profile = self.data_dir / f"{self.browser_name}-profile"
             self.profile.mkdir(parents=True, exist_ok=True)
             # Popen only starts the process (non-blocking); the browser must outlive any asyncio transport
-            self._proc = subprocess.Popen([exe, *chrome_args(self.profile, PORT)], close_fds=True)  # noqa: ASYNC220
+            self._proc = subprocess.Popen([exe, *chrome_args(self.profile, port)], close_fds=True)  # noqa: ASYNC220
             for _ in range(60):
                 if await self._alive(endpoint):
                     break
                 await asyncio.sleep(0.25)
             else:
                 raise RuntimeError(f"{self.browser_name} did not open its remote-control port")
+        self.port = port
         self._pw = await async_playwright().start()
         self._browser = await self._pw.chromium.connect_over_cdp(endpoint)
         if self._reaper is None or self._reaper.done():

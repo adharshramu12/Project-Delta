@@ -283,6 +283,9 @@ THE USER IS NOT AT THIS PC: they are writing from their phone in {channel} and c
   send what they take). Answers go in your final reply, in short, plain words for a phone screen."""
 
 DONE, NEED_USER = "DONE:", "NEED_USER:"
+# An answer to the token budget question that means "continue" (the button sends "Keep going").
+KEEP_GOING = re.compile(r"^\W*(?:(?:yes|ok|okay|sure)\W+)?(?:please\W+)?(?:keep going|continue|go on|carry on)\b",
+                        re.I)
 
 
 MAX_NUDGES = 3  # small models may never use the markers: accept their answer after this many
@@ -414,6 +417,11 @@ class Orchestrator:
         # task id -> (first outside source, text read from outside), kept from the end of a task until its
         # learning step has run: the executor forgets both when the task ends.
         self._after: dict[str, tuple[str | None, str | None]] = {}
+        # Token budget (agent.token_budget). task id -> (tokens already used before this task, its limit), and
+        # chat -> (used, limit) for a task that stopped at its limit, so "Keep going" in the same chat continues
+        # with an explicitly extended limit (and the earlier usage still counted) instead of a silent fresh one.
+        self._budget: dict[str, tuple[int, int]] = {}
+        self._budget_stops: dict[str, tuple[int, int]] = {}
         self.browsers: Any = None  # BrowserHub (delta.tools.browser_switch), set by bootstrap
 
     def _finish_proof(self, result: TaskResult) -> None:
@@ -445,6 +453,7 @@ class Orchestrator:
             if self.proof:
                 self.proof.start(req.id, req.text)
             self.router.reset_meter()
+            self._begin_budget(req)
             result = await self._run(req)
         except LLMError as e:
             result = TaskResult(req.id, "failed", friendly_model_error(e))
@@ -466,6 +475,7 @@ class Orchestrator:
             if pinned is not None:
                 self.browsers.end_task(req.id, pinned)
             CURRENT_REQUEST.reset(current)
+            self._budget.pop(req.id, None)
             self._keep_provenance(req.id)
             self.executor.forget_task(req.id)
             for helper in (self.healer, self.ladder):
@@ -1210,19 +1220,50 @@ class Orchestrator:
         except Exception:
             log.exception("orchestrator.lesson_failed", task=req.id)
 
+    @staticmethod
+    def _chat_key(req: TaskRequest) -> str:
+        return req.chat_id or f"{req.channel}:{req.user}"
+
+    def _begin_budget(self, req: TaskRequest) -> None:
+        """Set this task's token limit. Normally the user's per-task budget. When the previous task in this chat
+        stopped at its limit and the user answered "Keep going", the limit is raised by one more budget on top
+        of what was already used, said so in the audit log, and the earlier usage keeps counting."""
+        base = self.s.agent.token_budget
+        if base <= 0:
+            return
+        stop = self._budget_stops.pop(self._chat_key(req), None)
+        if stop is not None and KEEP_GOING.match(req.text.strip()):
+            used, cap = stop
+            extended = max(cap, used) + base
+            self._budget[req.id] = (used, extended)
+            self.audit.record("task.budget_extended", task=req.id, used=used, previous=cap, budget=extended)
+            log.info("orchestrator.token_budget_extended", task=req.id, used=used, budget=extended)
+        else:
+            self._budget[req.id] = (0, base)
+
     def _over_budget(self) -> str:
-        """NEED_USER question once the task's tokens pass the user's per-task budget (off when 0)."""
-        budget = self.s.agent.token_budget
-        if budget <= 0:
+        """NEED_USER question once the task's tokens pass its limit (off when the budget is 0). After a
+        "Keep going" the limit is the extended one and tokens used before the pause still count."""
+        base = self.s.agent.token_budget
+        if base <= 0:
             return ""
-        used = usage.used_for_budget(self.router.meter)
-        if used < budget:
+        req = CURRENT_REQUEST.get()
+        carried, cap = self._budget.get(req.id, (0, base)) if req is not None else (0, base)
+        used = carried + usage.used_for_budget(self.router.meter)
+        if used < cap:
             return ""
-        log.info("orchestrator.token_budget", used=used, budget=budget)
-        if self.engine is not None and (req := CURRENT_REQUEST.get()) is not None:
-            self.engine.failure(req.id, "budget", f"token budget reached: {used} of {budget}")
-        return (f"{NEED_USER} This task has used about {used:,} tokens, which passes your limit of "
-                f"{budget:,} tokens per task.\nShould I keep going?\n- Keep going\n- Stop here")
+        log.info("orchestrator.token_budget", used=used, budget=cap)
+        if req is not None:
+            self._budget_stops[self._chat_key(req)] = (used, cap)
+            while len(self._budget_stops) > 64:
+                self._budget_stops.pop(next(iter(self._budget_stops)))
+            if self.engine is not None:
+                self.engine.failure(req.id, "budget", f"token budget reached: {used} of {cap}")
+        limit = (f"your limit of {cap:,} tokens per task" if cap <= base
+                 else f"the extended limit of {cap:,} tokens (your limit is {base:,} per task)")
+        return (f"{NEED_USER} This task has used about {used:,} tokens, which passes {limit}. Keep going adds "
+                f"another {base:,} tokens (new limit {max(cap, used) + base:,}).\nShould I keep going?"
+                "\n- Keep going\n- Stop here")
 
     async def _learn(self, req: TaskRequest, result: TaskResult) -> None:
         """Self-improvement after a task: memory facts + skills. Never raises."""

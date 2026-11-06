@@ -475,10 +475,11 @@ class ToolExecutor:
             await asyncio.to_thread(self.undo.after, task_id, kept, result.ok)
         self.audit.record("tool", task=task_id, tool=name, ok=result.ok, evidence=result.evidence)
         self.exfil.observe(task_id, name, args, result)
+        untrusted = name in UNTRUSTED_SOURCES or getattr(tool, "untrusted_output", False) is True  # e.g. MCP
         if task_id:
             self.observations.add(task_id, name, result.ok, args.model_dump(), result.output, result.evidence,
-                                  name in UNTRUSTED_SOURCES, str(getattr(tool, "risk", "")) == Risk.READ)
-        if task_id and result.ok and name in UNTRUSTED_SOURCES and task_id not in self._tainted:
+                                  untrusted, str(getattr(tool, "risk", "")) == Risk.READ)
+        if task_id and result.ok and untrusted and task_id not in self._tainted:
             self._tainted[task_id] = name
             self.audit.record("taint", task=task_id, source=name)
         return result

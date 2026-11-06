@@ -15,11 +15,19 @@ Configure in delta.yaml:
               url: https://example.com/mcp
               token_secret: github_mcp_token     # `delta secrets set github_mcp_token`
               risk: write                        # default risk for this server's tools
-              tools: { search_repositories: read }  # per-tool overrides
+              tools: { search_repositories: read }  # per-tool overrides (your allowlist)
+              # trust_read_only_hints: true      # believe the server's own readOnlyHint (off by default)
 
-Safety: MCP tools go through Delta's policy like any other tool. Risk comes from (1) per-tool
-override, (2) the server's own annotations (readOnlyHint / destructiveHint), (3) server default,
-(4) WRITE — so unknown tools ask before running.
+Safety: MCP tools go through Delta's policy like any other tool. A server describes its own tools, so what
+it says about them is not trusted on its own. Risk comes from, in order:
+  1. your per-tool override (`tools:`), the allowlist;
+  2. the server's destructiveHint (it can only make a tool MORE careful);
+  3. your server default (`risk:`);
+  4. the server's readOnlyHint, only when you set `trust_read_only_hints: true` for that server;
+  5. otherwise EXTERNAL (unknown: the tool runs in another program and may send data anywhere), so it asks
+     at every level except Autopilot, and after a task read outside content it always asks.
+What an MCP tool returns is outside content: it marks the task as tainted, like a web page.
+Before 0.2.0 a readOnlyHint alone made a tool READ (never asked) and unknown tools were WRITE.
 """
 
 from __future__ import annotations
@@ -49,25 +57,27 @@ def tool_name(server: str, tool: str) -> str:
 
 
 def pick_risk(tool: Any, server_cfg: dict[str, Any]) -> Risk:
+    """See the module docstring: the user's own word first, the server's word only to be more careful (or when
+    the user said to believe it), and EXTERNAL for anything unknown."""
     override = (server_cfg.get("tools") or {}).get(tool.name)
     if override:
         return Risk(override)
     ann = getattr(tool, "annotations", None)
-    if ann is not None:
-        if getattr(ann, "destructive_hint", None):
-            return Risk.DESTRUCTIVE
-        if getattr(ann, "read_only_hint", None):
-            return Risk.READ
+    if ann is not None and getattr(ann, "destructive_hint", None):
+        return Risk.DESTRUCTIVE
     if server_cfg.get("risk"):
         return Risk(server_cfg["risk"])
-    return Risk.WRITE
+    if ann is not None and getattr(ann, "read_only_hint", None) and server_cfg.get("trust_read_only_hints") is True:
+        return Risk.READ
+    return Risk.EXTERNAL
 
 
 class McpTool(Tool[FreeArgs]):
     Args = FreeArgs
     name = ""          # set per instance
     description = ""
-    risk = Risk.WRITE
+    risk = Risk.EXTERNAL
+    untrusted_output = True  # what another program returns is outside content (ToolExecutor taints the task)
 
     def __init__(self, server: str, session: Any, tool: Any, risk: Risk) -> None:
         self.server = server

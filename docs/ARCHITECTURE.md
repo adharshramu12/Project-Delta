@@ -406,7 +406,7 @@ pulsing dot while it works and a green dot when an answer is waiting.
 | the same screen sent twice | perception cache: unchanged step screenshots are not re-attached, the same question on an unchanged marked view reuses the answer, unchanged window reads after an action are one line |
 | apps with no accessibility tree needing a vision model | Windows OCR text lines with screen points: a cheap text-only model can act (`read_screen_text`, `click_text`) |
 | invisible cost | every answer shows AI calls, tokens (reported, estimate, or "not reported" for CLI AIs) and wall time; also in `GET /api/tasks/{id}` (`usage`, `wall_s`) and the run's `run.json` |
-| a runaway task | optional `agent.token_budget` (default 0 = off): past it, Delta pauses and asks "Keep going / Stop here" |
+| a runaway task | optional `agent.token_budget` (default 0 = off): past it, Delta pauses and asks "Keep going / Stop here". "Keep going" in the same chat continues with the limit raised by one more budget on top of what was already used (the earlier tokens keep counting, and `task.budget_extended` is audited); any other reply starts a new task with the normal budget |
 | the whole page listing after every browser action | on the same page only the changes are sent (`browser.snapshot_diffs`, on by default; `browser.full_snapshot_every`, default 8) |
 | old page listings in the history | a listing superseded by a newer full one becomes a one-line stub; the latest full listing and the diffs after it stay whole; older results keep their page text, not stale refs |
 | element lines sent twice | the AFTER page read drops element lines the model already holds in its listing |
@@ -496,7 +496,7 @@ browser visibly on a page the user picks and keeps it open 30 minutes; Delta nev
   clipboard, shell, Python; listing outside allowed folders) and runs nothing remote while locked;
   `ApprovalBroker.answer` turns a locked remote answer into a logged *deny* and needs the PIN to approve
   deletes and sends from a phone. The Telegram menu also needs the PIN for camera, screenshot, closing apps,
-  keys, Autopilot, switching the browser (`/browser`) and opening the sign-in browser (`/signin`). PIN: scrypt hash, 15-minute unlock. 5 wrong PINs lock remote control until someone at
+  keys, Autopilot, switching the browser (`/browser`) and opening the sign-in browser (`/signin`). PIN: scrypt hash, 15-minute unlock. 5 wrong PINs in a row (count saved in remote_guard.json, so a restart does not clear it) lock remote control until someone at
   the PC unlocks it; `/lock` locks at once. Full list in SECURITY.md.
 - Every remote request shows a Windows notification and is audited. Results (pictures, files) are sent
   back into the chat.

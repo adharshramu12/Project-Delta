@@ -1,5 +1,14 @@
 # Keep line endings consistent for every contributor (Windows, macOS, Linux)
 * text=auto eol=lf
+# Windows scripts are run by cmd.exe and Windows PowerShell 5.1, which expect CRLF line endings
+*.cmd text eol=crlf
+*.bat text eol=crlf
 *.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
 *.png binary
 *.ico binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.docx binary

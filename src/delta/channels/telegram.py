@@ -550,14 +550,22 @@ class TelegramChannel(PCMenu):
         from delta.system.notify import notify
 
         notify("\U0001f4f1 Delta: request from Telegram", text[:120])
-        chats, chat_id = getattr(self.c, "chats", None), self._chat(uid)
-        history = chats.context_for(chat_id) if chats and chat_id else ""
-        if chats and chat_id:
-            chats.add(chat_id, "user", text)
+        from delta.system.vault import VaultUnavailableError
+
+        chats, chat_id, history = getattr(self.c, "chats", None), "", ""
+        try:
+            chat_id = self._chat(uid)
+            history = chats.context_for(chat_id) if chats and chat_id else ""
+            if chats and chat_id:
+                chats.add(chat_id, "user", text)
+        except VaultUnavailableError as e:  # never stored unencrypted: tell the owner why, do nothing else
+            await message.reply_text(str(e))
+            return
         res = await self.c.submit(TaskRequest(text, channel=self.name, user=uid, chat_id=chat_id, history=history))
         if chats and chat_id:
-            chats.add(chat_id, "delta", res.answer, {"status": res.status, "provider": res.provider,
-                                                      "options": res.options, "channel": self.name})
+            with contextlib.suppress(VaultUnavailableError):  # the answer is still sent below
+                chats.add(chat_id, "delta", res.answer, {"status": res.status, "provider": res.provider,
+                                                          "options": res.options, "channel": self.name})
         if res.status == "needs_user" and res.questions:
             await self._start_form(message, uid, res)
             return

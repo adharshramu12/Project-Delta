@@ -9,6 +9,7 @@ An edited file's old version goes to the Recycle Bin first, so edits stay undoab
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import shutil
@@ -20,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from delta.safety.policy import norm_path
 from delta.system import proctree
+from delta.system.childenv import scrubbed_env
 from delta.tools.base import Risk, Tool, ToolResult
 
 TEXT_LIMIT = 2_000_000  # files bigger than this are skipped by search (logs, databases)
@@ -130,9 +132,13 @@ def _backup_to_recycle_bin(p: Path) -> None:
     """Put a copy of the current file in the Recycle Bin under its own name (restorable from there)."""
     from send2trash import send2trash
 
-    tmp = Path(tempfile.mkdtemp(prefix="delta-backup-")) / p.name
-    shutil.copy2(p, tmp)
-    send2trash(str(tmp))
+    folder = Path(tempfile.mkdtemp(prefix="delta-backup-"))
+    tmp = folder / p.name
+    try:
+        shutil.copy2(p, tmp)
+        send2trash(str(tmp))
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)  # the copy is in the Recycle Bin now; the empty folder goes
 
 
 DESTRUCTIVE_CODE = [r"\bos\.(remove|unlink|rmdir|removedirs|kill)\b", r"\bshutil\.(rmtree|move)\b",
@@ -173,12 +179,24 @@ class RunPython(Tool[PythonArgs]):
             ":\n" + args.code[:400]
 
     async def run(self, args: PythonArgs) -> ToolResult:
-        cwd = str(norm_path(args.cwd)) if args.cwd else tempfile.mkdtemp(prefix="delta-py-")
-        script = Path(tempfile.mkdtemp(prefix="delta-script-")) / "task.py"
+        scratch = None if args.cwd else tempfile.mkdtemp(prefix="delta-py-")
+        cwd = str(norm_path(args.cwd)) if args.cwd else str(scratch)
+        script_dir = tempfile.mkdtemp(prefix="delta-script-")
+        try:
+            return await self._run(args, cwd, Path(script_dir) / "task.py")
+        finally:
+            # The script is Delta's own copy: always removed. The scratch folder goes only if the script left
+            # nothing in it, so a file it was asked to make there is never lost.
+            shutil.rmtree(script_dir, ignore_errors=True)
+            if scratch:
+                with contextlib.suppress(OSError):
+                    os.rmdir(scratch)  # fails (and keeps it) when it is not empty
+
+    async def _run(self, args: PythonArgs, cwd: str, script: Path) -> ToolResult:
         script.write_text(args.code, encoding="utf-8")
         proc = await asyncio.create_subprocess_exec(
             sys.executable, "-I", str(script), cwd=cwd, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            stderr=asyncio.subprocess.PIPE, env=scrubbed_env({"PYTHONIOENCODING": "utf-8"}))
         proctree.track(getattr(proc, "pid", None))
         try:
             out, err = await asyncio.wait_for(proc.communicate(), args.timeout_s)

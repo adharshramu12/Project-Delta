@@ -6,8 +6,10 @@ them apart from the owner, so sensitive remote actions need a second factor only
 - A PIN (4-8 digits), set on the PC. Stored only as a salted scrypt hash in Windows Credential
   Manager; never in a file, a log or a chat. A correct PIN unlocks sensitive actions for 15 minutes.
 - Secure by default: with no PIN set, sensitive actions are refused (with how to set one).
-- Brute force: 5 wrong PINs lock ALL remote control. Only someone at the PC can unlock it, never the
-  phone. The owner can also lock it from the phone at any time (/lock).
+- Brute force: 5 wrong PINs in a row lock ALL remote control. Only a correct PIN or an unlock on the PC
+  resets the count, and the count is saved in the data folder, so restarting Delta does not clear it.
+  Only someone at the PC can lift a lock, never the phone. The owner can also lock it from the phone at
+  any time (/lock).
 - Every unlock, failure, lock and sensitive action is audit-logged.
 
 Enforced centrally, not per channel: `Container.submit` refuses remote tasks while locked,
@@ -15,13 +17,16 @@ Enforced centrally, not per channel: `Container.submit` refuses remote tasks whi
 `ApprovalBroker.answer()` asks `approval_refusal()` before accepting an approval button from a phone.
 A channel is remote unless it is one of LOCAL_CHANNELS, so a new chat channel is covered by default.
 
-State that must survive a restart (locked, why) lives in remote_guard.json in Delta's data folder."""
+State that must survive a restart (locked, why, wrong PINs so far) lives in remote_guard.json in Delta's
+data folder, written atomically (a temporary file, flushed, then renamed over the old one)."""
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import threading
 import time
@@ -31,8 +36,7 @@ from typing import Any
 
 PIN_SECRET = "remote_pin"  # the hash's name in the credential store
 UNLOCK_S = 15 * 60
-MAX_FAILURES = 5
-FAILURE_WINDOW_S = 15 * 60
+MAX_FAILURES = 5  # wrong PINs in a row (no time window: waiting never resets the count)
 SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
 
 # What needs the PIN. Everything else (questions, music, apps opening) stays one message away.
@@ -178,10 +182,15 @@ class RemoteGuard:
         self.now = now
         self._lock = threading.Lock()
         self._unlocked_until: dict[str, float] = {}
-        self._failures: list[float] = []
         state = self._load()
         self.locked: bool = bool(state.get("locked"))
         self.locked_reason: str = str(state.get("reason", ""))
+        # Wrong PINs since the last correct one (or the last unlock on the PC). Saved, so a restart, a crash
+        # or a reboot never hands an attacker a fresh set of guesses. Older files have no count: 0.
+        try:
+            self.failures: int = max(0, int(state.get("failures", 0)))
+        except (TypeError, ValueError):
+            self.failures = 0
 
     # --- persistence ---------------------------------------------------------------------------------
     def _load(self) -> dict[str, Any]:
@@ -191,10 +200,19 @@ class RemoteGuard:
             return {}
 
     def _save(self) -> None:
+        """Atomic: a crash leaves either the old file or the new one, never half of one."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"locked": self.locked, "reason": self.locked_reason}), encoding="utf-8")
-        tmp.replace(self.path)
+        tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
+        data = json.dumps({"locked": self.locked, "reason": self.locked_reason, "failures": self.failures})
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.path)
+        finally:
+            with contextlib.suppress(OSError):
+                tmp.unlink()
 
     # --- PIN (set on the PC only) ----------------------------------------------------------------------
     @property
@@ -222,14 +240,16 @@ class RemoteGuard:
             return False, "No PIN is set. On the PC: Delta → Settings → Remote security → Set PIN."
         if check_pin(pin.strip(), stored):
             with self._lock:
-                self._failures.clear()
                 self._unlocked_until[user] = self.now() + UNLOCK_S
+                if self.failures:
+                    self.failures = 0
+                    self._save()
             self.audit.record("guard.unlocked", user=user, minutes=UNLOCK_S // 60)
             return True, f"Unlocked for {UNLOCK_S // 60} minutes."
         with self._lock:
-            t = self.now()
-            self._failures = [f for f in self._failures if t - f < FAILURE_WINDOW_S] + [t]
-            left = MAX_FAILURES - len(self._failures)
+            self.failures += 1
+            left = MAX_FAILURES - self.failures
+            self._save()  # before answering: a restart right after a wrong PIN must not forget it
         self.audit.record("guard.pin_failed", user=user, attempts_left=max(left, 0))
         if left <= 0:
             self.lock(f"{MAX_FAILURES} wrong PINs from Telegram", by=f"guard:{user}")
@@ -248,7 +268,7 @@ class RemoteGuard:
         """Only the PC (dashboard) calls this: a phone can never undo a lock."""
         with self._lock:
             self.locked, self.locked_reason = False, ""
-            self._failures.clear()
+            self.failures = 0
             self._save()
         self.audit.record("guard.lock_lifted", by=by)
 
@@ -257,4 +277,5 @@ class RemoteGuard:
 
     def status(self) -> dict[str, Any]:
         return {"has_pin": self.has_pin, "locked": self.locked, "reason": self.locked_reason,
-                "unlock_minutes": UNLOCK_S // 60, "max_failures": MAX_FAILURES, "sensitive": SENSITIVE}
+                "unlock_minutes": UNLOCK_S // 60, "max_failures": MAX_FAILURES, "failures": self.failures,
+                "sensitive": SENSITIVE}

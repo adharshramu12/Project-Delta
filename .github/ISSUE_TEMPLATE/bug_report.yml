@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in Delta does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do not paste API keys, tokens, PINs, passwords or private files.
+        A security problem? Do not open an issue: see SECURITY.md for how to report it privately.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you asked Delta to do, what it did, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Delta
+        2. Ask "..."
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Delta version
+      description: The output of `delta --version`
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and processor
+      placeholder: "Windows 11 24H2, Intel x64 (or ARM64)"
+  - type: input
+    id: model
+    attributes:
+      label: AI model or provider
+      placeholder: "Groq, Ollama, Claude Code, Codex, ..."
+  - type: dropdown
+    id: autonomy
+    attributes:
+      label: Autonomy level
+      options: [Careful, Balanced, Trusted, Autopilot, "Not sure"]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output of `delta doctor` and relevant log lines
+      description: Logs are in %LOCALAPPDATA%\Delta\logs. Remove anything private first.
+      render: text

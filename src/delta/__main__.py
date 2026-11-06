@@ -54,17 +54,67 @@ async def _cli() -> int:
     return 0
 
 
-def _update() -> int:
-    """Newest version over the installed one (data untouched): the installer again, from GitHub."""
+def running_delta(data_dir: Path) -> int | None:
+    """The process id of a Delta service or terminal that is running now (its delta.pid), else None."""
+    import psutil
+
+    try:
+        pid = int((data_dir / "delta.pid").read_text().strip())
+    except (OSError, ValueError):
+        return None
+    if pid == os.getpid() or not psutil.pid_exists(pid):
+        return None
+    try:
+        name = psutil.Process(pid).name().lower()
+    except psutil.Error:
+        return None
+    return pid if ("python" in name or "delta" in name) else None  # a reused pid of something else is not Delta
+
+
+def _own_processes(root: Path) -> list[int]:
+    """This process plus the launchers above it that live in Delta's own environment (delta.exe and the venv's
+    python.exe start the real interpreter as a child): the installer waits for all of them to exit."""
+    import psutil
+
+    pids = [os.getpid()]
+    with contextlib.suppress(psutil.Error):
+        for parent in psutil.Process().parents():
+            exe = parent.exe()
+            if exe and Path(exe).resolve().is_relative_to(root):
+                pids.append(parent.pid)
+    return pids
+
+
+def _update(stop: bool = False, root: Path | None = None) -> int:
+    """Newest version over the installed one (data untouched): the installer again, from GitHub.
+
+    Safe while Delta runs: files in use cannot be replaced (Windows locks loaded .pyd files), so a running Delta
+    must be closed first. Without --stop this only explains how; with --stop the installer closes it. The
+    installer itself runs in its own window and starts only after this command has exited, so this command's
+    own Python is not holding any of Delta's files either."""
     import subprocess
 
-    root = Path(__file__).resolve().parents[2]
+    root = root or Path(__file__).resolve().parents[2]
     if (root / ".git").exists():
         print("This is a developer checkout: update it with 'git pull', then 'uv sync --extra all'.")
         return 1
     script = root / "scripts" / "install.ps1"
-    return subprocess.call(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
-                            "-FromGitHub", "-InstallDir", str(root), "-NoLaunch"])
+    pid = running_delta(load_settings().data_dir)
+    if pid is not None and not stop:
+        print(f"Delta is running (process {pid}). Its files cannot be replaced while it runs.\n"
+              "Close it (the Shut down button in Delta's window), then run 'delta update' again,\n"
+              "or run 'delta update --stop' to close it and update now.")
+        return 1
+    cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-FromGitHub",
+           "-InstallDir", str(root), "-NoLaunch", "-WaitForPid", ",".join(map(str, _own_processes(root)))]
+    if stop:
+        cmd.append("-StopRunning")
+    flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    # A fixed command line that runs Delta's own installer script (nothing from the user or the model).
+    subprocess.Popen(cmd, creationflags=flags, close_fds=True)  # nosec B603
+    print("The update runs in a new window. It starts as soon as this command has finished, and your data is "
+          "kept.\nOpen Delta again from its icon when it says it is done.")
+    return 0
 
 
 def _doctor() -> int:
@@ -114,10 +164,11 @@ def _doctor() -> int:
     print(f"\nHardware: cpu {snap.cpu_pct:.0f}%  ram {snap.ram_pct:.0f}%  gpu {snap.gpu_util_pct}%  "
           f"gpu_temp {snap.gpu_temp_c}C  vram {snap.vram_pct and round(snap.vram_pct)}%  "
           f"battery {snap.battery_pct}% {'(plugged)' if snap.plugged else '(on battery)'}")
-    from delta.safety.audit import AuditLog
+    from delta.safety.audit import AuditLog, load_or_create_key
 
-    audit_ok = AuditLog(s.data_dir / "audit.jsonl").verify()
-    print(f"Audit log chain: {'intact' if audit_ok else 'TAMPERED'}")
+    report = AuditLog(s.data_dir / "audit.jsonl", load_or_create_key(create=False)).verify_report()
+    audit_ok = report.ok
+    print(f"Audit log chain: {'intact' if audit_ok else 'TAMPERED'} ({report.text()})")
     from delta.config import in_onedrive, known_folder, save_dir
 
     out = save_dir(s.files, create=False)
@@ -177,7 +228,8 @@ def main() -> None:
     cp = sub.add_parser("captcha", help="sites where Delta may read simple captchas for you")
     cp.add_argument("action", choices=["allow", "remove", "list"])
     cp.add_argument("host", nargs="?")
-    sub.add_parser("update", help="update Delta to the newest version (keeps your data)")
+    up = sub.add_parser("update", help="update Delta to the newest version (keeps your data)")
+    up.add_argument("--stop", action="store_true", help="close a running Delta first, then update")
     from delta.scheduler.cli import add_parser as add_schedule_parser
 
     add_schedule_parser(sub)
@@ -197,7 +249,7 @@ def main() -> None:
     if args.cmd == "doctor":
         sys.exit(_doctor())
     if args.cmd == "update":
-        sys.exit(_update())
+        sys.exit(_update(stop=args.stop))
     if args.cmd == "secrets":
         sys.exit(_secrets(args.action, args.name))
     if args.cmd == "schedule":
@@ -229,11 +281,11 @@ def main() -> None:
 
         sys.exit(manage_allowlist(load_settings(), args.action, args.host))
     if args.cmd == "audit":
-        from delta.safety.audit import AuditLog
+        from delta.safety.audit import AuditLog, load_or_create_key
 
-        good = AuditLog(load_settings().data_dir / "audit.jsonl").verify()
-        print("audit chain intact" if good else "AUDIT CHAIN BROKEN: log was modified")
-        sys.exit(0 if good else 1)
+        report = AuditLog(load_settings().data_dir / "audit.jsonl", load_or_create_key(create=False)).verify_report()
+        print(report.text())
+        sys.exit(0 if report.ok else 1)
     if args.cmd == "app":
         # Run hidden from the Desktop shortcut: an error here would otherwise show NOTHING at all.
         try:

@@ -67,6 +67,49 @@ def test_a_new_pin_ends_open_unlocks(tmp_path):
     assert not g.is_unlocked("5")
 
 
+def test_wrong_pins_are_remembered_across_a_restart(tmp_path):
+    """A restart (or a crash, or a reboot) must not hand out a fresh set of guesses (P6)."""
+    g, store, _, _ = make(tmp_path)
+    g.set_pin("4821", by="dashboard")
+    for _ in range(MAX_FAILURES - 1):
+        assert not g.try_pin("5", "0000")[0]
+    restarted, *_ = make(tmp_path, store)
+    assert restarted.failures == MAX_FAILURES - 1 and not restarted.locked
+    ok, msg = restarted.try_pin("5", "9999")
+    assert not ok and restarted.locked and "locked" in msg
+
+
+def test_waiting_does_not_reset_the_count_but_a_right_pin_does(tmp_path):
+    clock = Clock()
+    g, *_ = make(tmp_path, clock=clock)
+    g.set_pin("4821", by="dashboard")
+    for _ in range(MAX_FAILURES - 1):
+        g.try_pin("5", "0000")
+        clock.t += 24 * 3600  # one guess a day: still counted
+    assert g.failures == MAX_FAILURES - 1
+    assert g.try_pin("5", "4821")[0] and g.failures == 0  # the owner got it right: count starts again
+    g.try_pin("5", "0000")
+    again, *_ = make(tmp_path, {"remote_pin": g._get("remote_pin")})
+    assert again.failures == 1
+    again.lock("test", by="dashboard")
+    again.unlock_from_pc("dashboard")
+    assert again.failures == 0 and make(tmp_path)[0].failures == 0
+
+
+def test_the_state_file_is_written_atomically_and_old_files_still_load(tmp_path):
+    import json
+
+    (tmp_path / "remote_guard.json").write_text(json.dumps({"locked": False, "reason": ""}))  # before the count
+    g, *_ = make(tmp_path)
+    assert g.failures == 0 and not g.locked
+    g.set_pin("4821", by="dashboard")
+    g.try_pin("5", "0000")
+    assert json.loads((tmp_path / "remote_guard.json").read_text())["failures"] == 1
+    assert [p.name for p in tmp_path.iterdir()] == ["remote_guard.json"]  # no temporary file left behind
+    (tmp_path / "remote_guard.json").write_text('{"locked": false, "failures": "lots"}')
+    assert make(tmp_path)[0].failures == 0  # a damaged count never crashes start-up
+
+
 # --- in Telegram ---------------------------------------------------------------------------------------
 telegram = pytest.importorskip("telegram")
 

@@ -26,8 +26,9 @@ from delta.memory.store import MemoryStore
 from delta.memory.tools import memory_tools, wire_memory_tools
 from delta.messaging.tools import ChatSessions, messaging_tools
 from delta.safety.approvals import ApprovalBroker
-from delta.safety.audit import AuditLog
+from delta.safety.audit import AuditLog, load_or_create_key
 from delta.safety.policy import PolicyEngine
+from delta.system import childenv, vault
 from delta.system.governor import Governor
 from delta.system.hardware_guard import Assessment
 from delta.system.lifecycle import Lifecycle
@@ -179,6 +180,12 @@ class Container:
             self.lifecycle.on_shutdown("engine", self._close_engine)
         for name, closer in self.closers:
             self.lifecycle.on_shutdown(name, closer)
+        if why := vault.problem():  # Windows without working DPAPI: chats and memories are refused, not stored plain
+            self.warn(why.replace("encrypt this", "encrypt your chats and memories").replace(
+                "so it was not saved", "so they are not saved until this is fixed"))
+        if getattr(self.audit, "key", None) is None and vault.required():
+            self.warn("The audit log is not signed: Windows Credential Manager did not give Delta its audit key. "
+                      "It still keeps its hash chain. Run `delta doctor` for details.")
         self.audit.record("delta.start")
 
     async def _close_engine(self) -> None:
@@ -332,8 +339,10 @@ def build(settings: Settings) -> Container:
     router = ModelRouter(build_providers(settings), settings.llm.routes, allow_local=governor.allow_local,
                          preferred=settings.llm.preferred)
     memory = MemoryStore.from_config(data / "memory.db", settings.memory)
-    audit = AuditLog(data / "audit.jsonl")
+    # Keyed chain (HMAC) when the credential store works; otherwise the plain hash chain as before.
+    audit = AuditLog(data / "audit.jsonl", key_loader=load_or_create_key)
     approvals = ApprovalBroker(settings.agent.approval_timeout_s)
+    childenv.configure(settings.agent.child_env_allow)  # run_shell / run_python never see secret env vars
 
     chats = ChatSessions(router, events, audit)
     live_channels: dict[str, Any] = {}

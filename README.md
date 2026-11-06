@@ -7,7 +7,7 @@
 **Created by [Adharsh Kumar Bachu](https://github.com/adharshramu12)** · Open source · Apache 2.0
 
 Talk to it like a friend. Control it from your phone. It plans, uses your computer and browser,
-asks before anything risky, and **verifies every task before it says "done".**
+asks before anything risky, and **checks the result of every task it works on before it says "done".**
 
 `Codex` · `Claude Code` · `Cline` · `NVIDIA NIM` · `Groq` · `DeepSeek` · `LM Studio` · `Ollama`
 
@@ -20,11 +20,11 @@ asks before anything risky, and **verifies every task before it says "done".**
 |  |  |
 |---|---|
 | 🧠 **Bring the AI you already have** | Use your **ChatGPT/Codex plan** (free or paid), your **Claude Code** subscription, **Cline**, or free API keys from **NVIDIA NIM** and **Groq**. Local models (LM Studio, Ollama) work too. No new subscription needed. |
-| 🔀 **Hybrid, never stuck** | Delta routes every request to the best available AI and **falls back automatically** when one is down, rate-limited or out of credits. Switch the main AI, model or API key any time, even from your phone. |
+| 🔀 **Hybrid, with automatic fallback** | Delta routes every request to the best available AI and **falls back automatically** when one is down, rate-limited or out of credits. Switch the main AI, model or API key any time, even from your phone. |
 | 📱 **Your whole PC from Telegram** | Send a message or a **voice note** from anywhere: run tasks, get screenshots and files, take a webcam photo, change volume, brightness or dark mode, close apps, switch AI or key. **Slack is coming soon.** |
-| 🔐 **Only you can control it** | Paired to **your** Telegram account only. A **PIN** guards sensitive actions, wrong tries lock remote control, and your PC alerts you. Every action goes into a tamper-evident audit log. |
+| 🔐 **Only you can control it** | Paired to **your** Telegram account only. A **PIN** guards sensitive actions, wrong tries lock remote control, and your PC alerts you. Every action goes into an audit log that is hash-chained and signed, so edits show up. |
 | 🆘 **Help when you need it** | Tell Delta you're unwell or in trouble and it can **WhatsApp your chosen emergency contacts** in your name and **start a WhatsApp call**, from the PC or your phone. A clear instruction acts at once; otherwise it asks first. For anything serious it tells you to call **112**. |
-| ✅ **Verified, not hopeful** | Plan → act → **check the result against clear goals** → retry or tell you honestly what failed. |
+| ✅ **Verified, not hopeful** | Plan → act → **check the result against clear goals** → retry or tell you honestly what failed. Checks catch most mistakes, not all: an answer is only as true as the page or file it came from. |
 | 🤝 **A partner, not a chatbot** | Warm and honest in your own tone. It reads the mood, corrects you kindly when you're wrong, and says clearly what it can and can't do. |
 | 🪶 **Light on your laptop** | ~100 MB in the background, near-zero CPU at rest, **no GPU** unless you choose a local model. **Shutdown** stops everything. |
 | 🪙 **Careful with tokens** | Greetings cost 0 tokens. A chat reply and what Delta learns from it come from **one** AI call. Each step sends only the tools it needs, and a browser step on the same page sends only what changed. Every answer shows its tokens and time; you can set a per-task token limit. |
@@ -136,8 +136,18 @@ pick your AI, set permissions, and pair your Telegram in 3 steps.
 - **Double-click the icon** to open it again.
 - **⏻ Shutdown** stops everything and frees all memory.
 
-`delta update` gets the newest version. `scripts\uninstall.ps1` removes Delta (your chats and
-memory stay unless you add `-RemoveData`).
+`delta update` gets the newest version. Delta's files cannot be replaced while it runs, so close it first
+(the Shut down button), or run `delta update --stop` to have the update close it for you. The update runs in
+its own window. `scripts\uninstall.ps1` removes Delta (your chats and memory stay unless you add `-RemoveData`).
+
+- **Python:** the installer reuses a signed 64-bit (x64) Python 3.12 that is already installed (it asks the
+  `py` launcher and the registry), never the Microsoft Store one, and otherwise installs the official one.
+- **Windows on ARM** (Snapdragon, Copilot+ PCs): Delta uses the x64 build of Python 3.12, which Windows runs
+  under its built-in emulation, because some of Delta's packages (OpenCV) have no ARM64 build yet. This has not
+  been tested on a real ARM PC yet (see [docs/NOT_VERIFIED.md](docs/NOT_VERIFIED.md)).
+- **Settings:** Delta reads its shipped `config\` folder plus your own `settings.yaml` in
+  `%LOCALAPPDATA%\Delta`. To use another config folder, set `DELTA_CONFIG_DIR`. (Before 0.2.0, a
+  `config\delta.yaml` in whatever folder you started `delta` from was picked up silently; it no longer is.)
 
 ## Scheduled tasks and reminders
 
@@ -193,9 +203,9 @@ arguments with secrets masked, a short result, the model, tokens, time and the s
   quick tools), and every program it started is ended with all its child processes. Only processes Delta
   started for that call are touched, never your own browser or apps. Delta's own browser profile is
   restarted once per task if it stops responding.
-- **Evals.** `delta eval run` plays the 70 tasks in `evals/tasks` (files, documents, web pages on a local
-  test site, apps, memory, self-heal drills that break things on purpose, set-of-marks and OCR on drawn
-  pictures, and read-only helpers) and checks each result with a fixed rule (a file's contents, the page state, the
+- **Evals.** `delta eval run` plays the 86 tasks in `evals/tasks` (files, documents, web pages on a local
+  test site, apps, memory, learning, self-heal drills that break things on purpose, set-of-marks and OCR on
+  drawn pictures, and read-only helpers) and checks each result with a fixed rule (a file's contents, the page state, the
   answer). By default it uses a scripted model: no keys, no internet, no cost, and that is what CI runs.
   `delta eval run --model groq` (or any provider you set up) measures a real model and costs what that
   provider charges. Reports (JSON and Markdown: success rate, tokens, time, cost estimate, each task) go to
@@ -354,9 +364,13 @@ grounding: {mode: report, max_checks: 1}   # report | strict | off
   task. Never saved, and never offered for permanent deletes, terminals or links carrying data.
 - **Hard limits:** passwords, payment details and security settings are always refused.
 - **Prompt-injection containment:** after Delta reads a web page, file or message, anything that sends,
-  deletes or runs code needs your yes, even in autopilot. A malicious page can't quietly take over.
+  deletes or runs code needs your yes, even in autopilot. A malicious page cannot quietly send, delete or run
+  code; it can still mislead an answer, so check important results ([SECURITY.md](SECURITY.md)).
 - **Encrypted at rest:** memories and chats are encrypted with Windows DPAPI, readable only by your
-  Windows account.
+  Windows account. If encryption is not working, Delta refuses to save them rather than storing them unencrypted.
+- **No secrets for child programs:** commands and scripts Delta runs for you do not get API keys, tokens or
+  passwords from Delta's environment, and MCP add-on tools are not trusted just because they say they are
+  read-only.
 - **Emergency alerts:** contacts are stored encrypted; during a help request Delta reaches nobody
   without your yes (even in autopilot) unless your own message clearly says to.
 - **Captchas, only if you opt in:** off by default. For your own accounts (e.g. a university portal) you can
@@ -364,7 +378,8 @@ grounding: {mode: report, max_checks: 1}   # report | strict | off
   asks you). Otherwise you type it on the PC and approve. reCAPTCHA, hCaptcha and Cloudflare checks are
   always refused. Details: [SECURITY.md](SECURITY.md#captchas-opt-in-your-own-accounts-only).
 - **Your rules:** `config/boundaries.yaml` sets allowed folders, apps, sites, quiet hours and autonomy.
-- **Tamper-evident audit log** of every decision and tool call.
+- **Tamper-evident audit log** of every decision and tool call: hash-chained and signed with a key in Windows
+  Credential Manager. `delta audit verify` checks it.
 - Full threat model and known limits: [SECURITY.md](SECURITY.md).
 
 ## Architecture
@@ -382,7 +397,7 @@ grounding: {mode: report, max_checks: 1}   # report | strict | off
              ▼
   Model router ── Codex ▸ Claude Code ▸ Cline ▸ NIM ▸ Groq ▸ DeepSeek ▸ LM Studio ▸ Ollama
                         ▲
-  Governor (CPU/RAM/GPU/battery)              Audit log (hash chain)
+  Governor (CPU/RAM/GPU/battery)              Audit log (signed hash chain)
 ```
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Add-ons and MCP: [docs/ADDONS.md](docs/ADDONS.md)
@@ -394,7 +409,7 @@ pip install uv
 uv sync --extra all          # plain 'uv sync' = core agent + dashboard
 uv run delta doctor          # checks your setup
 uv run delta run --open      # start the service and open the app
-uv run pytest -q             # 290+ tests
+uv run pytest -q             # about 1,090 tests (CI on Windows, v0.2.0: full suite 1,069 passed, 17 skipped)
 ```
 
 | File | What |
@@ -405,6 +420,14 @@ uv run pytest -q             # 290+ tests
 
 Runtime data (memory, audit log, logs) lives in `%LOCALAPPDATA%\Delta`.
 
+CI runs on every push and pull request (`.github/workflows/ci.yml`), all on clean Windows runners: `full`
+(ruff, mypy and every test with all extras), `minimal` (a plain install: core tests, optional ones skip),
+`e2e-windows` (Delta's browser tools in a real Chrome or Edge against a local test site) and `evals-scripted`
+(the eval suite with a scripted model, which must pass 100%). A `security` job (bandit, pip-audit on the
+locked dependencies) and CodeQL report but do not block. The tests run on Linux too for development, except
+the ones that need Windows (the registry, PowerShell, Windows paths). Release history: [CHANGELOG.md](CHANGELOG.md).
+What has not been checked on real hardware: [docs/NOT_VERIFIED.md](docs/NOT_VERIFIED.md).
+
 ## Roadmap
 
 - [x] Hybrid model router: Codex, Claude Code, Cline, NIM, Groq, DeepSeek, LM Studio, Ollama
@@ -413,7 +436,7 @@ Runtime data (memory, audit log, logs) lives in `%LOCALAPPDATA%\Delta`.
 - [x] Question forms, memory, skill learning, partner-style chat
 - [x] One-line installer, setup wizard, light/dark theme, low resource use
 - [ ] Slack control (in progress)
-- [ ] Scheduled tasks and routines
+- [x] Scheduled tasks and routines
 - [x] Prompt-injection containment (enforced in code) and DPAPI encryption of memory and chats
 - [x] Emergency help: WhatsApp alerts and calls to chosen contacts, from the app or Telegram
 - [ ] End-to-end encrypted channel (Matrix), signed releases

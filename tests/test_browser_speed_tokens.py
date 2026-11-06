@@ -412,6 +412,53 @@ async def test_token_budget_pauses_and_asks(tmp_path):
 
 
 @pytest.mark.usefixtures("any_os")
+async def test_keep_going_continues_with_an_explicitly_extended_budget(tmp_path):
+    """P8: "Keep going" must not be a silent fresh budget. The limit grows by one budget on top of what was
+    already used, the earlier tokens keep counting, and the extension is in the audit log."""
+    orch, audit, _ = make(tmp_path, {})
+    orch.s.agent.token_budget = 1000
+    first = TaskRequest("research this", channel="api", chat_id="c1")
+    tok = orch_mod.CURRENT_REQUEST.set(first)
+    try:
+        orch._begin_budget(first)
+        orch.router.meter.clear()
+        orch.router.meter["input"] = 1200
+        question = orch._over_budget()
+    finally:
+        orch_mod.CURRENT_REQUEST.reset(tok)
+    assert "limit of 1,000 tokens per task" in question and "new limit 2,200" in question
+
+    again = TaskRequest("Keep going", channel="api", chat_id="c1")
+    tok = orch_mod.CURRENT_REQUEST.set(again)
+    try:
+        orch._begin_budget(again)
+        assert orch._budget[again.id] == (1200, 2200)
+        orch.router.meter.clear()
+        orch.router.meter["input"] = 500  # 1,700 in total: under the extended limit
+        assert orch._over_budget() == ""
+        orch.router.meter["input"] = 1100  # 2,300 in total: asks again, naming the extended limit
+        q2 = orch._over_budget()
+    finally:
+        orch_mod.CURRENT_REQUEST.reset(tok)
+    assert "2,300 tokens" in q2 and "extended limit of 2,200" in q2
+    assert any(r["event"] == "task.budget_extended" and r["data"]["budget"] == 2200 for r in audit.tail(10))
+
+
+@pytest.mark.usefixtures("any_os")
+async def test_a_new_request_or_another_chat_gets_the_normal_budget(tmp_path):
+    orch, _, _ = make(tmp_path, {})
+    orch.s.agent.token_budget = 1000
+    orch._budget_stops["c1"] = (1200, 1000)
+    other_chat = TaskRequest("keep going", channel="api", chat_id="c2")
+    orch._begin_budget(other_chat)
+    assert orch._budget[other_chat.id] == (0, 1000) and "c1" in orch._budget_stops
+    new_task = TaskRequest("what's the weather", channel="api", chat_id="c1")
+    orch._begin_budget(new_task)
+    assert orch._budget[new_task.id] == (0, 1000) and "c1" not in orch._budget_stops  # any other answer: fresh
+    assert orch_mod.KEEP_GOING.match("Yes, keep going") and not orch_mod.KEEP_GOING.match("stop here")
+
+
+@pytest.mark.usefixtures("any_os")
 async def test_no_budget_by_default(tmp_path):
     assert Settings().agent.token_budget == 0
     orch, _, _ = make(tmp_path, {

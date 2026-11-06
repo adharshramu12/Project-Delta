@@ -390,7 +390,7 @@ class ClaudeCodeProvider(CLIProvider):
         model, effort = self.model_for(task), self.effort_for(task)
         full = inject_tool_prompt(messages, tools) if tools else list(messages)
         system = str(full[0].get("content", "")) if full else ""
-        convo = f"{model}/{effort}/" + hashlib.sha1(system[:20000].encode()).hexdigest()
+        convo = f"{model}/{effort}/" + hashlib.sha1(system[:20000].encode(), usedforsecurity=False).hexdigest()
         sess = self._live.get(convo)
         if sess is not None and sess.continues(messages):
             new = flatten_messages(messages[sess.sent + 1:])  # +1: skip our own last reply
@@ -650,25 +650,46 @@ class CodexProvider(CLIProvider):
         self._live: dict[str, _CodexSession] = {}
         self._spare: dict[str, _CodexSession] = {}
         self._no_server = False  # this Codex has no app server: one-shot only
-        self._plain = False  # this Codex refused lean_codex_args(): run it as configured
+        # Fail closed: this Codex refused lean_codex_args() (the overrides that switch off its plugins, MCP servers
+        # and shell for Delta). It is then NOT run with the user's own setup; it is reported unusable instead.
+        self._refused_lean = False
+
+    def _refuse(self) -> LLMError:
+        return LLMError("Codex would not start with Delta's safety settings (its plugins, MCP servers and shell "
+                        "switched off), so Delta did not use it. Update Codex (npm install -g @openai/codex) or "
+                        "choose another AI in Settings.")
 
     async def _session(self, model: str) -> _CodexSession | None:
         exe = self.executable()
+        if self._refused_lean:
+            raise self._refuse()
         if exe is None or self._no_server:
             return None
-        for extra in ([] if self._plain else lean_codex_args(), []):
-            try:
-                return await _CodexSession.start(exe, model, model, extra=extra)
-            except (LLMError, OSError, TimeoutError, KeyError, ValueError):
-                if extra:  # this Codex rejects an override: keep working, just without the savings
-                    log.warning("codex.lean_rejected")
-                    self._plain = True
-        self._no_server = True  # fall back to `codex exec` from now on
-        return None
+        try:
+            return await _CodexSession.start(exe, model, model, extra=lean_codex_args())
+        except (LLMError, OSError, TimeoutError, KeyError, ValueError):
+            pass
+        # Why did it fail? Only to tell the two cases apart: a plain start is closed straight away, before any
+        # turn, so the user's own plugins, MCP servers and shell never get to act for Delta.
+        try:
+            probe = await _CodexSession.start(exe, model, model, extra=[])
+        except (LLMError, OSError, TimeoutError, KeyError, ValueError):
+            self._no_server = True  # no app server at all: `codex exec` (still with the lean overrides)
+            return None
+        probe.close()
+        log.warning("codex.lean_rejected")
+        self._refused_lean = True
+        raise self._refuse()
 
     async def prewarm(self, task: str) -> None:
         model = self.model_for(task)
-        if model not in self._spare and (s := await self._session(model)):
+        if model in self._spare:
+            return
+        try:
+            s = await self._session(model)
+        except LLMError:
+            return  # refused (fail closed): the real call reports it
+        if s is not None:
             self._spare[model] = s
 
     async def complete(
@@ -681,7 +702,7 @@ class CodexProvider(CLIProvider):
         model, effort = self.model_for(task), self.effort_for(task)
         full = inject_tool_prompt(messages, tools) if tools else list(messages)
         system = str(full[0].get("content", "")) if full else ""
-        convo = f"{model}/" + hashlib.sha1(system[:20000].encode()).hexdigest()
+        convo = f"{model}/" + hashlib.sha1(system[:20000].encode(), usedforsecurity=False).hexdigest()
         sess = self._live.get(convo)
         if sess is not None and sess.alive() and sess.continues(messages):
             images = _image_urls(messages[sess.sent + 1:])
@@ -739,7 +760,7 @@ class CodexProvider(CLIProvider):
     def command(self, exe: str, model: str, out_file: Path, effort: str = "",
                 images: list[Path] | None = None) -> list[str]:
         cmd = [exe, "exec", "--skip-git-repo-check", "--sandbox", "read-only",
-               "--output-last-message", str(out_file), *([] if self._plain else lean_codex_args())]
+               "--output-last-message", str(out_file), *lean_codex_args()]
         for f in images or []:
             cmd += ["--image", str(f)]
         if model:
