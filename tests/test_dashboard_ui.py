@@ -4,6 +4,7 @@ other sites (it must work offline), no HTML built from text, and every element t
 from __future__ import annotations
 
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,40 @@ def client(tmp_path, monkeypatch):
         yield tc
 
 
+class Tags(HTMLParser):
+    """Every start tag of index.html with its attributes, read by the standard HTML parser."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tags: list[tuple[str, dict[str, str | None]]] = []
+        self.script_text: list[str] = []
+        self._in_script = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.tags.append((tag, dict(attrs)))
+        self._in_script = tag == "script"
+
+    def handle_endtag(self, tag: str) -> None:
+        self._in_script = False
+
+    def handle_data(self, data: str) -> None:
+        if self._in_script and data.strip():
+            self.script_text.append(data)
+
+
+def parsed() -> Tags:
+    t = Tags()
+    t.feed(HTML)
+    return t
+
+
 def referenced() -> list[str]:
-    return re.findall(r'<(?:script|link)\b[^>]*?(?:src|href)="(/[^"]+)"', HTML)
+    out = []
+    for tag, attrs in parsed().tags:
+        url = attrs.get("src") if tag == "script" else attrs.get("href") if tag == "link" else None
+        if url and url.startswith("/"):
+            out.append(url)
+    return out
 
 
 def test_every_file_the_page_loads_is_served_with_its_type(client):
@@ -66,11 +99,13 @@ def test_the_page_has_a_strict_content_security_policy(client):
 
 def test_no_inline_script_style_or_event_handler():
     # The policy above would block them; this says why a page would break instead of failing quietly.
-    for m in re.finditer(r"<script\b([^>]*)>", HTML):
-        assert "src=" in m.group(1), m.group(0)
-    assert "<style" not in HTML
-    assert not re.search(r"\sstyle=", HTML)
-    assert not re.search(r"\son[a-z]+\s*=", HTML)
+    t = parsed()
+    for tag, attrs in t.tags:
+        assert tag != "style", "a <style> element"
+        assert tag != "script" or attrs.get("src"), "an inline <script>"
+        assert "style" not in attrs, f"a style attribute on <{tag}>"
+        assert not [a for a in attrs if a.startswith("on")], f"an event handler attribute on <{tag}>"
+    assert not t.script_text
 
 
 def test_nothing_is_loaded_from_another_site():
@@ -84,7 +119,10 @@ def test_nothing_is_loaded_from_another_site():
             assert url.startswith(allowed), f"{name}: {url}"
         if name.endswith(".css"):
             assert "@import" not in text and "url(" not in text, name
-    assert not re.search(r"<(?:link|script|img|iframe)\b[^>]*(?:src|href)=\"(?:https?:)?//", HTML)
+    for tag, attrs in parsed().tags:
+        for key in ("src", "href"):
+            url = attrs.get(key) or ""
+            assert tag == "a" or not re.match(r"(?:https?:)?//", url), f"<{tag} {key}={url}>"
 
 
 def test_no_html_is_built_from_text():
