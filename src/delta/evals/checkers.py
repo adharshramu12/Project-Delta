@@ -573,7 +573,7 @@ def _password_nowhere(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
         if root is None:
             continue
         for f in root.rglob("*"):
-            if f.is_file() and secret.encode() in _read_bytes(f):
+            if f.is_file() and secret.encode() in _read_bytes(f):  # a file gone meanwhile held nothing
                 return False, f"the password is in {f.name}"
     return True, "the password stayed in the sign-in form"
 
@@ -585,6 +585,8 @@ def _read_bytes(path: Path, wait_s: float = 5.0) -> bytes:
     while True:
         try:
             return path.read_bytes()
+        except FileNotFoundError:
+            return b""  # removed meanwhile (a browser's lock file as it shuts down)
         except PermissionError:
             if time.monotonic() > deadline:
                 raise

@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from delta.core.state import CURRENT_REQUEST, TaskRequest
-from delta.evals.portal_fixture import STANDIN
+from delta.evals.standin_vault import STANDIN
 from delta.logins.cli import run_cli
 from delta.logins.origin import OriginError, lookalike, mismatch, parse_origin, same_origin_login_url
 from delta.logins.service import LoginService

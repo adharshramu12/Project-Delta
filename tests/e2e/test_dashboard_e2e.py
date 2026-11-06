@@ -83,6 +83,7 @@ async def check_dashboard(page: Any, base: str, token: str) -> None:
         assert title and title.strip(), view
     # Settings loaded the real values; the theme toggle switches and comes back.
     await page.click(".nav-item[data-go='settings']")
+    await page.wait_for_selector("input[name=s_autonomy]:checked", state="attached", timeout=10000)  # loads async
     assert await page.locator("input[name=s_autonomy]:checked").count() == 1
     before = await page.get_attribute("html", "data-mode")
     for _ in range(3):

@@ -55,5 +55,5 @@
     if (r.ok) load();
   };
   const prev = D.views.settings.show;
-  D.views.settings.show = o => { load(); return prev(o); };
+  D.views.settings.show = o => { const r = prev(o); load(); return r; };  // Settings' own values load first
 })();

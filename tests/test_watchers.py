@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from delta.evals.portal_fixture import STANDIN
+from delta.evals.standin_vault import STANDIN
 from delta.logins.service import LoginService
 from delta.logins.signin import SignInResult
 from delta.logins.store import LoginStore

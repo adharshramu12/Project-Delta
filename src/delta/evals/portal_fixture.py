@@ -295,36 +295,14 @@ EVAL_PASSWORD = "Eval-Portal-Pass-5180"  # made up; checks assert it never leave
 NEW_EXAM = ("CS399 Compiler Design", "2026-12-02", "10:00", "Hall C")
 
 
-class HandleSealer:
-    """A stand-in for DPAPI in tests and on developer machines without it (Linux, macOS). seal() returns an opaque
-    random handle and keeps the text in this process only, so nothing written to disk is derived from the secret
-    (like DPAPI, and unlike a reversible "encoding"). unseal() of an unknown handle raises ValueError, which the stores
-    treat like a value sealed by another Windows account."""
-
-    def __init__(self) -> None:
-        self._kept: dict[str, str] = {}
-
-    def seal(self, text: str) -> str:
-        handle = "standin:" + secrets.token_hex(16)
-        self._kept[handle] = text
-        return handle
-
-    def unseal(self, sealed: str) -> str:
-        try:
-            return self._kept[sealed]
-        except KeyError:
-            raise ValueError("not sealed in this process") from None
-
-
-STANDIN = HandleSealer()  # one per process, so a store reopened in the same run can read what it sealed
-
-
 def sealers() -> dict[str, Any]:
     """Real DPAPI on Windows, the in-process stand-in elsewhere (developer runs on Linux or macOS)."""
     from delta.system import vault
 
     if vault.available():
         return {}
+    from delta.evals.standin_vault import STANDIN
+
     return {"seal": STANDIN.seal, "unseal": STANDIN.unseal}
 
 

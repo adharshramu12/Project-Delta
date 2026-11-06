@@ -426,10 +426,13 @@ def test_trailing_schedule_words_are_cut_in_linear_time():
     assert time.monotonic() - started < 1.0
 
 
-def test_app_tokens_are_written_only_when_sealed(tmp_path):
+def test_app_tokens_are_written_only_when_sealed(tmp_path, monkeypatch):
     from delta.connectors.secrets import SecretBox, SecretsUnavailableError
+    from delta.system import vault
 
-    keeps = SecretBox(tmp_path, seal=lambda t: "wrapped:" + t, unseal=lambda s: s[8:])
+    # a "sealer" that keeps the text inside its output (patched in, so no fake sealer is wired into SecretBox)
+    monkeypatch.setattr(vault, "seal_strict", lambda t: vault.PREFIX + t)
+    keeps = SecretBox(tmp_path)
     with pytest.raises(SecretsUnavailableError):
         keeps.save("notion", {"access_token": "abc"})  # the plain text is still in there: refused
     assert not list(tmp_path.iterdir())
