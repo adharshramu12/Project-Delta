@@ -139,3 +139,82 @@ async def test_attaching_files_in_the_dashboard(mgr, dashboard, tmp_path):
     base, token = dashboard
     page = await mgr.page()
     await asyncio.wait_for(attach_and_send(page, base, token, tmp_path), timeout=120)
+
+
+TELEGRAM_ID = "6057519957"
+# Where the shell, the sidebar and the settings save bar are, and how far the page itself is scrolled.
+LAYOUT = """() => { const box = s => document.querySelector(s).getBoundingClientRect();
+  const app = box('#app'), side = box('.sidebar'), bar = box('.savebar'), list = box('#chatlist');
+  return {w: innerWidth, h: innerHeight, scrollY: document.scrollingElement.scrollTop,
+          pageH: document.scrollingElement.scrollHeight, appTop: app.top, appH: app.height, sideH: side.height,
+          barBottom: bar.bottom, listBottom: list.bottom}; }"""
+
+
+async def scroll_settings_to_the_end(page: Any) -> None:
+    # the last section in the settings menu: its scrollIntoView used to scroll the whole page up past the window
+    await page.click(".settings-nav a[href='#set_about']")
+    await page.wait_for_timeout(400)
+
+
+def assert_fills_window(m: dict[str, Any], w: int, h: int) -> None:
+    assert (m["w"], m["h"]) == (w, h), m
+    assert m["scrollY"] == 0 and m["pageH"] <= h, m  # the page itself never scrolls
+    assert m["appTop"] == 0 and abs(m["appH"] - h) <= 1, m  # the shell fills the window, top to bottom
+    assert abs(m["sideH"] - h) <= 1, m  # and so does the sidebar
+    assert abs(m["barBottom"] - h) <= 1, m  # the save bar sits at the bottom of the window
+    assert m["listBottom"] > h / 2, m  # the chat list uses the sidebar's height, not a sliver at the top
+
+
+async def check_full_height(page: Any, base: str, token: str) -> None:
+    """The dashboard fills the whole window with Settings scrolled to its last section: in a window that starts small
+    (the app window opens at 1180x800), after it is maximized to 1920x1080, and after it is restored."""
+    small, large = (1180, 560), (1920, 1080)
+    await page.set_viewport_size({"width": small[0], "height": small[1]})
+    await page.goto(f"{base}/#token={token}")
+    await page.wait_for_selector(".nav-item[data-go='chat'][aria-current='page']", timeout=15000)
+    with contextlib.suppress(Exception):
+        await page.wait_for_selector("#setup[open]", timeout=5000)
+        await page.click("#wclose")
+    await page.click(".nav-item[data-go='settings']")
+    await page.wait_for_selector("input[name=s_autonomy]:checked", state="attached", timeout=10000)
+    for w, h in (small, large, small, large):
+        await page.set_viewport_size({"width": w, "height": h})
+        await page.wait_for_timeout(200)
+        await scroll_settings_to_the_end(page)
+        assert_fills_window(await page.evaluate(LAYOUT), w, h)
+
+
+async def test_dashboard_fills_the_window(mgr, dashboard):
+    base, token = dashboard
+    page = await mgr.page()
+    await asyncio.wait_for(check_full_height(page, base, token), timeout=120)
+
+
+async def check_telegram_title(page: Any, base: str, token: str) -> None:
+    """A Telegram conversation is stored as "Telegram <chat id>"; the window title and the sidebar never show the id."""
+    import httpx
+
+    auth = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(base_url=base, headers=auth, trust_env=False) as http:
+        chat = (await http.post("/api/chats")).json()
+        r = await http.patch(f"/api/chats/{chat['id']}", json={"title": f"Telegram {TELEGRAM_ID}"})
+        assert r.status_code == 200 and TELEGRAM_ID not in r.text
+    await page.goto(f"{base}/#token={token}")
+    await page.wait_for_selector(".nav-item[data-go='chat'][aria-current='page']", timeout=15000)
+    with contextlib.suppress(Exception):
+        await page.wait_for_selector("#setup[open]", timeout=5000)
+        await page.click("#wclose")
+    item = page.locator(f"#chatlist .citm[data-id='{chat['id']}'] .citm-main")
+    await item.wait_for(state="visible", timeout=10000)
+    await item.click()
+    await page.wait_for_function("() => document.title.includes('Telegram')", timeout=10000)
+    title = await page.title()
+    assert TELEGRAM_ID not in title and title == "Telegram chat · Delta", title
+    assert TELEGRAM_ID not in await page.inner_text("#chatlist")
+    assert TELEGRAM_ID not in await page.inner_text("#pagetitle")
+
+
+async def test_telegram_chat_id_is_not_shown(mgr, dashboard):
+    base, token = dashboard
+    page = await mgr.page()
+    await asyncio.wait_for(check_telegram_title(page, base, token), timeout=120)

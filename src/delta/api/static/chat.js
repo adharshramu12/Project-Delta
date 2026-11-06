@@ -481,6 +481,7 @@
           main.replaceWith(inp); inp.focus(); inp.select();
           let done = false;
           const save = () => { if (done) return; done = true;
+            if (inp.value.trim() === c.title) { refreshChats(); return; }  // unchanged: keep the stored name
             api(`/api/chats/${encodeURIComponent(c.id)}`, {method: "PATCH", body: JSON.stringify({title: inp.value})})
               .then(ch => { if (c.id === current) setCurrent(c.id, ch.title); refreshChats(); }).catch(refreshChats); };
           inp.onkeydown = ev => { if (ev.key === "Enter") inp.blur(); if (ev.key === "Escape") { done = true; refreshChats(); } };
