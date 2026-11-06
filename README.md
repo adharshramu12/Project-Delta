@@ -167,8 +167,8 @@ Keys are stored in **Windows Credential Manager**, never in files.
 2. **Install.** In the extracted folder, double-click **`Install Delta.cmd`**. If Windows shows "Windows protected
    your PC" or a security warning for a downloaded file, choose **More info > Run anyway** (or **Run**). The installer
    reuses or installs the official, signed Python 3.12 (64-bit), copies Delta to
-   `%LOCALAPPDATA%\Programs\Delta`, installs its packages (a few minutes), and adds a **Delta** icon to your
-   Desktop and Start menu. A log is kept at `%TEMP%\delta-install.log`.
+   `%LOCALAPPDATA%\Programs\Delta`, installs its packages (a few minutes), adds a **Delta** icon to your
+   Desktop and Start menu, and adds the `delta` command for terminals. A log is kept at `%TEMP%\delta-install.log`.
 3. **Set up.** Delta opens its setup wizard: pick your AI, set permissions, and pair your Telegram in 3 steps.
    With no AI chosen yet, Delta still opens and says what to add.
 
@@ -184,9 +184,30 @@ the internet; Delta says so plainly when it cannot reach them.
 - **Double-click the icon** to open it again.
 - **⏻ Shutdown** stops everything and frees all memory.
 
-`delta update` gets the newest version. Delta's files cannot be replaced while it runs, so close it first
-(the Shut down button), or run `delta update --stop` to have the update close it for you. The update runs in
-its own window. `scripts\uninstall.ps1` removes Delta (your chats and memory stay unless you add `-RemoveData`).
+**The `delta` command.** The installer adds a `delta` command for your Windows account: a small `delta.cmd` in
+`%LOCALAPPDATA%\Programs\Delta\bin`, added to your own Path (no administrator rights, the PC-wide Path is not
+changed). Open a new PowerShell window after installing to use it; a window that was already open does not see it.
+
+**Update.** Choose **Update Delta** in the Start menu (in the Delta folder), or run `delta update` in a new
+PowerShell window. Delta's files cannot be replaced while it runs, so close it first (the Shut down button), or run
+`delta update --stop` to have the update close it for you (that is what **Update Delta** does). The update runs in
+its own window and keeps your data.
+
+If PowerShell says `delta` is not recognized (an install from before the `delta` command existed, or a window that
+was open during the install), paste the install line again. It updates Delta in place and keeps your data:
+
+```powershell
+irm https://raw.githubusercontent.com/adharshramu12/Project-Delta/main/scripts/install.ps1 | iex
+```
+
+Or run Delta's own Python by its full path:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Delta\.venv\Scripts\python.exe" -m delta update --stop
+```
+
+`scripts\uninstall.ps1` removes Delta and its `delta` command (your chats and memory stay unless you add
+`-RemoveData`).
 
 - **Python:** the installer reuses a signed 64-bit (x64) Python 3.12 that is already installed (it asks the
   `py` launcher and the registry), never the Microsoft Store one, and otherwise installs the official one.
@@ -211,7 +232,9 @@ its own window. `scripts\uninstall.ps1` removes Delta (your chats and memory sta
 | Delta shows "could not be read (the file is damaged ...)" at start | A power cut or full disk damaged one of Delta's files. Delta kept the damaged copy (`*.damaged-<date>`) in `%LOCALAPPDATA%\Delta` and started a new one; nothing else changed. |
 | "Delta could not read its settings file ..." | Fix `%LOCALAPPDATA%\Delta\settings.yaml`, or rename it to go back to the default settings. Chats, memories and keys are kept. |
 | "Delta's save folder ... is not available" | The folder is on a drive that is not connected. Plug it in, or pick another folder in Settings. |
-| The icon does nothing, or "Delta is taking too long to start" | Open `%LOCALAPPDATA%\Delta\logs\service.log` (last lines), or run `delta doctor` in a terminal from `%LOCALAPPDATA%\Programs\Delta\.venv\Scripts`. |
+| The icon does nothing, or "Delta is taking too long to start" | Open `%LOCALAPPDATA%\Delta\logs\service.log` (last lines), or run `delta doctor` in a new PowerShell window. |
+| "delta is not recognized" in PowerShell | Close that window and open a new one (in Windows Terminal, close every tab and open it again). Still not found: paste the install line again (it updates in place and keeps your data), or use the full path: `& "$env:LOCALAPPDATA\Programs\Delta\.venv\Scripts\python.exe" -m delta` followed by the command, for example `update --stop`. |
+| The installer says another program called delta comes first on your Path | Another tool named `delta` (for example the git diff tool) runs instead. Use the full path it prints, or the full Python path above. |
 | "No AI model is available" | Add a free Groq key in Setup, sign in to Codex or Claude Code, or start LM Studio or Ollama. |
 | A connected app says Node.js or uv is not installed | Run the command it shows (`winget install OpenJS.NodeJS.LTS` or `winget install astral-sh.uv`), then connect again. |
 | Uninstall says it "could not remove" the folder | Restart the PC and run `scripts\uninstall.ps1` again. |
