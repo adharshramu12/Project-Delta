@@ -152,8 +152,13 @@ class Container:
 
     async def start(self) -> None:
         self.lifecycle.acquire_single_instance()
-        folder = save_dir(self.settings.files)
-        await asyncio.to_thread(ensure_desktop_shortcut, folder)
+        try:
+            folder = save_dir(self.settings.files)
+        except OSError as e:  # a save folder on a drive that is gone (USB, network) must not stop start-up
+            self.warn(f"Delta's save folder {self.settings.files.save_dir} is not available ({e.strerror or e}). "
+                      "Plug the drive back in, or choose another folder in Settings.")
+        else:
+            await asyncio.to_thread(ensure_desktop_shortcut, folder)
         await self.governor.start()
         self.lifecycle.on_shutdown("governor", self.governor.stop)
         await self._start_addons()
@@ -181,6 +186,11 @@ class Container:
             self.lifecycle.on_shutdown("engine", self._close_engine)
         for name, closer in self.closers:
             self.lifecycle.on_shutdown(name, closer)
+        from delta.system import sqlite_safe
+
+        for original, moved in sqlite_safe.SET_ASIDE:  # damaged databases: kept aside, a new one in their place
+            if original.parent == self.settings.data_dir or self.settings.data_dir in original.parents:
+                self.warn(sqlite_safe.warning_text(original, moved))
         if why := vault.problem():  # Windows without working DPAPI: chats and memories are refused, not stored plain
             self.warn(why.replace("encrypt this", "encrypt your chats and memories").replace(
                 "so it was not saved", "so they are not saved until this is fixed"))

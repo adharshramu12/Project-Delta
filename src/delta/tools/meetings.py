@@ -21,6 +21,8 @@ from pydantic import AliasChoices, BaseModel, Field
 from delta.tools.base import Risk, Tool, ToolResult
 
 MEET_CODE = re.compile(r"\b([a-z]{3}-[a-z]{4}-[a-z]{3})\b")
+# An accessible element NAME (not a URL being checked) that mentions a Meet link: a plain text search.
+MEET_HOST = re.compile(r"meet\.google\.com")
 NEW_MEETING = {
     "google_meet": "https://meet.new",
     "zoom": "https://zoom.us/start/videomeeting",
@@ -127,7 +129,7 @@ def find_event(title: str, code: str, timeout_s: float = 15) -> str | None:
             for el in w.descendants():
                 name = el.element_info.name or ""
                 low = name.lower()
-                if want in low and (code in low or "meet.google.com" in low):
+                if want in low and (code in low or MEET_HOST.search(low)):
                     return name
         time.sleep(1.5)
     return None

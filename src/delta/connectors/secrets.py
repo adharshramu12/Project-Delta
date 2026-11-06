@@ -54,7 +54,9 @@ class SecretBox:
                 sealed = vault.seal(text)
             except vault.VaultUnavailableError as e:
                 raise SecretsUnavailableError(NOT_SEALED) from e
-        if sealed == text:  # a sealer that did nothing is not a sealer
+            if not sealed.startswith(vault.PREFIX):  # only a DPAPI-sealed value ("dpapi:...") is ever written
+                raise SecretsUnavailableError(NOT_SEALED)
+        if sealed == text or text in sealed:  # a sealer that did nothing (or kept the text) is not a sealer
             raise SecretsUnavailableError(NOT_SEALED)
         self.folder.mkdir(parents=True, exist_ok=True)
         path = self._path(app_id)

@@ -238,3 +238,38 @@
     - status: done
     - step_output_contains: {tool: use_app_tool, text: Shopping list}
     - app_calls: {tool: search_notes, count: 1}
+
+- id: conn-multi-step-find-read-create
+  description: A realistic task over several app calls (find the tool, search, read, then a write that asks first).
+  request: Find my shopping list in my notes and make a copy of it called Shopping copy.
+  connector: {auth: none, read: [search_notes, read_note]}
+  script:
+    plan: [{needs_tools: true, goal: copy the note, tools: [find_app_tool, use_app_tool], success_criteria: ["the copy exists"]}]
+    chat:
+      - call: {tool: find_app_tool, args: {query: search notes}}
+      - call: {tool: use_app_tool, args: {tool: fake__search_notes, arguments: {query: shopping}}}
+      - call: {tool: use_app_tool, args: {tool: fake__read_note, arguments: {id: n1}}}
+      - call: {tool: use_app_tool, args: {tool: fake__create_note, arguments: {title: Shopping copy, body: "milk, eggs, rice"}}}
+      - text: "DONE: I found your shopping list and made a copy called Shopping copy."
+  check:
+    - status: done
+    - steps_ok: true
+    - app_calls: {tool: search_notes, count: 1}
+    - app_calls: {tool: read_note, count: 1}
+    - app_calls: {tool: create_note, count: 1}
+    - app_asked: {count: 1, tool: fake__create_note}
+    - step_output_contains: {tool: use_app_tool, text: created note}
+
+- id: conn-stdio-write-asks-then-runs
+  description: A local (stdio) server. A write asks first and runs once after the yes, never twice.
+  request: Create a note called Groceries.
+  connector: {server: stdio}
+  script:
+    plan: [{needs_tools: true, goal: create the note, tools: [use_app_tool], success_criteria: ["the note exists"]}]
+    chat:
+      - call: {tool: use_app_tool, args: {tool: fake__create_note, arguments: {title: Groceries, body: milk}}}
+      - text: "DONE: Created the note Groceries."
+  check:
+    - status: done
+    - app_asked: {count: 1, tool: fake__create_note}
+    - app_calls: {tool: create_note, count: 1}

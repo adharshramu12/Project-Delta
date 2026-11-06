@@ -142,6 +142,16 @@ class Transport:
     negotiated: str = PROTOCOL_VERSION
 
 
+MAX_LOG_BYTES = 1_000_000  # a server's own log (its stderr): kept to this size, plus one older copy
+
+
+def rotate_log(path: Path, max_bytes: int = MAX_LOG_BYTES) -> None:
+    """Some servers write to stderr on every request; their log must not grow for ever on a small disk."""
+    with contextlib.suppress(OSError):
+        if path.stat().st_size > max_bytes:
+            path.replace(path.with_name(path.name + ".1"))
+
+
 # --- stdio ---------------------------------------------------------------------------------------------------
 
 class StdioTransport(Transport):
@@ -167,6 +177,7 @@ class StdioTransport(Transport):
             kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW: no console window pops up
         if self.errlog is not None:
             self.errlog.parent.mkdir(parents=True, exist_ok=True)
+            rotate_log(self.errlog)
             self._err = self.errlog.open("ab")
         try:
             self.proc = await asyncio.create_subprocess_exec(

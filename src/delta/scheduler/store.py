@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from delta.scheduler.rules import Rule, describe, fmt_when, from_iso, iso, next_run, now_utc, zone_label
+from delta.system import sqlite_safe
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedules(
@@ -107,7 +108,7 @@ class ScheduleStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self.history_limit = max(1, history_limit)
-        self._db = sqlite3.connect(path, check_same_thread=False, timeout=5)
+        self._db = sqlite_safe.connect(path, check_same_thread=False, timeout=5)
         self._db.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         with self._lock:

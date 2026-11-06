@@ -231,6 +231,7 @@ connectors:
   breaker_failures: 3         # failures in a row before an app is paused for breaker_cooldown_s
   breaker_cooldown_s: 60
   sign_in_timeout_s: 300      # how long a browser sign-in may take
+  idle_close_s: 600           # a local app server (npx/uvx) unused this long is stopped to free memory; 0 = never
 
 addons:
   # Add-ons only run when listed here. Built-in: mcp. Community add-ons: pip packages

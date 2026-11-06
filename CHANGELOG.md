@@ -16,6 +16,33 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   per-tool risk and switches; time limits, read-only retries and a circuit breaker; 16 scripted evals. Works
   without the optional `mcp` extra. See [docs/APPS.md](docs/APPS.md).
 
+- `connectors.idle_close_s` (default 600): a local app server (npx / uvx) unused for 10 minutes is stopped to free
+  its memory and started again on the next call. 0 keeps the old behaviour.
+
+### Security
+- A Telegram message shown as a Windows notification could run PowerShell (`$(...)` in the text) before any PIN
+  check. The notification text is now passed to Windows as data only.
+
+### Fixed (fresh-laptop audit)
+- A damaged `memory.db`, `chats.db`, `learning.db`, `skills.db`, `schedules.db` or `tasks.db` (power cut, full disk)
+  stopped Delta from starting. The damaged file is now kept as `<name>.damaged-<date>` and a new one is opened, with
+  a start-up message.
+- A last audit-log line cut off by a power cut made every later action fail. New records now chain to the last
+  whole record; `delta audit verify` still reports the cut line.
+- A stale `delta.pid` whose process id Windows had reused for another program made Delta refuse to start
+  ("already running") after a crash or power cut.
+- A broken `settings.yaml` (or a value Delta cannot use) gave a traceback; it now names the file and how to fix it.
+- A save folder on a drive that is gone, a slow first PowerShell start, or a user folder with an apostrophe
+  (`C:\Users\D'Souza`) no longer stop start-up or break the Desktop shortcut.
+- Local app servers' logs are kept to about 1 MB each; the learner no longer keeps ids of tasks that ended with a
+  question.
+- `delta` and the Desktop icon start faster (httpx loads only for `delta doctor` and the service).
+- Installer: TLS 1.2 on older Windows PowerShell, a free-space check, plain messages when uv or the packages cannot
+  be downloaded (proxy hint), and `Install Delta.cmd` explains when it was opened inside the zip. Uninstall stops
+  anything still running from Delta's folders first.
+- CodeQL findings: the Telegram token is checked before it becomes part of an address, documents are served by
+  their listed name only, a schedule-parsing regex is linear, and duplicate emoji ranges were removed.
+
 ### Changed
 - Telegram `/apps` now shows your connected apps; the list of open windows moved to `/windows` (a button under
   `/apps` opens it too).

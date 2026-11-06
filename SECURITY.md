@@ -28,7 +28,8 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 - **Secrets** live in Windows Credential Manager, never in config, logs or chats.
 - **Audit log** is hash-chained and, from 0.2.0, also signed with a secret key kept in Windows Credential Manager
   (an HMAC chain), so rewriting it needs that key too. `delta audit verify` checks both and names the first
-  broken line (see "What is not protected" for its limits).
+  broken line (see "What is not protected" for its limits). A record cut off by a power cut or a full disk is
+  left in place, so verify still reports it; new records chain to the last whole one, so recording never stops.
 - **Prompt injection (enforced in code):** web pages, files and tool output are data and can never grant
   approval. Once a task has read outside content (a page, search result, file, chat message or the screen),
   every send, delete, code run or memory write in that task needs a human yes, **even in Autopilot and even
@@ -155,7 +156,7 @@ Delta can help with **simple image/text captchas** on sites where you log in to 
 | PIN guessing | **5 wrong PINs in a row lock all remote control.** There is no time window: only a correct PIN or an unlock on the PC resets the count, and the count is saved in Delta's data folder, so restarting Delta or the PC does not clear it. Only someone at the PC can unlock it; the phone never can. |
 | PIN or key left in chat history | Delta deletes the message holding a PIN or API key right after reading it. |
 | PIN stolen from the PC | Never stored: only a salted **scrypt** hash in Credential Manager, compared in constant time. |
-| Something happens without the owner knowing | A **Windows notification** on the PC for every remote request and sensitive action; every unlock, failure, lock and action is in the audit log. |
+| Something happens without the owner knowing | A **Windows notification** on the PC for every remote request and sensitive action; every unlock, failure, lock and action is in the audit log. The words of a phone message are only ever shown in the notification: they are passed to Windows as data, never as part of a PowerShell command (until November 2026, text such as `$(...)` in a Telegram message could run on the PC before any PIN check; fixed). |
 | Owner suspects misuse | `/lock` from Telegram (or *Lock* in Settings → Remote security on the PC) locks all remote control at once: no request from Telegram or Slack runs, and an Approve tapped in Telegram or Slack counts as **Deny** (logged). Unlock only on the PC. |
 | Bot token leaked | Stored in Credential Manager; replace it from the PC. Pairing still stops a token holder from controlling the PC. |
 
