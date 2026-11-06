@@ -24,6 +24,12 @@ saying what you found (it worked, or how it failed) is very welcome.
   the folder.
 - `delta update` while Delta is running: the "close it first" message, `delta update --stop` closing it, and
   the installer waiting for the update command to exit before replacing files.
+- The `delta` command on a real user's PC: a new PowerShell window (5.1 and 7) and Windows Terminal finding it
+  after the installer adds `%LOCALAPPDATA%\Programs\Delta\bin` to the account's Path, `delta update` and the
+  **Update Delta** Start-menu item replacing files while started through `bin\delta.cmd`, an install that started
+  with an older installer, and the warning when another `delta` (the git diff tool) comes first on the Path. The CI
+  Windows runner checks the Path entry, `delta --version` from a new process and uninstall removing it, in a test
+  folder with a space, an apostrophe, `&` and a non-ASCII letter in its name.
 
 ## Windows features
 

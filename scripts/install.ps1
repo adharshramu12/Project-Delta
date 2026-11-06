@@ -5,9 +5,10 @@
 #
 # It installs the official, signed Python 3.12 if needed (Smart App Control blocks unsigned Python
 # started from the Desktop), copies Delta to %LOCALAPPDATA%\Programs\Delta, builds its environment
-# from the locked package versions, adds Desktop and Start-menu icons and opens Delta, whose setup
-# wizard takes it from there. Run it again to repair or update. Your data (%LOCALAPPDATA%\Delta:
-# chats, memory, settings) is never touched.
+# from the locked package versions, adds the `delta` terminal command (bin\delta.cmd, on your account's Path),
+# Desktop and Start-menu icons (and "Update Delta" in the Start menu) and opens Delta, whose setup wizard takes it
+# from there. Run it again to repair or update. Your data (%LOCALAPPDATA%\Delta: chats, memory, settings) is
+# never touched.
 #
 # Python: an x64 CPython 3.12 that is already installed is reused when it is signed and not the Microsoft
 # Store one (found through the py launcher, the registry, or the usual folders). Windows on ARM (Snapdragon,
@@ -19,7 +20,8 @@ param(
     [string]$Branch = "main",
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\Delta"),
     [switch]$NoLaunch,
-    [switch]$NoShortcuts,    # for a trial install that must not repoint the Desktop icon
+    [switch]$NoShortcuts,    # for a trial install that must not repoint the Desktop icon (nor the delta command)
+    [switch]$NoPath,         # make bin\delta.cmd but do not add it to your Path
     [switch]$FromGitHub,     # always download the newest version (delta update)
     [switch]$StopRunning,    # close a running Delta without asking (delta update --stop)
     [string]$WaitForPid = "" # comma-separated process ids to wait for first (the `delta update` that started us)
@@ -175,7 +177,8 @@ try {
     if (-not $same) {
         New-Item -ItemType Directory -Force $InstallDir | Out-Null
         # mirror the code; keep the installed .venv so an update does not rebuild it from nothing
-        robocopy $Source $InstallDir /MIR /XD .git .venv .venv-* .mypy_cache .pytest_cache .ruff_cache __pycache__ `
+        # and bin (the delta command): `delta update` may still be finishing in it while this runs.
+        robocopy $Source $InstallDir /MIR /XD .git .venv .venv-* bin .mypy_cache .pytest_cache .ruff_cache __pycache__ `
             /XF *.lnk .outside-* .realview-* /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { Fail "copying Delta's files failed (robocopy code $LASTEXITCODE)" }
     }
@@ -217,10 +220,25 @@ try {
     if ($LASTEXITCODE -ne 0) { Fail "Delta does not start (see the log)" }
     Done "Delta $ver"
 
-    # 5. Icons ---------------------------------------------------------------------------------------
-    Step 5 "Desktop and Start-menu icons"
-    if ($NoShortcuts) { Done "skipped (-NoShortcuts)" } else {
-        & (Join-Path $InstallDir "scripts\create_shortcut.ps1") | Out-Host
+    # 5. Command and icons ----------------------------------------------------------------------------
+    Step 5 "The delta command, Desktop and Start-menu icons"
+    $command = $null
+    try {
+        # Your account's Path only (HKCU), never the PC-wide one. A trial install (-NoShortcuts) leaves it alone.
+        $command = & (Join-Path $InstallDir "scripts\delta_command.ps1") -Action Install -InstallDir $InstallDir `
+            -NoPath:([bool]($NoPath -or $NoShortcuts)) | Select-Object -Last 1
+    } catch {
+        Write-Host "      The delta command could not be set up: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    if ($command -and $command.OnPath) {
+        Done "delta command added ($($command.Bin) is on your Path)"
+        if ($command.Other) {
+            Write-Host ("      Another program called delta comes first on your Path ($($command.Other)), so 'delta' " +
+                        "runs that one. Use the full path instead: ""$($command.Shim)"" update") -ForegroundColor Yellow
+        }
+    } elseif ($command) { Done "delta command made in $($command.Bin) (not added to your Path)" }
+    if ($NoShortcuts) { Done "icons skipped (-NoShortcuts)" } else {
+        & (Join-Path $InstallDir "scripts\create_shortcut.ps1") -NoCommand | Out-Host
         Done "Delta icon added"
     }
 
@@ -232,7 +250,9 @@ try {
     } else { Done "skipped (-NoLaunch)" }
 
     Write-Host "`nDelta is installed. Open it any time from the Delta icon on your Desktop." -ForegroundColor Green
-    Write-Host "Update later: run this again, or 'delta update'. Remove: scripts\uninstall.ps1"
+    if ($command -and $command.OnPath) { Write-Host "Open a new PowerShell window to use the delta command." }
+    $later = if ($NoShortcuts) { "" } else { "'Update Delta' in the Start menu, " }
+    Write-Host "Update later: $later'delta update' in a new PowerShell window, or run this again. Remove: scripts\uninstall.ps1"
     if (Test-Path $staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue }
     Stop-Transcript | Out-Null
 } catch {
