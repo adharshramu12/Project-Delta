@@ -12,6 +12,8 @@
         plan: [{...planner JSON...}]
         chat: [{call: {tool: write_file, args: {...}}}, {text: "DONE: ..."}]
         verify: [{passed: true, reason: "..."}]
+      inject: [{tool, times, output}]  optional: make tool calls fail (delta.selfheal.inject; evals only)
+      fake_browser: {moved: true}      optional: the fake browser (delta.evals.fakebrowser) with failure switches
       check:                           all must pass; see delta.evals.checkers
         - file_contains: {path: notes.txt, text: hello}
       timeout_s: 120
@@ -28,7 +30,7 @@ from typing import Any
 
 import yaml
 
-SUITES = ("files", "documents", "browser", "apps", "memory")
+SUITES = ("files", "documents", "browser", "apps", "memory", "selfheal")
 
 
 @dataclass
@@ -43,6 +45,8 @@ class EvalTask:
     approve: str = "approve"
     timeout_s: float = 120
     description: str = ""
+    inject: list[dict[str, Any]] = field(default_factory=list)
+    fake_browser: dict[str, Any] | None = None
 
 
 class SpecError(ValueError):
@@ -64,11 +68,18 @@ def _task(raw: Any, suite: str, where: str) -> EvalTask:
     script = raw.get("script") or {}
     if not isinstance(script, dict):
         raise SpecError(f"{where} {raw['id']}: script must be a mapping of job -> replies")
+    inject = raw.get("inject") or []
+    if not isinstance(inject, list) or not all(isinstance(r, dict) and "tool" in r for r in inject):
+        raise SpecError(f"{where} {raw['id']}: inject must be a list of mappings with a tool")
+    fake = raw.get("fake_browser")
+    if fake is not None and not isinstance(fake, dict):
+        raise SpecError(f"{where} {raw['id']}: fake_browser must be a mapping of switches")
     return EvalTask(id=str(raw["id"]), suite=str(raw.get("suite", suite)), request=str(raw["request"]),
                     check=list(check), script={str(k): list(v or []) for k, v in script.items()},
                     setup=dict(raw.get("setup") or {}), needs=[str(n) for n in raw.get("needs") or []],
                     approve=approve, timeout_s=float(raw.get("timeout_s", 120)),
-                    description=str(raw.get("description", "")))
+                    description=str(raw.get("description", "")), inject=list(inject),
+                    fake_browser=dict(fake) if fake is not None else None)
 
 
 def load_specs(folder: Path, suites: list[str] | None = None, ids: list[str] | None = None) -> list[EvalTask]:

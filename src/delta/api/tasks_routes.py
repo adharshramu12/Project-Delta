@@ -7,6 +7,7 @@ Telegram, where Remote Guard asks for the PIN (delta.engine.resume).
   GET  /api/tasks/{id}/timeline         one task: its steps from the event log, state changes, checks
   POST /api/tasks/{id}/resume           {"confirm_last"?: "done" | "not_done"} -> started, or what to ask first
   POST /api/tasks/{id}/discard          an interrupted task: nothing more runs for it
+  POST /api/tasks/{id}/undo             put back the files the task changed (delta.selfheal.undo)
   GET  /tasks.js                        the dashboard's Tasks panel
 """
 
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from delta.engine.resume import discard, prepare_resume
 from delta.engine.states import TaskState
+from delta.selfheal.actions import undo_task
 
 STATIC = Path(__file__).parent / "static"
 
@@ -87,3 +89,9 @@ def register(app: FastAPI, c: Any, auth: Callable[..., None], launch: Callable[.
         engine()
         ok, message = discard(c, task_id, "api")
         return {"ok": ok, "message": message}
+
+    @app.post("/api/tasks/{task_id}/undo", dependencies=[Depends(auth)])
+    async def undo(task_id: str) -> dict[str, Any]:
+        if not task_id.isalnum():
+            raise HTTPException(404, "unknown task")
+        return undo_task(c, task_id, "api")

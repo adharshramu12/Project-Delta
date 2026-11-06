@@ -833,6 +833,7 @@ function connect() {
       if (m.event === "task.plan" && d.plan.needs_tools) showChecklist(d.task_id, d.plan);
       if (m.event === "task.step") { tickStep(d.task_id, d.tool); if (!(d.args && d.args.auto)) add("step", "· " + d.tool + " " + JSON.stringify(d.args).slice(0, 140)); }
       if (m.event === "task.verify" && d.passed) tickAll(d.task_id);
+      if (m.event === "task.recovery") add("step " + (d.ok ? "ok" : ""), "· self-heal: " + d.line);
       if (m.event === "chat.replied") add("step ok", `💬 replied to ${d.person} on ${d.app}: “${d.text}”`);
       if (m.event === "chat.skipped") add("step", `💬 you skipped a reply to ${d.person}: “${d.text}”`);
       if (m.event === "chat.handoff") { add("step bad", `✋ stopped chatting with ${d.person} (${d.app}): ${d.reason}. Please reply yourself.`); if (window.Notification && Notification.permission === "granted") new Notification(`Delta: ${d.person} needs you`, {body: d.reason}); }

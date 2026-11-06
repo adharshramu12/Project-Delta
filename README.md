@@ -170,8 +170,8 @@ arguments with secrets masked, a short result, the model, tokens, time and the s
   quick tools), and every program it started is ended with all its child processes. Only processes Delta
   started for that call are touched, never your own browser or apps. Delta's own browser profile is
   restarted once per task if it stops responding.
-- **Evals.** `delta eval run` plays the 40 tasks in `evals/tasks` (files, documents, web pages on a local
-  test site, apps, memory) and checks each result with a fixed rule (a file's contents, the page state, the
+- **Evals.** `delta eval run` plays the 55 tasks in `evals/tasks` (files, documents, web pages on a local
+  test site, apps, memory, and self-heal drills that break things on purpose) and checks each result with a fixed rule (a file's contents, the page state, the
   answer). By default it uses a scripted model: no keys, no internet, no cost, and that is what CI runs.
   `delta eval run --model groq` (or any provider you set up) measures a real model and costs what that
   provider charges. Reports (JSON and Markdown: success rate, tokens, time, cost estimate, each task) go to
@@ -186,6 +186,45 @@ arguments with secrets masked, a short result, the model, tokens, time and the s
     max_events_per_task: 2000
     default_tool_timeout_s: 600 # watchdog limit per tool call (0 = none)
     tool_timeouts: {}           # per tool, e.g. {web_search: 60}
+  ```
+
+## Self-heal, undo and cheaper models (opt-in)
+
+When a step fails, Delta first works out why and tries a fixed, safe fix before spending an AI call or asking
+you. You see one plain line per fix in the run timeline and in the chat, such as "Button moved, found it
+again" or "Closed a cookie banner ('Reject all') and tried again".
+
+- **What it recognises:** element not found or moved, slow pages and timeouts, a banner or dialog in the way,
+  sign-in pages, captchas, pages that will not load, apps that hang or crash, Windows refusing access, files
+  open in another program, and a busy or failing AI service.
+- **What it does:** re-reads the page and finds the element again by name, waits for the page to settle and
+  tries once more, closes harmless banners with "Reject all" / "Not now" / "Close" (never "Accept", never on
+  payment, permission, sign-in or security dialogs), reopens the page after its own browser was restarted,
+  waits when the AI is rate limited, and stops to ask you on a sign-in page (it never types passwords) or
+  when Windows says no. Captchas follow the existing captcha rules.
+- **Strategy ladder:** if one way of clicking keeps failing it steps down: the page structure, then Windows
+  UI Automation, then the screen picture (only if a model that can see is set up), then it asks you.
+- **Never twice:** a step that sends, deletes, buys, submits, writes or runs a command is never retried on
+  its own, unless the failure proves it did not happen. Every retry passes the same permission checks and
+  approvals as the first try. Attempts are capped per step and per task.
+- **Undo for file changes:** before Delta changes, moves or recycles a file inside your allowed folders it
+  keeps a copy (big files are skipped and the timeline says so). Put everything back with
+  `delta undo <task id>`, the **Undo file changes** button in a task's timeline, or `/undo` in Telegram (needs
+  your PIN). Nothing is deleted for good by an undo: files in the way are kept in Delta's undo folder.
+- **Cheaper models, only if you ask:** `router.ladder` lets simple reading steps use a smaller model you
+  already set up, moving up to your main AI after failures; planning and checking always use your main AI.
+  `router.fallbacks` names extra providers used only when your normal ones are rate limited, down or out of
+  quota. Both are empty by default, so your providers, routes and CLI providers (Codex, Claude Code, Cline)
+  are untouched. The timeline shows which model ran each step.
+
+  ```yaml
+  selfheal: {enabled: true, max_per_step: 2, max_per_task: 6, dismiss_benign_popups: true, strategy_after: 2}
+  undo: {enabled: true, max_file_mb: 25, max_task_mb: 200, retention_days: 7}
+  router:
+    ladder: []          # e.g. [ollama]: your own cheaper provider(s), cheapest first
+    escalate_after: 2
+    cheap_steps: [observe]
+    fallbacks: []       # e.g. [nim]: only on rate limit / outage / quota
   ```
 
 ## Telegram commands
@@ -203,6 +242,7 @@ arguments with secrets masked, a short result, the model, tokens, time and the s
 | *"every day at 9 am check my attendance"* | A scheduled task; the result comes back here (making one needs your PIN) |
 | *"I'm not well, message Ravi now"* | 🆘 Emergency alert to your saved contacts (WhatsApp message or call) |
 | `/tasks` | Recent tasks; Resume or Discard one that was interrupted (Resume needs your PIN) |
+| `/undo` | Put back the files a task changed (needs your PIN) |
 | `/stop` `/status` `/help` | Stop a task, PC health and AIs, all commands |
 
 ## Safety by design

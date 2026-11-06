@@ -7,6 +7,7 @@
   delta captcha allow|remove|list [host]
   delta schedule add|list|pause|resume|remove|run [text | id]
   delta tasks [list|show|resume|discard|prune] [id]
+  delta undo [task id]
   delta eval run [--suite S] [--model M] [--scripted]
 """
 
@@ -182,8 +183,10 @@ def main() -> None:
     add_schedule_parser(sub)
     from delta.engine.cli import add_parser as add_tasks_parser
     from delta.evals.cli import add_parser as add_eval_parser
+    from delta.selfheal.cli import add_parser as add_undo_parser
 
     add_tasks_parser(sub)
+    add_undo_parser(sub)
     add_eval_parser(sub)
     args = parser.parse_args()
 
@@ -201,6 +204,10 @@ def main() -> None:
         from delta.engine.cli import run_cli as run_tasks_cli
 
         sys.exit(run_tasks_cli(load_settings(), args))
+    if args.cmd == "undo":
+        from delta.selfheal.cli import run_cli as run_undo_cli
+
+        sys.exit(run_undo_cli(load_settings(), args))
     if args.cmd == "eval":
         from delta.evals.cli import run_cli as run_eval_cli
 

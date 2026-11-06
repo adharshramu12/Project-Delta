@@ -24,6 +24,7 @@ from typing import Any
 from delta.engine.redact import redact_args, redact_text, redact_value
 from delta.engine.states import RESULT_STATE, RUNNING, IllegalTransitionError, TaskState
 from delta.engine.store import TaskStore
+from delta.selfheal.taxonomy import classify
 from delta.system.logging import log
 
 S = TaskState
@@ -140,6 +141,7 @@ class TaskEngine:
         self._meter: dict[str, tuple[int, int]] = {}  # task -> tokens counted so far (in, out)
         self._shots: dict[str, set[str]] = {}  # task -> screenshots already attributed to a step
         self._repeat: dict[str, set[str]] = {}  # task -> fingerprints of side effects done before a resume
+        self.undo: Any = None  # UndoStore (delta.selfheal.undo), set at start-up: undo availability per task
 
     # --- helpers --------------------------------------------------------------------------------
     def _safe(self, what: str, fn: Any, *args: Any, **kw: Any) -> Any:
@@ -270,7 +272,9 @@ class TaskEngine:
         output = str(getattr(result, "output", "") or "") if result is not None else "stopped before it finished"
         evidence = getattr(result, "evidence", None) or {}
         keep = {k: evidence[k] for k in ("verified", "user_denied", "exit_code", "url", "title", "watchdog",
-                                         "killed", "needs_pin") if k in evidence}
+                                         "killed", "needs_pin", "recovery") if k in evidence}
+        if not ok:  # the failure type (delta.selfheal.taxonomy): what went wrong, for the log and for self-heal
+            keep["failure"] = str(classify(name, output, evidence))
         fields: dict[str, Any] = {"tool": name, "ok": int(ok), "summary": redact_text(output, SUMMARY_CHARS),
                                   "duration_ms": int(duration_s * 1000),
                                   "data": json.dumps(redact_value(keep, 200), default=str)[:2000]}
@@ -293,6 +297,27 @@ class TaskEngine:
             return None
         return ("this exact step already ran before Delta was interrupted; running it again could do it twice "
                 "(send twice, write twice). Please confirm")
+
+    def recovery(self, task_id: str, failure: str, line: str, ok: bool, tool: str = "",
+                 data: dict[str, Any] | None = None) -> None:
+        """One self-heal line (delta.selfheal): what failed, what was tried, in plain English."""
+        self._safe("recovery", self._recovery, task_id, failure, line, ok, tool, data or {})
+
+    def _recovery(self, task_id: str, failure: str, line: str, ok: bool, tool: str, data: dict[str, Any]) -> None:
+        if self.store.get(task_id) is None:
+            return
+        self.store.append(task_id, "recovery", tool=tool, ok=int(ok), summary=redact_text(line, SUMMARY_CHARS),
+                          data=json.dumps(redact_value({"failure": failure, **data}, 200), default=str)[:2000])
+
+    def failure(self, task_id: str, failure: str, summary: str) -> None:
+        """A failure outside a tool step (a model call), recorded with its type."""
+        self._safe("failure", self._failure, task_id, failure, summary)
+
+    def _failure(self, task_id: str, failure: str, summary: str) -> None:
+        if self.store.get(task_id) is None:
+            return
+        self.store.append(task_id, "failure", ok=0, summary=redact_text(summary, SUMMARY_CHARS),
+                          data=json.dumps({"failure": failure}))
 
     # --- start-up, resume, discard -------------------------------------------------------------
     def recover(self) -> list[dict[str, Any]]:
@@ -380,6 +405,36 @@ class TaskEngine:
         checks = [{"ts": e["ts"], "ok": bool(e["ok"]), "summary": e["summary"]} for e in events
                   if e["kind"] == "verify"]
         notes = [{"ts": e["ts"], "summary": e["summary"]} for e in events if e["kind"] == "note"]
-        return {"task": task, "steps": [s.to_dict() for s in steps_of(events)], "states": states,
-                "checks": checks, "notes": notes, "running": task["state"] in {str(s) for s in RUNNING},
-                "now": time.time()}
+        recoveries = [{"ts": e["ts"], "ok": bool(e["ok"]), "summary": e["summary"], "tool": e["tool"],
+                       **_data(e, "failure", "rung")} for e in events if e["kind"] == "recovery"]
+        failures = [{"ts": e["ts"], "summary": e["summary"], **_data(e, "failure")} for e in events
+                    if e["kind"] == "failure"]
+        undo = self._undo_summary(task_id)
+        steps = []
+        for s in steps_of(events):
+            view = s.to_dict()
+            view["undo"] = s.step in undo.get("steps", [])
+            steps.append(view)
+        failed = {e["step"]: _data(e, "failure", "recovery") for e in events if e["kind"] == "step_end" and not e["ok"]}
+        for view in steps:
+            view.update(failed.get(view["step"], {}))
+        return {"task": task, "steps": steps, "states": states, "checks": checks, "notes": notes,
+                "recoveries": recoveries, "failures": failures, "undo": undo,
+                "running": task["state"] in {str(s) for s in RUNNING}, "now": time.time()}
+
+    def _undo_summary(self, task_id: str) -> dict[str, Any]:
+        if self.undo is None:
+            return {"available": False, "files": 0, "restored": False, "skipped": [], "steps": []}
+        try:
+            return dict(self.undo.summary(task_id))
+        except Exception:
+            log.exception("engine.undo_summary_failed")
+            return {"available": False, "files": 0, "restored": False, "skipped": [], "steps": []}
+
+
+def _data(event: dict[str, Any], *keys: str) -> dict[str, Any]:
+    try:
+        raw = json.loads(event.get("data") or "{}")
+    except ValueError:
+        return {}
+    return {k: raw[k] for k in keys if isinstance(raw, dict) and k in raw}

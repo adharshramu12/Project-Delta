@@ -45,6 +45,7 @@ HELP = (
     "\"what's scheduled?\" (making or turning on a schedule from here needs your PIN)\n\n"
     "/stop - stop what I'm doing now\n"
     "/tasks - recent tasks; resume or discard one that was interrupted\n"
+    "/undo - put back the files a task changed (needs your PIN)\n"
     "/unlock - enter your PIN (screen, camera, files, commands, approving deletes or sends,\n"
     "  closing apps and keys need it)\n"
     "/lock - lock all remote control now (only the PC can unlock it)\n"

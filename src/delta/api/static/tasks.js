@@ -1,6 +1,7 @@
 // Tasks panel in the dashboard's right-hand drawer (delta.engine): recent tasks with filters, a run
 // timeline for each one (time, tool, short result, model, tokens, screenshot), and Resume / Discard for
-// tasks a crash or power cut interrupted. Loaded after the main script, so it uses its `api` helper and
+// tasks a crash or power cut interrupted. Self-heal lines ("Button moved, found it again") and an Undo button
+// for the task's file changes (delta.selfheal) are shown in the timeline. Loaded after the main script, so it uses its `api` helper and
 // `token`. Kept in its own file so the main page only needs a container and one <script> tag.
 (() => {
   const box = document.getElementById("tasks");
@@ -31,6 +32,10 @@
 #timeline td.res{max-width:360px;word-break:break-word}
 #timeline td.bad{color:var(--bad)}
 #timeline img{height:54px;border-radius:6px;border:1px solid var(--line)}
+#timeline .heal{margin-top:10px;font-size:13px}
+#timeline .heal div{padding:2px 0}
+#timeline .heal .ok{color:var(--ok)}
+#timeline .undo{margin-top:10px;display:flex;gap:8px;align-items:center;font-size:13px}
 #timeline .answer{margin-top:12px;white-space:pre-wrap;font-size:13.5px;background:var(--surface-2);border-radius:var(--r-sm);padding:10px 12px}`;
   document.head.appendChild(style);
 
@@ -125,6 +130,9 @@
       const row = el("tr");
       row.appendChild(el("td", "", "+" + Math.max(0, s.started - t0).toFixed(1) + "s" + (s.duration_ms != null ? ` (${(s.duration_ms / 1000).toFixed(1)}s)` : "")));
       const tool = el("td"); tool.appendChild(el("b", "", s.tool)); if (s.side_effect) tool.appendChild(el("div", "meta", "changes something"));
+      if (s.undo) tool.appendChild(el("div", "meta", "undo available"));
+      if (s.recovery) tool.appendChild(el("div", "meta", "self-heal step"));
+      if (s.failure && s.ok === false) tool.appendChild(el("div", "meta", label(s.failure)));
       row.appendChild(tool);
       const res = s.unconfirmed ? "started, never finished" : (!s.ran ? "not run: " : (s.ok ? "" : "failed: ")) + (s.summary || "");
       row.appendChild(el("td", "res" + (s.ok === false || s.unconfirmed ? " bad" : ""), res.slice(0, 240)));
@@ -135,6 +143,28 @@
     }
     if (!d.steps.length) { const r = el("tr"); const c = el("td", "", "No tool steps."); c.colSpan = 6; r.appendChild(c); table.appendChild(r); }
     card.appendChild(table);
+    if (d.recoveries && d.recoveries.length) {
+      const heal = el("div", "heal");
+      heal.appendChild(el("b", "", "Self-heal"));
+      for (const r of d.recoveries) heal.appendChild(el("div", r.ok ? "ok" : "", "+" + Math.max(0, r.ts - t0).toFixed(1) + "s  " + r.summary));
+      card.appendChild(heal);
+    }
+    if (d.undo && (d.undo.available || d.undo.restored || (d.undo.skipped || []).length)) {
+      const row = el("div", "undo");
+      if (d.undo.available) {
+        const b = el("button", "", `Undo file changes (${d.undo.files})`); b.type = "button";
+        b.title = "Put back the files this task changed. Files in the way are kept in Delta's undo folder.";
+        b.onclick = async () => {
+          if (!confirm("Put back the files this task changed?")) return;
+          b.disabled = true;
+          const r = await api(`/api/tasks/${id}/undo`, {method: "POST"}).catch(e => ({message: e.message}));
+          alert(r.message || "Done."); openTimeline(id);
+        };
+        row.appendChild(b);
+      } else if (d.undo.restored) row.appendChild(el("span", "meta", "File changes were undone."));
+      for (const s of d.undo.skipped || []) row.appendChild(el("span", "meta", `Not undoable: ${s.path} (${s.why})`));
+      card.appendChild(row);
+    }
     for (const c of d.checks) card.appendChild(el("div", "meta", (c.ok ? "Check passed: " : "Check failed: ") + c.summary));
     if (d.task.answer) card.appendChild(el("div", "answer", d.task.answer));
     wrap.appendChild(card);

@@ -246,6 +246,35 @@ def attach_engine(settings: Settings, router: ModelRouter, executor: ToolExecuto
     return engine
 
 
+def attach_selfheal(settings: Settings, router: ModelRouter, executor: ToolExecutor, orchestrator: Orchestrator,
+                    events: EventBus) -> Any:
+    """Self-heal (recovery playbooks, strategy ladder), undo for file changes, and the opt-in model ladder and
+    failover. Each piece follows its own setting; the model ladder and fallbacks are empty (off) by default,
+    so routing is unchanged unless the user fills them in."""
+    from delta.llm.ladder import ModelLadder
+    from delta.selfheal.healer import Healer
+    from delta.selfheal.undo import UndoStore
+
+    router.fallbacks = [n for n in settings.router.fallbacks if n in router.providers]
+    ladder = ModelLadder(settings.router, router.providers)
+    orchestrator.ladder = ladder if ladder.enabled else None
+    healer = None
+    if settings.selfheal.enabled:
+        healer = Healer(settings.selfheal, executor, events, can_see=orchestrator._can_see)
+        healer.engine = orchestrator.engine
+        orchestrator.healer = healer
+    if settings.undo.enabled:
+        undo = UndoStore(settings.data_dir / "undo", settings.undo, lambda: list(executor.policy.allowed))
+        try:
+            undo.prune()
+        except Exception as e:  # an unreadable undo folder must never stop Delta from starting
+            log.warning("undo.prune_failed", error=str(e))
+        executor.undo = undo
+        if orchestrator.engine is not None:
+            orchestrator.engine.undo = undo
+    return healer
+
+
 def build(settings: Settings) -> Container:
     data = settings.data_dir
     data.mkdir(parents=True, exist_ok=True)  # first run: databases need the folder to exist
@@ -343,6 +372,7 @@ def build(settings: Settings) -> Container:
 
     governor.on_change(on_health)
     attach_engine(settings, router, executor, orchestrator, proof, registry, audit)  # tasks.db, watchdog
+    attach_selfheal(settings, router, executor, orchestrator, events)  # recovery, undo, opt-in model ladder
     from delta.safety.remote_guard import RemoteGuard
     from delta.system.notify import notify
 

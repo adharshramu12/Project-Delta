@@ -5,6 +5,7 @@ validate args -> policy decision -> (approval) -> run -> audit. Nothing runs any
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import json
 import time
@@ -177,6 +178,9 @@ class ToolExecutor:
         # Durable task engine (delta.engine), set at start-up; None keeps the executor exactly as before.
         self.recorder: Any = None  # TaskEngine: each step's start and end go to the task's event log
         self.watchdog: Any = None  # Watchdog: time limit per call, ends the processes a stopped call started
+        self.undo: Any = None  # UndoStore (delta.selfheal.undo): a copy of each file about to be changed
+        # FaultInjector (delta.selfheal.inject): TESTS AND SCRIPTED EVALS ONLY, never set from settings.
+        self.faults: Any = None
 
     @staticmethod
     def action_key(tool: Tool, args: BaseModel, risk: str) -> str:
@@ -397,13 +401,25 @@ class ToolExecutor:
         return tool_refusal(self.guard, req.channel, req.user, tool.name, outside)
 
     async def _run(self, tool: Tool, args: BaseModel, name: str, task_id: str) -> ToolResult:
+        step: int | None = None
         if self.recorder is not None and task_id and (mark := _STEP.get()) is not None:
-            mark["step"] = self.recorder.step_started(task_id, name, args.model_dump(), tool)
+            step = mark["step"] = self.recorder.step_started(task_id, name, args.model_dump(), tool)
+        # Undo: copy what is about to change (files inside the allowed folders only). Never fails the step.
+        kept: list[str] = []
+        if self.undo is not None and task_id:
+            kept = await asyncio.to_thread(self.undo.before, task_id, step, name, args.model_dump())
+        injected = self.faults.take(name) if self.faults is not None else None
         try:
-            result = await (self.watchdog.run(tool, args, task_id) if self.watchdog is not None else tool.run(args))
+            if injected is not None:
+                result = injected
+            else:
+                result = await (self.watchdog.run(tool, args, task_id) if self.watchdog is not None
+                                else tool.run(args))
         except Exception as e:
             log.exception("tool.crashed", tool=name)
             result = ToolResult(False, f"{type(e).__name__}: {e}")
+        if kept:
+            await asyncio.to_thread(self.undo.after, task_id, kept, result.ok)
         self.audit.record("tool", task=task_id, tool=name, ok=result.ok, evidence=result.evidence)
         self.exfil.observe(task_id, name, args, result)
         if task_id and result.ok and name in UNTRUSTED_SOURCES and task_id not in self._tainted:
