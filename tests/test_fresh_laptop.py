@@ -410,7 +410,9 @@ def test_emoji_pattern_matches_exactly_what_it_did_before():
               (0x3030, 0x3030), (0x303D, 0x303D), (0x3297, 0x3297), (0x3299, 0x3299), (0x24C2, 0x24C2),
               (0x25A0, 0x25FF)]
     for cp in range(0x2000, 0x20000):
-        was = any(lo <= cp <= hi for lo, hi in before)
+        # One change on purpose: a lone zero-width joiner is part of Indic scripts (Telugu, Hindi), not an emoji.
+        # It still goes when it joins two emojis (a family emoji), see test_writer_rules.
+        was = any(lo <= cp <= hi for lo, hi in before) and cp != 0x200D
         assert bool(EMOJI.match(chr(cp))) == was, hex(cp)
 
 

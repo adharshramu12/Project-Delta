@@ -271,7 +271,12 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         browser_mod.PORT = _free_port()  # a private port: never attaches to a Delta browser already running
         browser = browser_mod.BrowserManager(data)
         tools += browser_mod.browser_tools(browser)
+    from delta.tools.email import email_tools
+
+    draft_email, send_email = email_tools(router)
+    tools += [draft_email, send_email]
     registry = ToolRegistry(tools)
+    send_email.registry = registry
     if portal is not None:
         if browser is None:
             portal.close()

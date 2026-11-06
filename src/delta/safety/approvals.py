@@ -42,6 +42,7 @@ class ApprovalRequest:
     reason: str
     task_id: str = ""
     for_task: bool = False  # offer "Allow for this task" (ToolExecutor decides when it may)
+    can_edit: bool = False  # offer "Edit" (an email draft): the person says what to change instead of yes/no
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     created: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -52,6 +53,7 @@ class ApprovalOutcome:
     by: str  # who answered, or "timeout"
     human: bool = True  # False when no person chose this answer (a lock turned it into a "no")
     for_task: bool = False  # the person chose "Allow for this task" (only ever with approved=True)
+    edit: str | None = None  # the person chose "Edit" (only on a request that offered it): what to change
 
 
 Presenter = Callable[[ApprovalRequest], Awaitable[None]]
@@ -102,6 +104,18 @@ class ApprovalBroker:
     def resolve(self, request_id: str, approved: bool, by: str, for_task: bool = False) -> bool:
         """True when this answer settled the request (see answer() for why it may not)."""
         return self.answer(request_id, approved, by, for_task)[0]
+
+    def edit(self, request_id: str, changes: str, by: str) -> tuple[bool, str]:
+        """"Edit" on a request that offered it (an email draft): nothing is done, and the agent gets the person's
+        changes to redraft and ask again. Counts as a "not now", never as a refusal or a yes."""
+        entry = self._pending.get(request_id)
+        if not entry or entry[1].done():
+            return False, "already answered or expired"
+        req, fut = entry
+        if not req.can_edit:
+            return False, "this request cannot be edited"
+        fut.set_result(ApprovalOutcome(False, by, edit=" ".join(changes.split())[:2000]))
+        return True, "edit requested"
 
     def answer(self, request_id: str, approved: bool, by: str, for_task: bool = False) -> tuple[bool, str]:
         """Settle a request: (settled, what to show the person who answered).

@@ -72,7 +72,7 @@ class SlackChannel:
             buttons.append({"type": "button", "action_id": "delta_approve_task", "value": req.id,
                             "text": {"type": "plain_text", "text": "Allow for this task"}})
         buttons.append({"type": "button", "style": "danger", "action_id": "delta_deny", "value": req.id,
-                        "text": {"type": "plain_text", "text": "Deny"}})
+                        "text": {"type": "plain_text", "text": "Cancel" if req.can_edit else "Deny"}})
         blocks: list[dict[str, Any]] = [
             {"type": "section", "text": {"type": "plain_text", "text": approval_text(req)}},
             {"type": "actions", "elements": buttons},

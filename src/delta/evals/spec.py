@@ -56,7 +56,7 @@ from typing import Any
 import yaml
 
 SUITES = ("files", "documents", "browser", "apps", "memory", "selfheal", "perception", "helpers", "learning",
-          "connectors", "attachments", "portal")
+          "connectors", "attachments", "portal", "style")
 
 
 @dataclass

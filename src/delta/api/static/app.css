@@ -358,6 +358,7 @@ body.panel-closed .panel{display:none}
 .approval-top span:first-of-type{flex:1}
 .approval-top .ic{width:15px;height:15px}
 .approval-what{font-weight:var(--fw-semibold);overflow-wrap:anywhere}
+.approval-what.draft{font-weight:400;white-space:pre-wrap;max-height:40vh;overflow:auto}
 .approval-why{font-size:var(--fs-sm);color:var(--text-2);overflow-wrap:anywhere}
 .prog-head{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s2)}
 .prog-head .muted{flex:1}

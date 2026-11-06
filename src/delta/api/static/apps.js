@@ -127,7 +127,9 @@
   const banner = h("div", {class: "banner warn", role: "status", hidden: true});
   const grid = h("div", {class: "cards grid"});
   const customBox = h("div", {class: "card"});
-  mbox.append(banner, grid, h("h3", {class: "list-title", text: "Add another MCP server"}), customBox);
+  // Advanced: MCP is how apps talk to Delta; it turns on by itself. Only custom servers live here.
+  const legacy = h("div", {class: "stack"});
+  mbox.append(banner, grid, h("details", {class: "card"}, h("summary", {text: "Advanced: custom MCP servers"}), legacy, h("h3", {class: "list-title", text: "Add another MCP server"}), customBox));
   const open = {};  // app id -> "connect" | "tools" (which panel is open on its card)
   let loaded = false, lastSig = "";
 
@@ -143,6 +145,14 @@
     if (sig === lastSig || Object.values(open).includes("tools")) return;  // unchanged, or the user is reading a tool list
     lastSig = sig;
     grid.replaceChildren(...[...data.apps].sort((a, b) => Number(b.connected) - Number(a.connected)).map(card));
+    servers();
+  }
+  async function servers() {
+    const m = await call("/api/mcp-servers");
+    if (!m || !Array.isArray(m.servers) || !m.servers.length) { legacy.replaceChildren(); return; }
+    const sw = h("input", {type: "checkbox", checked: m.enabled});
+    sw.onchange = async () => { await call("/api/mcp-servers", {enabled: sw.checked}); D.toast({title: "Saved", body: "Restart Delta for this to take effect.", kind: "ok"}); };
+    legacy.replaceChildren(h("label", {class: "check"}, sw, " Run the servers from my settings file"), ...m.servers.map(x => h("p", {class: "small muted", text: `${x.name}: ${x.runs}`})));
   }
   function card(a) {
     const st = a.state === "connected" ? state(true, "Connected") : a.state === "needs reconnect" ? state(false, "Needs reconnect") : state(null, "Not connected");

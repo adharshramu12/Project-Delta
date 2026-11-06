@@ -14,6 +14,7 @@ from typing import Any
 
 from delta import CREDIT
 from delta.config import Settings, known_folder, save_dir
+from delta.core.academy import AcademyNote
 from delta.core.clarify import ask_first
 from delta.core.events import EventBus
 from delta.core.intents import match_intent, small_talk
@@ -31,7 +32,9 @@ from delta.core.state import (
     TaskResult,
     Verification,
 )
+from delta.core.style import STYLE_BLOCK, slop_check
 from delta.core.verifier import verify
+from delta.identity import identity_answer, is_identity_question
 from delta.learning.corrections import learn_corrections, standing_instructions
 from delta.learning.store import LearningStore
 from delta.llm import usage
@@ -124,6 +127,9 @@ Rules:
     - <pick one>
     - <pick one>
   Ask only what changes the result; never ask what you can find out yourself.
+- Email: draft it in the user's voice from what you know (recipient, thread, past tone), then call send_email
+  with the full draft. It shows the user the draft and recipients and sends ONLY after they press Approve.
+{style}
 
 GOAL: {goal}
 PLAN:
@@ -429,6 +435,8 @@ class Orchestrator:
         self._budget: dict[str, tuple[int, int]] = {}
         self._budget_stops: dict[str, tuple[int, int]] = {}
         self.browsers: Any = None  # BrowserHub (delta.tools.browser_switch), set by bootstrap
+        # The once-per-conversation academy line for people who ask to learn AI (delta.core.academy).
+        self.academy = AcademyNote(getattr(getattr(settings, "academy", None), "enabled", True))
 
     def _finish_proof(self, result: TaskResult) -> None:
         """Close the run record; a proof folder that cannot be written must not fail the task itself."""
@@ -496,6 +504,10 @@ class Orchestrator:
                 await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
             except Exception:
                 log.exception("router.release_failed", task=req.id)
+        if result.status in ("done", "needs_user") and not result.fast and result.answer:
+            # One writing style everywhere (delta.core.style): long dashes, AI phrases, US spellings, stray emojis
+            # and any claim to be human are fixed in code, at no token cost.
+            result.answer = slop_check(result.answer, "chat", req.text).text
         if req.attachment_notes and result.status != "cancelled":
             # Plain words the model might leave out: a picture that was not seen, pages that could not be read.
             notes = [n for n in dict.fromkeys(req.attachment_notes) if n not in result.answer]
@@ -530,6 +542,8 @@ class Orchestrator:
         files = await self._attach(req)
         if not files and (reply := small_talk(req.text, self.s.agent.owner_name)):  # "hi", "thanks": 0 tokens
             return TaskResult(req.id, "done", reply, fast=True)
+        if not files and is_identity_question(req.text):  # "who made you?": 0 tokens, always the same answer
+            return TaskResult(req.id, "done", identity_answer(self.s.agent.name), fast=True)
         # Never guess what only the user can decide (e.g. a meeting's day/time): ask first, 0 tokens.
         if not files and (question := ask_first(req.text)):
             return TaskResult(req.id, "needs_user", question.text, options=question.options,
@@ -572,7 +586,8 @@ class Orchestrator:
                 if self.memory.add(fact, kind="profile", source="auto", task_id=req.id):
                     await self.events.publish("memory.learned", fact=fact)
         if not plan.needs_tools:
-            return TaskResult(req.id, "done", plan.answer, provider=self.router.last_provider or "")
+            answer = self.academy.add(plan.answer, req.text, f"{req.channel}:{req.chat_id or req.user}", req.history)
+            return TaskResult(req.id, "done", answer, provider=self.router.last_provider or "")
         if plan.direct and not steps:
             done = await self._direct(req, plan, steps)
             if done is not None:
@@ -769,7 +784,7 @@ class Orchestrator:
     def _initial_messages(self, req: TaskRequest, plan: Plan, memory_ctx: str,
                           skill: Skill | None = None) -> list[Message]:
         system = ACTOR_PROMPT.format(
-            name=self.s.agent.name, credit=CREDIT, owner=self.s.agent.owner_name or "the user",
+            name=self.s.agent.name, credit=CREDIT, style=STYLE_BLOCK, owner=self.s.agent.owner_name or "the user",
             os=f"{platform.system()} {platform.release()}", now=datetime.now().strftime("%A %d %B %Y %H:%M"),
             home=Path.home(), desktop=known_folder("Desktop"), documents=known_folder("Personal"),
             save_dir=save_dir(self.s.files), diff_help=snapshot.DIFF_HELP,

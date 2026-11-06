@@ -99,7 +99,8 @@ _SPELL_BASE: dict[str, str | None] = {
     "skillful": "skilful", "aging": "ageing", "analyze": "analyse", "analyzed": "analysed", "analyzes": "analyses",
     "analyzing": "analysing", "paralyze": "paralyse", "catalyze": "catalyse", "judgment": "judgement",
     "acknowledgment": "acknowledgement", "mold": "mould", "plow": "plough", "cozy": "cosy", "pajamas": "pyjamas",
-    "mustache": "moustache", "tire": None,  # tyre vs tire (be tired): ambiguous, never changed
+    "mustache": "moustache", "gotten": "got",  # an Americanism Indian English does not use
+    "tire": None,  # tyre vs tire (be tired): ambiguous, never changed
 }
 US_TO_IN: dict[str, str] = {k: v for k, v in _SPELL_BASE.items() if v}
 for _stem in _IZE_STEMS:
@@ -108,9 +109,12 @@ for _stem in _IZE_STEMS:
 
 DASHES = re.compile(r"[\u2014\u2013\u2012\u2015\u2E3A\u2E3B\uFE58\uFE63\uFF0D]|-{2,}")
 # U+1F000 to U+1FAFF already holds the supplemental symbols (1F900-1F9FF) and the flag letters (1F1E6-1F1FF).
+# A zero-width joiner counts only inside an emoji sequence: on its own it is part of Indic scripts (Telugu, Hindi,
+# Malayalam), and removing it changed the words.
 EMOJI = re.compile("[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U00002B00-\U00002BFF"
-                   "\U0000FE0F\U0000200D\U000020E3\U00002190-\U000021FF\U00002300-\U000023FF"
-                   "\U00003030\U0000303D\U00003297\U00003299\U000024C2\U000025A0-\U000025FF]")
+                   "\U0000FE0F\U000020E3\U00002190-\U000021FF\U00002300-\U000023FF"
+                   "\U00003030\U0000303D\U00003297\U00003299\U000024C2\U000025A0-\U000025FF]"
+                   "|\u200D(?=[\U0001F000-\U0001FAFF\U00002600-\U000027BF])")
 HASHTAG = re.compile(r"(?<![\w&/])#[A-Za-z][\w]*")
 URL = re.compile(r"https?://\S+|www\.\S+")
 CODE = re.compile(r"```.*?```|`[^`\n]+`", re.S)

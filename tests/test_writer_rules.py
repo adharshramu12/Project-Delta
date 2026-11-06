@@ -96,3 +96,12 @@ def test_flat_rhythm_is_reported():
 def test_ai_word_list_is_maintained():
     for w in ("delve", "tapestry", "leverage", "unlock", "game-changer", "in today's fast-paced world"):
         assert w in AI_WORDS
+
+
+def test_a_zero_width_joiner_in_indic_text_is_not_an_emoji():
+    from delta.addons.writer.rules import check_text, fix_mechanical
+
+    word = "\u0c28\u0c4d\u200d\u0c28"  # Telugu with a ZWJ: part of the script
+    assert not any(i.code == "emoji" for i in check_text(f"{word} ok"))
+    assert word in fix_mechanical(f"{word} ok")
+    assert fix_mechanical("family \U0001F468\u200d\U0001F469 ok") == "family ok"

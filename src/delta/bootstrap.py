@@ -253,8 +253,16 @@ class Container:
                       "LM Studio to run models on this PC.")
 
     async def _start_addons(self) -> None:
+        from delta.addons import mcp_settings
+
         cfg = self.settings.addons
-        if not cfg.enabled:
+        try:  # Settings > Add-ons "mcp" moved to Apps (delta.addons.mcp_settings): once, nothing lost
+            if moved := mcp_settings.apply_migration(self.settings):
+                self.audit.record("settings.migrated", what="addons.mcp", change=moved)
+        except Exception:
+            log.exception("addons.mcp_migration_failed")
+        enabled = mcp_settings.effective_addons(cfg)  # MCP servers run whenever some are configured
+        if not enabled:
             return
         from delta.addons.api import AddonContext
         from delta.addons.builtin import builtin_addons
@@ -266,7 +274,7 @@ class Container:
             return AddonContext(name, conf, folder, self.router, self.events, self.registry)
 
         self.addon_infos, contexts = await start_addons(
-            cfg.enabled, cfg.config, builtin_addons(), make_ctx, self.settings.data_dir / "addons")
+            enabled, cfg.config, builtin_addons(), make_ctx, self.settings.data_dir / "addons")
         for ctx in contexts:
             for name, hook in ctx._shutdown:
                 self.lifecycle.on_shutdown(name, hook)
@@ -449,6 +457,12 @@ def build(settings: Settings) -> Container:
         FetchPage(),
         *(memory_tools(memory) if settings.memory.enabled else []),
     ])
+    from delta.tools.email import email_tools
+
+    draft_email, send_email = email_tools(router)  # every email is shown in full and sent only on a human yes
+    registry.register(draft_email)
+    registry.register(send_email)
+    send_email.registry = registry
     from delta.addons.writer import writer_tools
 
     writer = writer_tools(router, settings.writer, events)  # [] when writer.enabled is false
@@ -521,6 +535,7 @@ def build(settings: Settings) -> Container:
     connectors = attach_connectors(settings, registry, audit)  # connected apps; nothing connects at start-up
     if connectors is not None:
         closers.append(("connectors", connectors.manager.close))
+    send_email.connectors = connectors  # send through the Gmail app when it is connected and can send
     executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
     # `remember` labels what a task that read outside content saves as untrusted (delta.memory.provenance)
     wire_memory_tools([found for n in registry.names() if (found := registry.get(n)) is not None], executor)

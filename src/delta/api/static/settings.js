@@ -98,7 +98,7 @@
     $("s_vnote").textContent = a.can_see_pictures ? "An AI that can see pictures is ready." : "No AI here can see pictures, so Delta uses the text in them and says so.";
     $("s_mem").checked = s.memory.enabled; $("s_extract").checked = s.memory.auto_extract; $("s_skills").checked = s.memory.learn_skills;
     $("s_addons").replaceChildren(...(s.addons.available.length ? s.addons.available.map(a => h("label", {class: "check"},
-      h("input", {type: "checkbox", dataset: {addon: a}, checked: s.addons.enabled.includes(a)}), " ", a === "mcp" ? "mcp (connect other apps through the Model Context Protocol)" : a))
+      h("input", {type: "checkbox", dataset: {addon: a}, checked: s.addons.enabled.includes(a)}), " ", a))
       : [h("p", {class: "muted small", text: "No add-ons installed."})]));
     $("s_keys").replaceChildren(...Object.entries(s.keys).map(([name, k]) => h("div", {class: "krow"}, h("span", {text: k.label}),
       k.set ? h("span", {class: "row"}, h("span", {class: "pill ok", text: "Saved"}), btn("Remove", async () => {
