@@ -360,6 +360,9 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         from delta.evals import connector_fixture
 
         await connector_fixture.finish(connector)
+    if portal is not None and browser is not None:  # its checks read every file in the data folder: let Chrome
+        with contextlib.suppress(Exception):           # release its profile (Windows locks open files) first
+            await browser.close()
     out.cost_usd = cost_of(out.provider or "scripted", out.tokens_in, out.tokens_out)
     meter = dict(getattr(router, "meter", {}) or {})
     ctx = CheckContext(sandbox=sandbox, status=out.status, answer=out.answer, steps=steps, meter=meter,

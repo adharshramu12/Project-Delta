@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from delta.evals.portal_fixture import STANDIN
 from delta.logins.service import LoginService
 from delta.logins.signin import SignInResult
 from delta.logins.store import LoginStore
@@ -30,12 +31,8 @@ SECRET = "Canary-Pw-9!zQ"
 SITE = "https://erp.college.edu"
 
 
-def seal(t: str) -> str:
-    return "sealed:" + t[::-1]
-
-
-def unseal(t: str) -> str:
-    return t[len("sealed:"):][::-1]
+# An opaque-handle stand-in for DPAPI: nothing written to disk is derived from the secret.
+seal, unseal = STANDIN.seal, STANDIN.unseal
 
 
 # --- diff ---------------------------------------------------------------------------------------------------

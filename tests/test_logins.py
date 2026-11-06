@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from delta.core.state import CURRENT_REQUEST, TaskRequest
+from delta.evals.portal_fixture import STANDIN
 from delta.logins.cli import run_cli
 from delta.logins.origin import OriginError, lookalike, mismatch, parse_origin, same_origin_login_url
 from delta.logins.service import LoginService
@@ -25,12 +26,8 @@ from delta.safety.remote_guard import REMOTE_PIN_TOOLS, RemoteGuard, approval_re
 SECRET = "Canary-Pw-9!zQ"
 
 
-def seal(text: str) -> str:
-    return "sealed:" + text[::-1]
-
-
-def unseal(text: str) -> str:
-    return text[len("sealed:"):][::-1]
+# An opaque-handle stand-in for DPAPI: nothing written to disk is derived from the secret.
+seal, unseal = STANDIN.seal, STANDIN.unseal
 
 
 def store(tmp_path: Path) -> LoginStore:

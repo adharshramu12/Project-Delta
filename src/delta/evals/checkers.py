@@ -573,9 +573,22 @@ def _password_nowhere(ctx: CheckContext, arg: Any) -> tuple[bool, str]:
         if root is None:
             continue
         for f in root.rglob("*"):
-            if f.is_file() and secret.encode() in f.read_bytes():
+            if f.is_file() and secret.encode() in _read_bytes(f):
                 return False, f"the password is in {f.name}"
     return True, "the password stayed in the sign-in form"
+
+
+def _read_bytes(path: Path, wait_s: float = 5.0) -> bytes:
+    """A file's bytes, waiting a moment for a process that still holds it (Windows locks open files, e.g. a browser
+    that is shutting down). Still locked after that: the error is raised and the check fails."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        try:
+            return path.read_bytes()
+        except PermissionError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.25)
 
 
 def run_checks(ctx: CheckContext, checks: list[dict[str, Any]]) -> list[dict[str, Any]]:

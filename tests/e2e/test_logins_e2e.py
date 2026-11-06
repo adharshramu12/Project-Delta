@@ -14,11 +14,10 @@ from typing import Any
 
 import pytest
 
-from delta.evals.portal_fixture import CAPTCHA, OTP, USER, PortalSite
+from delta.evals.portal_fixture import CAPTCHA, OTP, USER, PortalSite, sealers
 from delta.logins.service import LoginService
 from delta.logins.store import LoginStore
 from delta.safety.audit import AuditLog
-from delta.system import vault
 from delta.tools.browser import BrowserManager, settle
 from delta.tools.captcha import CaptchaSolver
 from delta.watchers.recipe import Recipe, Section
@@ -33,11 +32,6 @@ pytestmark = [
 PASSWORD = "E2e-Canary-Pass-7731"
 
 
-def sealers() -> dict[str, Any]:
-    """Real DPAPI on Windows (CI), a stand-in elsewhere (developer runs)."""
-    if vault.available():
-        return {}
-    return {"seal": lambda t: "t:" + t[::-1], "unseal": lambda t: t[2:][::-1]}
 
 
 @pytest.fixture
