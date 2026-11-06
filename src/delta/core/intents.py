@@ -67,8 +67,23 @@ def match_intent(text: str, available: set[str]) -> Intent | None:
         if m:
             intent = build(m)
             return intent if intent.tool in available else None
+    if (browser := browser_intent(t)) is not None:
+        return browser if browser.tool in available else None
     if (sched := schedule_intent(t)) is not None:
         return sched if sched.tool in available else None
+    return None
+
+
+def browser_intent(text: str) -> Intent | None:
+    """"use Edge from now on", "switch to Delta's private browser", "sign in to my sites": one tool call.
+    A browser named inside a longer task ("open Gmail in Chrome") is a per-task choice instead
+    (BrowserHub.begin_task), not a saved switch."""
+    from delta.tools.browser_choice import persistent_request, signin_request
+
+    if (choice := persistent_request(text)) is not None:
+        return Intent("set_browser", {"choice": choice, "scope": "always"}, "the browser choice is saved")
+    if (signin := signin_request(text)) is not None:
+        return Intent("open_signin_browser", signin, "Delta's private browser is open for the user to sign in")
     return None
 
 

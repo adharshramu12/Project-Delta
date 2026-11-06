@@ -101,3 +101,45 @@ def stop_running(c: Container, by: str) -> bool:
     c.audit.record("task.cancel_requested", by=by)
     task.cancel()
     return True
+
+
+# --- which browser Delta uses (dashboard, Telegram /browser, chat set_browser) ------------------------------
+
+def browser_state(c: Container) -> dict[str, Any]:
+    """The browser choice as people see it: the four options (unavailable ones with the reason), the private
+    browser's engine, and the running task's browser when it differs from the saved one."""
+    from delta.tools.browser_choice import describe, detect, engine_options, from_config, options
+
+    hub = getattr(c, "browsers", None)
+    inst = hub.installed() if hub is not None else detect()
+    pick = from_config(c.settings.browser)
+    running = [tb for tb in getattr(hub, "_active", {}).values() if tb.used and tb.pick != pick]
+    return {"choice": pick.choice, "engine": pick.engine, "label": pick.label, "describe": describe(pick, inst),
+            "options": options(inst, pick), "engines": engine_options(inst, pick),
+            "running_note": (f"A task is using {running[0].pick.label} right now; your choice applies from the "
+                             "next task.") if running else "",
+            "signin_available": hub is not None and getattr(hub, "mgr", None) is not None}
+
+
+def set_browser(c: Container, choice: str, by: str, engine: str | None = None) -> str:
+    """Save the browser choice; the reply says it in plain words (and when a running task keeps the old one)."""
+    from delta.tools.browser_switch import save_choice
+
+    return save_choice(c.settings, c.audit, choice, engine, by=by, hub=getattr(c, "browsers", None))
+
+
+def set_private_engine(c: Container, engine: str, by: str) -> str:
+    from delta.tools.browser_switch import save_engine
+
+    return save_engine(c.settings, c.audit, engine, by=by, hub=getattr(c, "browsers", None))
+
+
+async def open_signin_browser(c: Container, url: str, by: str) -> tuple[bool, str]:
+    """'Sign in to my sites': Delta's private browser opens visibly on this PC; the person signs in."""
+    hub = getattr(c, "browsers", None)
+    if hub is None or getattr(hub, "mgr", None) is None:
+        return False, ("Delta's private browser is not available on this PC (it needs Google Chrome or Microsoft "
+                       "Edge and the browser add-on).")
+    result = await hub.open_signin(url)
+    c.audit.record("browser.signin_requested", by=by, ok=result.ok)
+    return result.ok, result.output

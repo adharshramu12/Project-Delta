@@ -42,6 +42,10 @@ asks before anything risky, and **verifies every task before it says "done".**
 
 **In your browser** (your own signed-in Chrome or Edge)
 - Open sites, read pages, fill forms, play YouTube
+- **Choose the browser from anywhere:** "My default browser", "Chrome", "Edge" (all signed in to your
+  sites) or "Delta's private browser" (works in the background and is faster, signed out until you sign in
+  once). Pick it in Settings, with `/browser` in Telegram, or just say it: "use Edge from now on", "switch to
+  Delta's private browser", or "do this in Chrome" for one task only. See [Choosing the browser](#choosing-the-browser)
 - **Deep Research in your own ChatGPT or Gemini:** Delta asks what you need, writes an
   expert-level research brief, starts Deep Research for you, and retries by itself if the site fails
 
@@ -49,6 +53,25 @@ asks before anything risky, and **verifies every task before it says "done".**
 - Asks **tick-box questions** instead of guessing, in the app and in Telegram
 - **Remembers** your preferences locally and **learns your workflows** as reusable skills
 - Voice notes in, answers out
+
+## Choosing the browser
+
+| Option | What it is |
+|---|---|
+| **My default browser** | Your everyday browser (Chrome or Edge), already signed in to your sites. Delta opens one window of its own there; that window comes to the front while Delta types. If your Windows default is another browser (for example Firefox), Delta uses Chrome, else Edge, and says so. |
+| **Chrome** / **Edge** | That browser, signed in to your sites, driven the same way. |
+| **Delta's private browser** | Delta's own separate profile, automated in the background: faster, and simple captchas on sites you allowed and page-change summaries work here. It starts signed out. You choose which installed browser runs it (Automatic = Chrome if installed, else Edge). |
+
+- **Where:** Settings → Browser (options that are not installed show greyed out with the reason), Telegram
+  `/browser` (tap a button; switching needs your PIN), or a sentence in chat. "Use Edge from now on" saves
+  the choice; "open Gmail in Chrome" or "do this in Delta's private browser" uses it for that one task and
+  leaves your setting alone. Delta confirms the switch in plain words.
+- **Never mid-task:** a switch made while a task is using the browser applies from the next task; Delta tells you.
+- **Sign in to my sites:** Settings → Browser → "Open to sign in", `/signin` in Telegram (opens on the PC, needs
+  your PIN), or say "sign in to my sites". Delta's private browser opens on the PC at the site you name (or a
+  blank tab); you sign in yourself and it remembers you for later tasks. Delta never types passwords there.
+- Old settings keep working: `browser.mode` and `browser.prefer` are unchanged; the new
+  `browser.private_engine` (default `auto`) only says which browser runs Delta's private one.
 
 ## Writer and Documents
 
@@ -159,6 +182,8 @@ comes back with the reason.
 | `/ai` `/model` | See or switch the main AI and model |
 | `/keys` | Replace an API key (PIN protected) |
 | `/mode` | Permission level: ask everything → autopilot |
+| `/browser` | Which browser Delta uses: your default, Chrome, Edge or Delta's private browser (switching needs your PIN) |
+| `/signin` | Open Delta's private browser on the PC so you can sign in to your sites (PIN protected) |
 | `/screen` `/camera` | Screenshot or webcam photo (PIN protected) |
 | `/volume` `/brightness` `/theme` | Sound, screen brightness, Windows light/dark |
 | `/apps` | Open apps; tap to close one |

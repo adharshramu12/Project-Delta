@@ -37,7 +37,7 @@ from pydantic import BaseModel
 from delta.core.state import CURRENT_REQUEST
 from delta.tools.base import Tool, ToolResult
 
-URL_TOOLS = {"fetch_page", "browser_open", "open_target"}
+URL_TOOLS = {"fetch_page", "browser_open", "open_target", "open_signin_browser"}
 SEARCH_TOOLS = {"browser_search"}
 # Desktop input tools: their WRITE-level calls (Enter, closing things) are taint-guarded, and every call
 # aimed at a terminal or at Delta's own window is confirmed.

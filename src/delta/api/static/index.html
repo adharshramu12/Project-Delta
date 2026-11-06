@@ -363,11 +363,17 @@ body.chats-closed #chats{margin-left:-264px;opacity:0;pointer-events:none;visibi
       <div class="msg" id="sos_msg"></div>
     </div>
     <h3>Browser</h3>
-    <label class="field">Which browser Delta uses <small id="s_using"></small>
-      <select id="s_prefer"><option value="auto">My Windows default browser</option><option value="chrome">Google Chrome</option><option value="edge">Microsoft Edge</option></select></label>
-    <label class="field">How
-      <select id="s_bmode"><option value="your-browser">My normal browser, signed in to my sites (recommended)</option>
-        <option value="delta-profile">A separate Delta profile (works in the background, not signed in)</option></select></label>
+    <small>Which browser Delta uses for websites. You can also change it from Telegram (/browser) or just say it,
+      e.g. "use Edge from now on" or "do this in Chrome". A change applies from the next task, never in the middle of one.</small>
+    <div id="s_browsers"></div>
+    <label class="field" id="s_engine_row" hidden>Delta's private browser runs in <small>which installed browser runs it (each keeps its own sign-ins)</small>
+      <select id="s_engine"></select></label>
+    <div class="app">
+      <b>Sign in to my sites</b>
+      <small>Opens Delta's private browser on this PC so you sign in once; it remembers you for later tasks. Delta never types your passwords there.</small>
+      <div class="kin"><input id="s_signin_url" placeholder="Site to sign in to (optional), e.g. mail.google.com"><button id="s_signin">Open to sign in</button></div>
+      <div class="msg" id="s_bmsg"></div>
+    </div>
     <label class="check"><input type="checkbox" id="s_orange"> Show an orange mouse pointer while Delta controls the mouse or keyboard</label>
     <h3>Folders</h3>
     <label class="field">Allowed folders <small>one per line: in "Trusted" mode Delta edits files here without asking</small><textarea id="s_allowed" rows="4"></textarea></label>
@@ -1148,12 +1154,37 @@ $("g_save").onclick = async () => {
 };
 $("g_unlock").onclick = async () => { const r = await api("/api/security/unlock", {method: "POST"}); $("g_msg").className = "msg ok"; $("g_msg").textContent = "✓ " + r.message; guardCard(); };
 $("g_lock").onclick = async () => { const r = await api("/api/security/lock", {method: "POST"}); $("g_msg").className = "msg ok"; $("g_msg").textContent = "✓ " + r.message; guardCard(); };
+function renderBrowsers(b) {
+  const box = $("s_browsers"); box.innerHTML = "";
+  for (const o of b.options || []) {
+    const l = document.createElement("label"); l.className = "choice";
+    l.innerHTML = '<input type="radio" name="s_browser"><b></b><small></small>';
+    const i = l.querySelector("input"); i.value = o.id; i.checked = o.current; i.disabled = !o.available;
+    l.querySelector("b").textContent = o.label;
+    l.querySelector("small").textContent = o.available ? o.help + (o.uses ? " " + o.uses : "") : "Not available: " + o.reason;
+    if (!o.available) l.style.opacity = ".55";
+    i.onchange = () => { $("s_engine_row").hidden = i.value !== "private"; };
+    box.appendChild(l);
+  }
+  const eng = $("s_engine"); eng.innerHTML = "";
+  for (const e of b.engines || []) {
+    const opt = document.createElement("option"); opt.value = e.id; opt.disabled = !e.available;
+    opt.textContent = e.label + (e.available ? "" : " (not installed)"); opt.selected = e.current; eng.appendChild(opt);
+  }
+  $("s_engine_row").hidden = b.choice !== "private";
+  $("s_signin").disabled = !b.signin_available;
+  $("s_bmsg").className = "msg"; $("s_bmsg").textContent = b.running_note || (b.signin_available ? "" : "Delta's private browser is not available on this PC.");
+}
+$("s_signin").onclick = async () => {
+  $("s_bmsg").className = "msg"; $("s_bmsg").textContent = "Opening Delta's private browser on this PC…";
+  const r = await api("/api/browser/signin", {method: "POST", body: JSON.stringify({url: $("s_signin_url").value.trim()})}).catch(e => ({message: e.message}));
+  $("s_bmsg").className = "msg " + (r.ok ? "ok" : "bad"); $("s_bmsg").textContent = (r.ok ? "✓ " : "✗ ") + (r.message || "");
+};
 async function openSettings() {
   guardCard();
   sosCard();
   const s = await api("/api/settings"), b = s.boundaries;
-  $("s_prefer").value = s.browser.prefer; $("s_bmode").value = s.browser.mode; $("s_orange").checked = s.browser.orange_cursor;
-  $("s_using").textContent = s.browser.using ? `(currently: ${s.browser.using})` : "(no Chrome or Edge found)";
+  renderBrowsers(s.browser); $("s_orange").checked = s.browser.orange_cursor;
   document.querySelector(`input[name=s_autonomy][value="${b.autonomy}"]`).checked = true;
   $("s_quiet").checked = b.quiet_hours.enabled; $("s_qstart").value = b.quiet_hours.start; $("s_qend").value = b.quiet_hours.end;
   $("s_allowed").value = b.allowed_paths.join("\n"); $("s_denied").value = b.denied_paths.join("\n");
@@ -1308,7 +1339,9 @@ $("openapps").onclick = async () => { $("setup").hidden = true; await openSettin
 $("s_close").onclick = () => { $("settings").hidden = true; };
 $("s_save").onclick = async () => {
   const body = {
-    browser: {prefer: $("s_prefer").value, mode: $("s_bmode").value, orange_cursor: $("s_orange").checked},
+    browser: (() => { const picked = document.querySelector("input[name=s_browser]:checked"), b = {orange_cursor: $("s_orange").checked};
+      if (picked) { b.choice = picked.value; if (picked.value === "private" && $("s_engine").value) b.engine = $("s_engine").value; }
+      return b; })(),
     boundaries: {autonomy: document.querySelector("input[name=s_autonomy]:checked").value,
       allowed_paths: lines("s_allowed"), denied_paths: lines("s_denied"), denied_apps: lines("s_apps"),
       denied_domains: lines("s_domains"), allowed_domains: lines("s_onlydomains"),
@@ -1320,7 +1353,7 @@ $("s_save").onclick = async () => {
   const r = await api("/api/settings", {method: "PUT", body: JSON.stringify(body)}).catch(e => ({detail: e.message}));
   if (!r.ok) { $("s_err").textContent = typeof r.detail === "string" ? r.detail : "Please check the values."; return; }
   $("settings").hidden = true;
-  add("step ok", "✓ Settings saved and applied." + (r.restart_needed ? " Restart Delta for the add-on change to take effect." : ""));
+  add("step ok", "✓ Settings saved and applied." + (r.browser_note ? " " + r.browser_note : "") + (r.restart_needed ? " Restart Delta for the add-on change to take effect." : ""));
 };
 api("/api/setup").then(s => { if (!s.completed) openSetup(); }).catch(() => {});
 

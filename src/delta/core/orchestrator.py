@@ -383,6 +383,7 @@ class Orchestrator:
         self.proof = proof
         self._planned: set[str] = set()  # tasks whose planner call also did the fact learning
         self._learning: set[asyncio.Task[None]] = set()
+        self.browsers: Any = None  # BrowserHub (delta.tools.browser_switch), set by bootstrap
 
     def _finish_proof(self, result: TaskResult) -> None:
         """Close the run record; a proof folder that cannot be written must not fail the task itself."""
@@ -406,6 +407,8 @@ class Orchestrator:
         self.audit.record("task.start", task=req.id, channel=req.channel, text=req.text)
         started = time.monotonic()
         current = CURRENT_REQUEST.set(req)
+        # The browser this task uses is fixed now: a switch saved while it runs applies to the next task.
+        pinned = self.browsers.begin_task(req.id, req.text) if self.browsers is not None else None
         try:
             await self.events.publish("task.started", task_id=req.id, text=req.text)
             if self.proof:
@@ -427,6 +430,8 @@ class Orchestrator:
             self.audit.record("task.error", task=req.id, error=type(e).__name__)
             result = TaskResult(req.id, "failed", TASK_CRASHED)
         finally:
+            if pinned is not None:
+                self.browsers.end_task(req.id, pinned)
             CURRENT_REQUEST.reset(current)
             self.executor.forget_task(req.id)
             try:

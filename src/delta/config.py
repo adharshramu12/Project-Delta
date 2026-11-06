@@ -159,6 +159,9 @@ class BrowserConfig(BaseModel):
     # delta-profile: a separate Delta profile, automated in the background, not signed in
     mode: Literal["your-browser", "delta-profile"] = "your-browser"
     prefer: Literal["auto", "chrome", "edge"] = "auto"  # auto = your Windows default browser
+    # Which installed browser runs Delta's private profile (delta-profile mode). auto = Chrome if
+    # installed, else Edge (what Delta always did). Added later: older settings files load unchanged.
+    private_engine: Literal["auto", "chrome", "edge"] = "auto"
     orange_cursor: bool = True  # orange mouse pointer while Delta controls the mouse/keyboard
     # Delta profile: after an action on the same page, send the AI only what changed on it.
     snapshot_diffs: bool = True

@@ -33,6 +33,8 @@ HELP = (
     "/ai - see or switch the main AI\n"
     "/model - pick the model for the main AI\n"
     "/mode - permission level (Careful, Balanced, Trusted, Autopilot)\n"
+    "/browser - which browser I use: your default, Chrome, Edge or my private one (switching needs your PIN)\n"
+    "/signin - open my private browser on the PC so you can sign in to your sites (needs your PIN)\n"
     "/keys - replace an API key (when credits or limits run out)\n\n"
     "<b>Your PC</b>:\n"
     "/volume - mute, louder, quieter (or /volume 30)\n"
@@ -83,6 +85,8 @@ class TelegramChannel(PCMenu):
         self.app.add_handler(CommandHandler("ai", self._ai_cmd))
         self.app.add_handler(CommandHandler("model", self._model_cmd))
         self.app.add_handler(CommandHandler("mode", self._mode_cmd))
+        self.app.add_handler(CommandHandler("browser", self._browser_cmd))
+        self.app.add_handler(CommandHandler("signin", self._signin_cmd))
         self.app.add_handler(CommandHandler("stop", self._stop_cmd))
         self.app.add_handler(CommandHandler("keys", self._keys_cmd))
         self.app.add_handler(CommandHandler("lock", self._lock_cmd))
@@ -113,7 +117,9 @@ class TelegramChannel(PCMenu):
         with contextlib.suppress(Exception):  # the "/" menu in the chat
             await self.app.bot.set_my_commands([
                 ("ai", "See or switch the main AI"), ("model", "Pick the model"),
-                ("mode", "Permission level"), ("keys", "Replace an API key"), ("stop", "Stop the running task"),
+                ("mode", "Permission level"), ("browser", "Which browser I use"),
+                ("signin", "Open my private browser to sign in"), ("keys", "Replace an API key"),
+                ("stop", "Stop the running task"),
                 ("lock", "Lock remote control now"), ("unlock", "Enter your PIN"),
                 ("volume", "PC volume"), ("brightness", "Screen brightness"), ("theme", "Windows light / dark mode"),
                 ("apps", "Open apps, tap to close"),
@@ -258,6 +264,50 @@ class TelegramChannel(PCMenu):
         await update.message.reply_text(f"Permission level. Tap to switch:\n\n{AUTOPILOT_STILL_ASKS}",
                                         reply_markup=self._buttons(rows))
 
+    def _browser_menu(self) -> tuple[str, Any]:
+        """The current browser and one button per option; unavailable ones say why (tapping explains)."""
+        from delta.control import browser_state
+
+        st = browser_state(self.c)
+        rows = []
+        for o in st["options"]:
+            mark = "✅ " if o["current"] else ("" if o["available"] else "🚫 ")
+            rows.append([(f"{mark}{o['label']}" + ("" if o["available"] else " (not available)"),
+                          f"ctl:browser:{o['id']}")])
+        if any(o["id"] == "private" and o["available"] for o in st["options"]):
+            rows.append([(f"{'✅ ' if e['current'] else ''}Private runs in: {e['label'].split(' (')[0]}"[:60],
+                          f"ctl:bengine:{e['id']}") for e in st["engines"] if e["available"]])
+        if st["signin_available"]:
+            rows.append([("🔑 Sign in to my sites (opens on the PC)", "ctl:signin:")])
+        from html import escape
+
+        lines = [f"Browser now: <b>{escape(st['label'])}</b>", f"({escape(st['describe'])})"]
+        lines += [f"• {escape(o['label'])}: {escape(o['reason'])}" for o in st["options"] if not o["available"]]
+        if st["running_note"]:
+            lines.append(escape(st["running_note"]))
+        lines.append("\nTap to switch (needs your PIN). It applies from the next task, never in the middle of one.")
+        return "\n".join(lines), self._buttons(rows)
+
+    async def _browser_cmd(self, update: Any, ctx: Any) -> None:
+        if not is_allowed(update.effective_user.id, self.allowed):
+            return
+        if await self._locked(update.message.reply_text):
+            return
+        if ctx is not None and ctx.args:  # /browser edge, /browser private
+            from delta.tools.browser_choice import parse_choice
+
+            choice = parse_choice(" ".join(ctx.args)) or " ".join(ctx.args)
+            await self._apply(update.message.reply_text, "browser", choice, update.effective_user.id)
+            return
+        text, kb = self._browser_menu()
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
+
+    async def _signin_cmd(self, update: Any, ctx: Any) -> None:
+        if not is_allowed(update.effective_user.id, self.allowed):
+            return
+        url = " ".join(ctx.args) if ctx is not None and ctx.args else ""
+        await self._apply(update.message.reply_text, "signin", url, update.effective_user.id)
+
     async def _stop_cmd(self, update: Any, ctx: Any) -> None:
         if not is_allowed(update.effective_user.id, self.allowed):
             return
@@ -282,6 +332,25 @@ class TelegramChannel(PCMenu):
                 await self._guarded(str(uid), "autopilot", say, go)
             elif kind == "mode":
                 await say(f"✅ Permission level: {set_autonomy(self.c, value, by)}.")
+            elif kind in ("browser", "bengine"):
+                from delta.control import set_browser, set_private_engine
+
+                async def switch() -> None:
+                    try:
+                        if kind == "browser":
+                            await say("✅ " + set_browser(self.c, value, by))
+                        else:
+                            await say("✅ " + set_private_engine(self.c, value, by))
+                    except ValueError as e:
+                        await say(f"✗ {e}")
+                await self._guarded(str(uid), "browser", say, switch)
+            elif kind == "signin":
+                from delta.control import open_signin_browser
+
+                async def open_it() -> None:
+                    ok, message = await open_signin_browser(self.c, value, by)
+                    await say(("✅ " if ok else "✗ ") + message)
+                await self._guarded(str(uid), "signin", say, open_it)
             elif kind == "key":
                 async def ask_key() -> None:
                     self._awaiting_key[str(uid)] = (value, time.monotonic() + 300)

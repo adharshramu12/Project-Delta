@@ -101,6 +101,7 @@ class Container:
     emergency: Any = None  # EmergencyContacts (encrypted)
     running: asyncio.Task[Any] | None = None  # the task being worked on now (any channel can stop it)
     scheduler: Any = None  # delta.scheduler.service.Scheduler (its loop starts in `delta run`)
+    browsers: Any = None  # delta.tools.browser_switch.BrowserHub: which browser each task uses
 
     def warn(self, message: str) -> None:
         if message not in self.warnings:
@@ -267,25 +268,30 @@ def build(settings: Settings) -> Container:
             ctl.close()
 
         closers.append(("desktop", close_desktop))
-    if settings.browser.mode == "your-browser" and desktop_ok:
-        # Default: the user's own signed-in Chrome/Edge, driven like a person (see user_browser.py).
+    # Both browser kits are built when this PC can run them; which one a task uses is chosen per task
+    # (delta.tools.browser_switch), so switching from the dashboard, Telegram or chat needs no restart.
+    from delta.tools.browser_switch import BrowserHub
+
+    browsers = BrowserHub(settings, audit)
+    if desktop_ok:
+        # The user's own signed-in Chrome/Edge, driven like a person (see user_browser.py). The default.
         from delta.tools.user_browser import user_browser_tools
 
-        for t in user_browser_tools(ctl, settings.browser.prefer):
-            registry.register(t)
-    elif _installed("playwright"):
-        # Optional: a separate Delta profile, fully automatable in the background but not signed in.
+        browsers.add_user(user_browser_tools(ctl, settings.browser.prefer))
+    if _installed("playwright"):
+        # Delta's private profile, fully automatable in the background but signed out until the user signs in.
         from delta.tools.browser import BrowserManager, browser_tools
 
         browser = BrowserManager(data)
         browser.diff_snapshots = settings.browser.snapshot_diffs
         browser.full_every = settings.browser.full_snapshot_every
-        for t in browser_tools(browser):
-            registry.register(t)
         from delta.tools.captcha import captcha_tool
 
-        registry.register(captcha_tool(browser, settings, router, approvals, audit, proof))
+        browsers.add_private([*browser_tools(browser),
+                              captcha_tool(browser, settings, router, approvals, audit, proof)], browser)
         closers.append(("browser", browser.close))
+    for t in browsers.tools():
+        registry.register(t)
     learning = LearningStore(data / "learning.db")
 
     async def on_learned(item: Learned) -> None:
@@ -300,6 +306,7 @@ def build(settings: Settings) -> Container:
     skills = SkillStore(data / "skills.db")
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
                                 governor, events, audit, skills, learning, proof)
+    orchestrator.browsers = browsers  # pins each task to its browser (switches apply at the next task)
 
     async def on_health(a: Assessment) -> None:
         await events.publish("governor.health", health=a.health.name, reasons=a.reasons)
@@ -314,6 +321,7 @@ def build(settings: Settings) -> Container:
     approvals.guard = guard  # ...and for every approval button pressed on a phone
     container = Container(settings, events, governor, router, memory, audit, approvals, registry, orchestrator,
                           Lifecycle(data), asyncio.Semaphore(1), closers, chats=ChatStore(data / "chats.db"),
-                          live_channels=live_channels, guard=guard, emergency=emergency, scheduler=scheduler)
+                          live_channels=live_channels, guard=guard, emergency=emergency, scheduler=scheduler,
+                          browsers=browsers)
     scheduler.bind(container)
     return container

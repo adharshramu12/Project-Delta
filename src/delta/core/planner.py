@@ -61,6 +61,10 @@ prepare_post only copies it and opens the compose page for the user to press Pos
 "every day at 9 am check my attendance" / "remind me at 6 pm to call Ravi" / "every Monday 10 am ..." ->
 schedule_task with text = the user's own words (it confirms the parsed time with the user before saving);
 "what's scheduled" -> list_schedules; "pause/delete my attendance check" -> pause_schedule / delete_schedule.
+"use Edge from now on" / "switch to Delta's private browser" -> set_browser {{"choice": "edge"|"chrome"|"default"|
+"private", "scope": "always"}}; "do this in Chrome ..." -> plan set_browser with "scope": "this_task" first, then
+the browser steps (the saved choice stays); "let me sign in to my sites" -> open_signin_browser (the user signs in;
+Delta never types passwords there).
 If the person or app is not clear, ask instead of guessing. Leave it null when the
 job needs several steps or looking at the screen.
 

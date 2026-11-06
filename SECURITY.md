@@ -112,6 +112,19 @@ Delta can help with **simple image/text captchas** on sites where you log in to 
   worked. The captcha answer is never logged or shown to the model.
 - Works in the **delta-profile** browser mode (it needs to see the captcha element), not in your-browser mode.
 
+### Choosing the browser
+
+- **Same rules in every browser.** Switching browsers (Settings, Telegram `/browser`, or a sentence in chat)
+  changes which browser the tools drive, not what they may do: each call is still judged by the real tool's
+  risk rules, password and payment fields are still refused, captchas still follow the rules above (and
+  `solve_captcha` is offered only while the task uses Delta's private browser).
+- **A web page cannot switch it.** `set_browser` saves a choice only when the user's own message talks about a
+  browser; a choice for one task only changes no setting. A switch never happens in the middle of a task.
+- **Sign in to my sites** opens Delta's private browser on the PC on an ordinary web address (no `file:`,
+  `javascript:` or `data:` addresses) and the user signs in. Delta never types passwords there. The profile lives
+  in Delta's own data folder, which no tool can read or change, and the address is checked by the blocked-sites
+  list and, after the task read outside content, by ExfilGuard like `browser_open`.
+
 ## Remote control (Telegram, Slack): threat model
 
 | Threat | Defence |
@@ -145,6 +158,14 @@ dashboard).
    - **Approve** on a delete/overwrite, a send, or one of the PIN tools above needs a PIN unlock; until then
      the request stays open (unlock, then tap Approve again, or answer on the PC). **Deny** never needs the
      PIN. Answers given on the PC are not affected.
+
+**Browser choice from a phone.** Saving a different browser from a remote channel is a settings change and
+needs a PIN unlock: Telegram `/browser` buttons go through the same PIN step as `/mode autopilot` and `/keys`,
+and the chat tool `set_browser` with `scope=always` declares that it needs the PIN, which `ToolExecutor` checks
+like the list above (a tool can only add a PIN requirement this way, never remove one). While locked, nothing is
+changed. A choice for one task only ("do this in Chrome") changes no setting and needs no PIN. Opening Delta's
+private browser for signing in (`open_signin_browser`, Telegram `/signin`) puts a browser window on the PC, so it
+is in the PIN list too. Every change is audited with who made it.
 
 Slack cannot take the PIN (there is no `/unlock` in Slack yet), so from Slack the PIN-protected actions are
 refused: do them on the PC, or from Telegram after `/unlock`. `/lock` is a Telegram command; a lock from
