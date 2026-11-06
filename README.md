@@ -54,6 +54,22 @@ asks before anything risky, and **checks the result of every task it works on be
 - **Remembers** your preferences locally and **learns your workflows** as reusable skills
 - Voice notes in, answers out
 
+## The dashboard
+
+Delta's app window is a calm, familiar dashboard: a sidebar with **Chat, Tasks, Apps, Schedules, Documents,
+Memory and Settings**, a top bar that always shows the AI model, the browser, phone (PIN) protection and the
+connection, and a **Task progress** panel next to the chat. Anything that changes or sends something appears as a
+card that says exactly what will happen, with **Approve**, **Allow for this task** and **Deny**. Light and dark
+follow Windows (or pick one), it works offline, and it stays light on older laptops.
+
+| Chat with a task running | Apps |
+|---|---|
+| ![Chat with the task progress panel and an approval card](docs/images/dashboard-chat-light.png) | ![Apps: AI models and connected apps](docs/images/dashboard-apps-light.png) |
+| **Dark theme** | **A task's timeline** |
+| ![The chat in the dark theme](docs/images/dashboard-chat-dark.png) | ![Every step of a task with time, model and tokens](docs/images/dashboard-task-timeline-dark.png) |
+
+How it is built (design tokens, components, accessibility and security rules): [docs/UI.md](docs/UI.md).
+
 ## Choosing the browser
 
 | Option | What it is |
@@ -155,7 +171,7 @@ Delta works inside the apps you use, through their official MCP servers: Notion,
 Linear, Slack, Sentry, Stripe, Gmail, Google Drive and Calendar, Asana, Vercel, Supabase, Hugging Face, Figma
 (desktop) and any other MCP server you add.
 
-1. **Open Apps**: the plug button at the top of the dashboard (or `delta apps list` on the PC).
+1. **Open Apps**: **Apps** in the dashboard's sidebar (or `delta apps list` on the PC).
 2. **Connect**: press Connect and sign in in the browser window that opens (some apps ask for a token or the
    client id of an OAuth app you create; the card says exactly what). From Telegram: `/connect notion` (PIN).
 3. **Ask**: "find my Notion notes about the launch", "open a GitHub issue for the login bug", "what is on my
@@ -182,7 +198,7 @@ Next run: Sat 7 Nov 2026, 9:00 AM") and saves it only after your OK. The result 
 asked from (Telegram, Slack, or the app's **Scheduled tasks** chat with a Windows notification); a failure
 comes back with the reason.
 
-- **Manage them** in the app's right-hand panel (**Schedules**: next run, last result, pause, resume, run now,
+- **Manage them** on the dashboard's **Schedules** page (next run, last result, pause, resume, run now,
   delete, and a box to add one), by asking ("what's scheduled?", "pause the attendance check"), or from a
   terminal: `delta schedule add "every day at 9 am ..."`, `delta schedule list`, `pause`, `resume`, `remove`,
   `run`.
@@ -208,7 +224,7 @@ Every task Delta works on is recorded in `tasks.db` in Delta's data folder: its 
 acting, waiting for you, verifying, done, failed, cancelled or interrupted) and each step it took (tool,
 arguments with secrets masked, a short result, the model, tokens, time and the screenshot, if any).
 
-- **See what happened.** The app's right-hand panel has **Tasks**: filter by state or search, then click a
+- **See what happened.** The dashboard's **Tasks** page: filter by state or search, then click a
   task for its run timeline. From a terminal: `delta tasks`, `delta tasks show <id>`.
 - **Crash resume, always your choice.** If Delta, Windows or the power stops in the middle of a task, the
   task is marked *interrupted* on the next start and shown with **Resume** and **Discard** (in the app, with
