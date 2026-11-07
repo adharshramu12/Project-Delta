@@ -39,12 +39,18 @@ $newWindow = "`$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine
 $script:failures = New-Object System.Collections.Generic.List[string]
 $script:token = ""
 $script:lastApi = ""
+$script:infos = New-Object System.Collections.Generic.List[string]
 $fake = $null
 
 function Check([bool]$ok, [string]$what) {
     if ($ok) { Write-Host "PASS  $what" -ForegroundColor Green }
     else { Write-Host "FAIL  $what" -ForegroundColor Red; $script:failures.Add($what) }
     return $ok
+}
+function Info([string]$what) { Write-Host "INFO  $what" -ForegroundColor Cyan; $script:infos.Add($what) }
+function SizeMB([string]$path) {
+    if (-not (Test-Path $path)) { return 0 }
+    [math]::Round(((Get-ChildItem $path -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1MB), 1)
 }
 function Must([bool]$ok, [string]$what) {
     if (-not (Check $ok $what)) { Write-Host "      last API call: $script:lastApi"; throw "cannot go on: $what" }
@@ -159,6 +165,7 @@ function SaveLogs {
 }
 
 $before = Leftovers
+$cachesBefore = @{ uv = (SizeMB (Join-Path $env:LOCALAPPDATA "uv\cache")); pip = (SizeMB (Join-Path $env:LOCALAPPDATA "pip\cache")) }
 $cmdTarget = "deltadental-test-$PID"   # a stranger's saved key whose name contains "delta"
 try {
     # 1. the README one-liner ---------------------------------------------------------------------------------
@@ -217,7 +224,7 @@ try {
     Check ((@($status.warnings) -join " ") -match "No AI model") "the top bar warns that no AI model is set up" | Out-Null
 
     # 5. the first message, with no AI model at all ----------------------------------------------------------
-    $first = RunTask "hello" 90
+    $first = RunTask "what is the capital of France?" 90   # not a greeting: those are answered without a model
     Check ($first.status -in "failed", "done", "answered") "the first message without a model ends (status $($first.status))" | Out-Null
     Check ("$($first.answer)" -match "Groq|Setup|LM Studio|Ollama") "with no model the reply says how to add one (got: $($first.answer))" | Out-Null
     Check ("$($first.answer)" -notmatch "not reachable at|Errors:|http://127") "with no model the reply has no internal error text (got: $($first.answer))" | Out-Null
@@ -250,7 +257,7 @@ try {
     Must (WaitFor { PortOpen 1234 } 30) "the LM Studio stand-in listens on 127.0.0.1:1234"
     Check (WaitFor { @((Api GET "/api/status").Json.providers) -contains "lmstudio" } 75) `
         "Delta sees the newly started local model within 75 s, without a restart" | Out-Null
-    $hi = RunTask "hello there" 120
+    $hi = RunTask "tell me one fun fact about India" 120
     Check ("$($hi.answer)" -match "FAKE-REPLY-OK") "a chat message gets the model's reply (got $($hi.status): $($hi.answer))" | Out-Null
     $chats = (Api GET "/api/chats").Json
     Check (@($chats).Count -ge 1 -or @($chats.chats).Count -ge 1) "the chat is in the chat list" | Out-Null
@@ -274,7 +281,7 @@ try {
     Check ($r.Code -eq 200 -and $r.Json.ok) "Stop on a running task is accepted" | Out-Null
     Check (WaitFor { (Api GET "/api/tasks/$slow").Json.status -eq "cancelled" } 20) `
         "the stopped task ends cancelled (got $((Api GET "/api/tasks/$slow").Json.status))" | Out-Null
-    $after = RunTask "hello again" 60
+    $after = RunTask "tell me another fun fact" 60
     Check ("$($after.answer)" -match "FAKE-REPLY-OK") "Delta still answers after a stop" | Out-Null
     $r = Api GET "/api/tasks"
     Check ($r.Code -eq 200) "Tasks page lists the history" | Out-Null
@@ -295,6 +302,9 @@ try {
     Check ($done -and $ulog -match "Delta is installed") "the update finishes and says Delta is installed" | Out-Null
     Check ($ulog -match "closed the running Delta") "the update closed the running Delta itself" | Out-Null
     Check (-not (PortOpen 7878)) "Delta is stopped after the update" | Out-Null
+    $win = (Join-Path $data "app-window").ToLowerInvariant()
+    $stale = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.ToLowerInvariant().Contains($win) })
+    if ($stale.Count) { Info "after 'delta update --stop', $($stale.Count) Edge process(es) of Delta's closed dashboard window were still running" }
     $v = Child ($newWindow + "delta --version; exit `$LASTEXITCODE")
     Check ($v.Code -eq 0) "delta still works after the update" | Out-Null
 
@@ -303,8 +313,8 @@ try {
     $setup = (Api GET "/api/setup").Json
     Check ($setup.completed) "setup stays completed after the update" | Out-Null
     $chats = Api GET "/api/chats"
-    Check ($chats.Text -match "hello") "old chats are kept after the update" | Out-Null
-    $hi2 = RunTask "hello after the update" 120
+    Check ($chats.Text -match "fun fact") "old chats are kept after the update" | Out-Null
+    $hi2 = RunTask "one more fun fact please" 120
     Check ("$($hi2.answer)" -match "FAKE-REPLY-OK") "chat works after the update" | Out-Null
 
     # 10. logs and shutdown ---------------------------------------------------------------------------------
@@ -336,6 +346,15 @@ try {
     $new = @(Leftovers | Where-Object { $_ -notin $before })
     Check ($new.Count -eq 0) "no startup entry, Run key or scheduled task was added (new: $($new -join '; '))" | Out-Null
     Check (@(DeltaProcesses).Count -eq 0) "no Delta process runs after uninstall" | Out-Null
+    # Not failures, but what a user still finds on the PC afterwards (reported in the summary).
+    foreach ($k in "uv", "pip") {
+        $mb = SizeMB (Join-Path $env:LOCALAPPDATA "$k\cache")
+        if ($mb - $cachesBefore[$k] -gt 1) { Info "after uninstall, $k's download cache still holds $([math]::Round($mb - $cachesBefore[$k], 1)) MB more than before Delta (%LOCALAPPDATA%\$k\cache)" }
+    }
+    $files = Join-Path ([Environment]::GetFolderPath("Desktop")) "Delta files"
+    if (Test-Path $files) { Info "after uninstall, the Desktop folder 'Delta files' (Delta's save folder) is still there" }
+    $py312 = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
+    if (Test-Path $py312) { Info "Python 3.12 stays installed after uninstall ($py312)" }
 } catch {
     $script:failures.Add("stopped: $($_.Exception.Message)")
     Write-Host "STOPPED  $($_.Exception.Message)" -ForegroundColor Red
@@ -351,6 +370,7 @@ try {
     Child "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Undefined -Force" @{ PSExecutionPolicyPreference = "Bypass" } | Out-Null
 }
 $summary = if ($script:failures.Count) { "Fresh-user journey: $($script:failures.Count) check(s) failed`n" + (($script:failures | ForEach-Object { "- $_" }) -join "`n") } else { "Fresh-user journey: every check passed" }
+if ($script:infos.Count) { $summary += "`n`nNoted (not failures):`n" + (($script:infos | ForEach-Object { "- $_" }) -join "`n") }
 $summary | Out-File (Join-Path $out "summary.md") -Encoding utf8
 if ($env:GITHUB_STEP_SUMMARY) { $summary | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
 Write-Host "`n$summary"
