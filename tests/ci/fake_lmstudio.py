@@ -17,6 +17,7 @@ replaces and the uninstaller removes). Every request is logged to the file given
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import time
@@ -74,10 +75,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        try:
+        with contextlib.suppress(OSError):  # Delta gave up on this request (a stopped task)
             self.wfile.write(data)
-        except OSError:  # Delta gave up on this request (a stopped task)
-            pass
 
     def do_GET(self) -> None:
         if self.path.rstrip("/") in ("/v1/models", "/api/v0/models"):

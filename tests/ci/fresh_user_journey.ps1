@@ -38,6 +38,7 @@ $newWindow = "`$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine
              "[Environment]::GetEnvironmentVariable('Path','User'); "
 $script:failures = New-Object System.Collections.Generic.List[string]
 $script:token = ""
+$script:lastApi = ""
 $fake = $null
 
 function Check([bool]$ok, [string]$what) {
@@ -46,7 +47,7 @@ function Check([bool]$ok, [string]$what) {
     return $ok
 }
 function Must([bool]$ok, [string]$what) {
-    if (-not (Check $ok $what)) { throw "cannot go on: $what" }
+    if (-not (Check $ok $what)) { Write-Host "      last API call: $script:lastApi"; throw "cannot go on: $what" }
 }
 
 function Child([string]$command, [hashtable]$envs = @{}) {
@@ -74,9 +75,13 @@ function Api([string]$method, [string]$path, $body = $null) {
     $req = @{ Method = $method; Uri = "$base$path"; SkipHttpErrorCheck = $true; UseBasicParsing = $true
                TimeoutSec = 60; Headers = @{ Authorization = "Bearer $script:token" } }
     if ($null -ne $body) { $req["Body"] = ($body | ConvertTo-Json -Depth 8 -Compress); $req["ContentType"] = "application/json" }
-    try { $r = Invoke-WebRequest @args } catch { return [pscustomobject]@{ Code = 0; Text = "$_"; Json = $null } }
+    try { $r = Invoke-WebRequest @req } catch {
+        $script:lastApi = "$method $path -> no answer: $($_.Exception.Message)"
+        return [pscustomobject]@{ Code = 0; Text = "$_"; Json = $null }
+    }
     $json = $null
     try { $json = $r.Content | ConvertFrom-Json } catch { }
+    $script:lastApi = "$method $path -> $([int]$r.StatusCode): $("$($r.Content)".Substring(0, [Math]::Min(300, "$($r.Content)".Length)))"
     return [pscustomobject]@{ Code = [int]$r.StatusCode; Text = "$($r.Content)"; Json = $json }
 }
 
@@ -138,6 +143,14 @@ function Leftovers {
     $startup = @(Get-ChildItem ([Environment]::GetFolderPath("Startup")) -Force -ErrorAction SilentlyContinue | ForEach-Object { "startup :: $($_.Name)" })
     $tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | ForEach-Object { "task :: $($_.TaskPath)$($_.TaskName)" })
     return @($run + $startup + $tasks)
+}
+
+function ShowLog([string]$path, [int]$lines = 60) {
+    if (Test-Path $path) {
+        Write-Host "::group::last $lines lines of $path"
+        Get-Content $path -Tail $lines | ForEach-Object { Write-Host "    | $_" }
+        Write-Host "::endgroup::"
+    }
 }
 
 function SaveLogs {
@@ -327,6 +340,9 @@ try {
     $script:failures.Add("stopped: $($_.Exception.Message)")
     Write-Host "STOPPED  $($_.Exception.Message)" -ForegroundColor Red
     Write-Host $_.ScriptStackTrace
+    ShowLog (Join-Path $data "logs\service.log") 80
+    ShowLog (Join-Path $data "logs\crashes.log") 80
+    ShowLog (Join-Path $data "logs\launcher.log") 40
 } finally {
     if ($fake) { Stop-Process -Id $fake.Id -Force -ErrorAction SilentlyContinue }
     & cmdkey.exe "/delete:$cmdTarget" 2>$null | Out-Null
