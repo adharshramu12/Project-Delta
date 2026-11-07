@@ -36,6 +36,28 @@ REAP_EVERY_S = 60  # how often the service looks for a closed window's leftover 
 ALREADY_RUNNING = "Delta is already running"  # what `delta run` prints when another copy won the race
 
 
+class PortTakenError(RuntimeError):
+    """Another program (not Delta) listens on Delta's dashboard port, so the dashboard cannot start there."""
+
+
+def port_taken_message(settings: Settings) -> str:
+    host, port = settings.api.host, settings.api.port
+    return (f"Another program is using Delta's port {host}:{port}, so Delta cannot open its dashboard.\n"
+            f"Close that program, or give Delta another port: add  api: {{port: {port + 1}}}  to "
+            f"{settings.data_dir / 'settings.yaml'}, then open Delta again.")
+
+
+def _delta_on_port(settings: Settings) -> bool:
+    """Something answers on the dashboard port AND it is Delta (its delta.pid names a live Delta process).
+    Only a port check here opened the dashboard on another program's page (a dev server, another app on 7878)
+    and never started Delta at all."""
+    if not _port_open(settings.api.host, settings.api.port):
+        return False
+    from delta.__main__ import running_delta
+
+    return running_delta(settings.data_dir) is not None
+
+
 def window_processes(data_dir: Path) -> list[object]:
     """Edge processes of Delta's own app window (its private profile), never the user's browser."""
     import psutil
@@ -381,7 +403,7 @@ async def run(open_ui: bool = False) -> int:
     # asyncio.to_thread would otherwise grow to cpu+4 idle threads; 4 is plenty for Delta's blocking calls
     asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(4, thread_name_prefix="delta-io"))
     token = load_token(settings.data_dir)
-    if open_ui and _port_open(settings.api.host, settings.api.port):
+    if open_ui and _delta_on_port(settings):
         open_dashboard(settings, token)  # already running: a second double-click just shows the window
         return 0
     from delta.bootstrap import build
@@ -400,6 +422,9 @@ async def run(open_ui: bool = False) -> int:
             open_dashboard(settings, token)
             return 0
         raise
+    if _port_open(settings.api.host, settings.api.port):  # this is the only Delta, so the port is someone else's
+        await c.stop()
+        raise PortTakenError(port_taken_message(settings))
 
     server = uvicorn.Server(uvicorn.Config(create_app(c, token), host=settings.api.host, port=settings.api.port,
                                            log_level="warning", access_log=False, lifespan="off",
@@ -450,10 +475,12 @@ def launch_app() -> int:
     from delta.api.server import load_token
 
     token = load_token(settings.data_dir)
-    host, port = settings.api.host, settings.api.port
-    if _port_open(host, port):
+    if _delta_on_port(settings):
         open_dashboard(settings, token)
         return 0
+    if _port_open(settings.api.host, settings.api.port):
+        alert(port_taken_message(settings))
+        return 1
     logs = settings.data_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     console = logs / "service.log"

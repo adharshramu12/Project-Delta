@@ -151,10 +151,10 @@ def friendly_model_error(e: LLMError) -> str:
         if e.only_rate_limited:
             return ("The AI service is busy right now (free-tier usage limit). Please try again in a minute. "
                     "Adding a second provider key (e.g. NVIDIA NIM) or a local model avoids this.")
-        if not e.kinds:
-            return ("No AI model is set up yet. Add a free Groq key with `delta secrets set groq_api_key`, "
-                    "sign in to Claude Code or Codex to use your existing plan, "
-                    "or start Ollama / LM Studio to run a model on this PC.")
+        if not e.kinds or e.nothing_set_up:
+            return ("No AI model is set up yet. Add a free Groq key in Delta's Settings > Keys (or in a terminal: "
+                    "`delta secrets set groq_api_key`), sign in to Claude Code or Codex to use your existing plan, "
+                    "or start Ollama / LM Studio to run a model on this PC. Then send your message again.")
     return f"I couldn't reach an AI model to finish this. Details: {e}"
 
 

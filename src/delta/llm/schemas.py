@@ -41,9 +41,12 @@ class LLMError(RuntimeError):
 
 
 class AllProvidersFailedError(LLMError):
-    def __init__(self, message: str, kinds: list[str] | None = None) -> None:
+    def __init__(self, message: str, kinds: list[str] | None = None, nothing_set_up: bool = False) -> None:
         super().__init__(message)
         self.kinds = kinds or []
+        # Every provider tried was a local server (Ollama, LM Studio) that is not running: on a new PC with no key
+        # this is "no AI model is set up", not an outage.
+        self.nothing_set_up = nothing_set_up
 
     @property
     def only_rate_limited(self) -> bool:

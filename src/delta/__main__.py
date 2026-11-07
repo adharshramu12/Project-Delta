@@ -350,7 +350,7 @@ def _dispatch(args: argparse.Namespace, no_console: bool) -> None:
             alert(f"Delta could not open.\n\n{detail.strip().splitlines()[-1]}\n\nDetails: {log_file}")
             sys.exit(1)
     if args.cmd == "run":
-        from delta.daemon import alert, run
+        from delta.daemon import PortTakenError, alert, run
         from delta.system.lifecycle import AlreadyRunningError
 
         try:
@@ -358,6 +358,11 @@ def _dispatch(args: argparse.Namespace, no_console: bool) -> None:
         except KeyboardInterrupt:
             sys.exit(0)
         except AlreadyRunningError as e:  # a plain line, not a traceback (the launcher looks for this text)
+            print(e, flush=True)
+            sys.exit(1)
+        except PortTakenError as e:  # what to do, not a traceback (the launcher shows these last lines)
+            if no_console:
+                alert(str(e))
             print(e, flush=True)
             sys.exit(1)
         except SettingsError:

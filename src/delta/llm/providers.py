@@ -167,6 +167,10 @@ class OpenAICompatProvider:
         self._models_cache = (time.monotonic(), opts)
         return opts
 
+    def forget_ping(self) -> None:
+        """The next ping() asks the server again (a call to it just failed)."""
+        self._ping_at = -1e9
+
     def ping(self) -> bool:
         """Is anything answering at base_url? Cached for 30 s (status screens call this often)."""
         import httpx
