@@ -4,6 +4,7 @@
 (() => {
   "use strict";
   const D = window.Delta, {$, api, h, icon, btn} = D;
+  const STOPPED_AFTER_MS = 3 * 60 * 1000;  // no sign of the update by then: it stopped before changing anything
   let info = null;
 
   function notes(title, text, url, onClose) {
@@ -41,9 +42,28 @@
     }
     if (!r.ok) { D.toast({title: "Could not update", body: D.detail(r) || "Try again later.", kind: "danger", timeout: 12000}); return; }
     D.disconnect();
+    const say = h("p", {class: "muted", text: r.message});
     document.body.replaceChildren(h("main", {class: "off-screen", role: "status", "aria-live": "polite"}, h("div", {},
-      h("span", {class: "hero-mark"}, icon("logo")), h("h1", {text: `Updating to Delta ${r.version}`}),
-      h("p", {class: "muted", text: r.message}), h("span", {class: "spinner", "aria-hidden": "true"}))));
+      h("span", {class: "hero-mark"}, icon("logo")), h("h1", {text: `Updating to Delta ${r.version}`}), say,
+      h("span", {class: "spinner", "aria-hidden": "true"}))));
+    // The installer checks the download before it closes Delta. If Delta is still here, unchanged, after 3 minutes,
+    // the update stopped before changing anything: say so instead of spinning forever.
+    const start = Date.now();
+    while (Date.now() - start < STOPPED_AFTER_MS) {
+      await new Promise(res => setTimeout(res, 5000));
+      const now = await api("/api/updates").catch(() => null);
+      if (!now || now.current !== v.current) { comeBack(); return; }  // Delta closed for the update, or is already back
+    }
+    say.replaceChildren(`The update stopped before changing anything, so Delta ${v.current} is still running. The update window, or delta-install.log in your Temp folder, says why. `,
+      h("button", {type: "button", class: "btn sm", id: "upd_back", onclick: () => location.reload(), text: "Back to Delta"}));
+  }
+
+  // Delta closed to update: reload once it answers again, so the page shows the new version.
+  async function comeBack() {
+    for (;;) {
+      if (await api("/api/updates").catch(() => null)) { location.reload(); return; }
+      await new Promise(res => setTimeout(res, 5000));
+    }
   }
 
   // ---- Settings > Updates and help (applied at once, like start with Windows)

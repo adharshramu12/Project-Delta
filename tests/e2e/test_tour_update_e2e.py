@@ -5,8 +5,9 @@ DELTA_UPDATE_RAW) that offers a newer version, and the update launcher replaced 
 `delta update`'s real run is in the fresh-user CI journey). Checks: the tour appears after setup, moves with the
 arrow keys, spotlights the real chat box, skips with Esc, never comes back by itself, and replays from Settings and
 from /tour; the banner shows the new version and its notes as text, Skip this version sticks, Update now asks first
-and then starts the update of exactly the checked commit and files, and What's new shows once after an update. No
-script error and no Content-Security-Policy violation anywhere. DELTA_SHOTS=<folder> saves screenshots."""
+and then starts the update of exactly the checked commit and files, What's new shows once after an update, and an
+update that never closes Delta says so after 3 minutes. No script error and no Content-Security-Policy violation
+anywhere. DELTA_SHOTS=<folder> saves screenshots."""
 
 from __future__ import annotations
 
@@ -272,6 +273,32 @@ async def skip_and_whats_new_flow(page: Any, d: SimpleNamespace, newer: str) -> 
     assert not problems, problems
 
 
+async def update_stopped_flow(page: Any, d: SimpleNamespace, newer: str) -> None:
+    """The launcher is a recorder, so Delta never closes: like an installer that stopped at its download check.
+    After 3 minutes (the page's clock moved on) the Updating screen says so and offers the way back."""
+    problems = watch(page)
+    await page.set_viewport_size({"width": 1280, "height": 800})
+    await page.clock.install()  # real time keeps flowing; fast_forward below skips the 3 minutes
+    await open_dashboard(page, d)
+    ban = page.locator("#updbanner")
+    await ban.wait_for(state="visible", timeout=15000)
+    await ban.get_by_role("button", name="Update now").click()
+    await page.wait_for_selector("#confirm[open]")
+    await page.click("#cf_yes")
+    await page.wait_for_selector(f"text=Updating to Delta {newer}", timeout=15000)
+    assert len(d.launched) == 1
+    assert await page.locator("#upd_back").count() == 0  # not before the 3 minutes
+    await page.clock.fast_forward("03:05")
+    back = page.locator("#upd_back")
+    await back.wait_for(state="visible", timeout=20000)
+    text = await page.locator("main[role='status']").inner_text()
+    assert "The update stopped before changing anything" in text and "delta-install.log" in text, text
+    await shot(page, "update-stopped.png")
+    await back.click()
+    await page.wait_for_selector(".nav-item[data-go='chat'][aria-current='page']", timeout=15000)
+    assert not problems, problems
+
+
 async def test_first_run_tour(mgr, tmp_path):
     with serve_delta(tmp_path / "data", tour_done=False, newer=None) as d:
         page = await mgr.page()
@@ -288,3 +315,9 @@ async def test_skip_this_version_and_whats_new(mgr, tmp_path):
     with serve_delta(tmp_path / "data", tour_done=True, newer="9.9.9") as d:
         page = await mgr.page()
         await asyncio.wait_for(skip_and_whats_new_flow(page, d, "9.9.9"), timeout=120)
+
+
+async def test_update_that_never_closes_delta_says_it_stopped(mgr, tmp_path):
+    with serve_delta(tmp_path / "data", tour_done=True, newer="9.9.9") as d:
+        page = await mgr.page()
+        await asyncio.wait_for(update_stopped_flow(page, d, "9.9.9"), timeout=120)

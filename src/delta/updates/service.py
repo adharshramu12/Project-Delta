@@ -9,11 +9,13 @@ import asyncio
 import contextlib
 import random
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from delta.config import Settings
 from delta.system.logging import log
-from delta.updates.checker import UpdateChecker
+
+if TYPE_CHECKING:  # the checker (and httpx) load on first use, never while Delta starts
+    from delta.updates.checker import UpdateChecker
 
 START_DELAY_S = (20.0, 90.0)  # after start-up, so the first check never slows Delta's own start
 MIN_SLEEP_S = 60.0
@@ -24,10 +26,18 @@ Notifier = Callable[[dict[str, Any]], Awaitable[bool]]
 class UpdateService:
     def __init__(self, settings: Settings, checker: UpdateChecker | None = None) -> None:
         self.settings = settings
-        self.checker = checker or UpdateChecker(settings)
+        self._checker = checker
         self.notify: Notifier | None = None  # set by the daemon: tell Telegram about a new version
         self._task: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
+
+    @property
+    def checker(self) -> UpdateChecker:
+        if self._checker is None:
+            from delta.updates.checker import UpdateChecker
+
+            self._checker = UpdateChecker(self.settings)
+        return self._checker
 
     def start(self) -> None:
         if self._task is None or self._task.done():
