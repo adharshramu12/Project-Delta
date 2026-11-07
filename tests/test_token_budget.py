@@ -24,9 +24,9 @@ def _bench():
     return mod
 
 
-async def test_token_use_per_task_type():
+async def test_token_use_per_task_type(tmp_path):
     bench = _bench()
-    data = await bench.measure()
+    data = await bench.measure(tmp_path)
     print("\n" + bench.table(data))
     for name, r in data.items():
         assert r["status"].startswith("done"), (name, r["status"])

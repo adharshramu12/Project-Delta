@@ -202,11 +202,23 @@ async def run_one(name: str, spec: dict[str, Any], base: Path, now: datetime) ->
     finally:
         for obj, attr, value in reversed(saved):
             setattr(obj, attr, value)
-        with contextlib.suppress(Exception):
-            c.memory.close()
+        _close_stores(c)
     for s in rec.sent:
         s["status"] = result.status
     return rec.sent
+
+
+def _close_stores(c: Any) -> None:
+    """Close every SQLite file build() opened, as Delta's own shutdown does (Container.start, close_state).
+    Windows refuses to delete a file that is still open, so a store left open breaks the temp-folder cleanup."""
+    orch = c.orchestrator
+    engine = getattr(orch, "engine", None)
+    for store in (c.memory, c.chats, getattr(orch, "skills", None), getattr(orch, "learning", None),
+                  getattr(c.scheduler, "store", None), getattr(c.watchers, "store", None),
+                  getattr(engine, "store", None)):
+        if store is not None:
+            with contextlib.suppress(Exception):
+                store.close()
 
 
 def _common(a: str, b: str) -> int:
@@ -218,34 +230,36 @@ def _common(a: str, b: str) -> int:
     return n
 
 
-async def measure() -> dict[str, Any]:
-    return await _measure()
+async def measure(base: Path | None = None) -> dict[str, Any]:
+    if base is not None:
+        return await _measure(base)
+    # Windows keeps a just-closed SQLite file locked for a moment: never fail the run over removing a temp folder
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        return await _measure(Path(tmp))
 
 
-async def _measure() -> dict[str, Any]:
+async def _measure(base: Path) -> dict[str, Any]:
     out: dict[str, Any] = {}
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
-        t0 = datetime(2026, 11, 7, 9, 30)
-        for name, spec in TASKS.items():
-            first = await run_one(name, spec, base, t0)
-            second = await run_one(name, spec, base, t0 + timedelta(minutes=1))
-            jobs: dict[str, dict[str, int]] = {}
-            for s in first:
-                j = jobs.setdefault(s["job"], {"calls": 0, "tokens": 0})
-                j["calls"] += 1
-                j["tokens"] += s["tokens"]
-            prefix: dict[str, int] = {}
-            for job in ("plan", "chat"):
-                a = next((s["prefix"] for s in first if s["job"] == job), "")
-                b = next((s["prefix"] for s in second if s["job"] == job), "")
-                if a and b:
-                    prefix[job] = _common(a, b)
-                    prefix[job + "_total"] = len(a)
-            out[name] = {"status": first[0]["status"] if first else "done (no model call)",
-                         "calls": len(first), "tokens": sum(s["tokens"] for s in first), "jobs": jobs,
-                         "stable_prefix": prefix,
-                         "tools_sent_max": max((s["tools"] for s in first), default=0)}
+    t0 = datetime(2026, 11, 7, 9, 30)
+    for name, spec in TASKS.items():
+        first = await run_one(name, spec, base, t0)
+        second = await run_one(name, spec, base, t0 + timedelta(minutes=1))
+        jobs: dict[str, dict[str, int]] = {}
+        for s in first:
+            j = jobs.setdefault(s["job"], {"calls": 0, "tokens": 0})
+            j["calls"] += 1
+            j["tokens"] += s["tokens"]
+        prefix: dict[str, int] = {}
+        for job in ("plan", "chat"):
+            a = next((s["prefix"] for s in first if s["job"] == job), "")
+            b = next((s["prefix"] for s in second if s["job"] == job), "")
+            if a and b:
+                prefix[job] = _common(a, b)
+                prefix[job + "_total"] = len(a)
+        out[name] = {"status": first[0]["status"] if first else "done (no model call)",
+                     "calls": len(first), "tokens": sum(s["tokens"] for s in first), "jobs": jobs,
+                     "stable_prefix": prefix,
+                     "tools_sent_max": max((s["tools"] for s in first), default=0)}
     return out
 
 
