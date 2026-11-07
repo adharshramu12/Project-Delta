@@ -47,10 +47,13 @@ def test_new_logins_with_a_password_let_delta_read_the_captcha(tmp_path):
 
 
 def _legacy(s: Any, lid: str, name: str, origin: str, on: bool, password: str = SECRET) -> None:
-    """A login file as #40 wrote it: only "simple_captcha", off by default then."""
+    """A login file as #40 wrote it when it was saved: only "simple_captcha", off by default then, and the save's own
+    "created" stamp (so the file's last write is explained by that save, not by a switch)."""
+    from datetime import UTC, datetime
+
     s.box.save(lid, {"name": name, "origin": origin, "username": USER, "password": password, "login_url": "",
-                     "permission": "ask", "created": "", "last_used": "", "last_outcome": "", "own_browser": {},
-                     "simple_captcha": on})
+                     "permission": "ask", "created": datetime.now(UTC).replace(microsecond=0).isoformat(),
+                     "last_used": "", "last_outcome": "", "own_browser": {}, "simple_captcha": on})
 
 
 def test_one_time_migration_turns_it_on_unless_the_user_turned_it_off(tmp_path):

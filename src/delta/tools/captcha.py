@@ -9,14 +9,18 @@ How it decides, for the site open in the browser:
    login; delta.logins.store), or the site's host is in `captcha.allowed_sites` (`delta captcha allow <host>`, set by
    the user, never by Delta: its settings file is a protected path): the captcha picture is read automatically, with
    no approval:
-     a. Windows OCR on this PC, on five cleaned-up versions of the picture at once (delta.tools.captcha_ocr:
-        grayscale, threshold, denoise, thin lines removed, darkest ink only), the answer fitted to the box's own
-        maxlength / pattern and the usual 0/O, 1/l/I, 5/S mix-ups fixed when the box says digits or letters;
-     b. only when OCR read nothing usable (or is not on this PC), and only when a configured model takes pictures and
-        the user lets pictures go to a model (attachments.vision is not "off"): ONE vision call on a small crop of
-        the captcha (a few hundred bytes, low detail). Counted (CaptchaSolver.vision_calls, the audit's via=vision).
+     a. the captcha model on this PC (delta.tools.captcha_model: ddddocr, a small offline ONNX model made for simple
+        text captchas, MIT), on three versions of the picture, held to the box's own maxlength / pattern / inputmode;
+        when all three readings agree the answer is typed and nothing else runs;
+     b. otherwise Windows OCR on five cleaned-up versions of the picture at once (delta.tools.captcha_ocr), the
+        usual 0/O, 1/l/I, 5/S mix-ups fixed when the box says digits or letters; when it lands on what the model
+        read, that is typed (Windows OCR is the only engine when the model is not installed);
+     c. when the engines disagree, a reading does not fit the box or nothing was read, and a configured model takes
+        pictures and the user lets pictures go to a model (attachments.vision is not "off"): ONE vision call on a
+        small crop of the captcha (a few hundred bytes, low detail) instead of typing a likely wrong guess. Counted
+        (CaptchaSolver.vision_calls, the audit's via=vision). Without one, the model's best reading is typed.
    At most MAX_AUTO_ATTEMPTS (3) tries per site in ATTEMPT_WINDOW_S; from the second try on the captcha is refreshed
-   first (a new picture). A sign-in where OCR reads the captcha makes zero AI calls.
+   first (a new picture). A sign-in where the model or OCR is sure makes zero AI calls.
 3. Otherwise, or once those tries are used up: the user. For a sign-in, the captcha picture goes to the chat the
    request came from (delta.logins.service parks the filled form); for the solve_captcha tool, Delta saves the
    picture with the run's proof and pauses on an approval. The answer is never logged, audited or shown to a model.
@@ -41,9 +45,10 @@ from pydantic import BaseModel, Field
 from delta.config import read_user_settings
 from delta.safety.approvals import ApprovalBroker, ApprovalRequest
 from delta.safety.audit import AuditLog
+from delta.system.logging import log
 from delta.tools.base import Risk, ToolResult
 from delta.tools.browser import BrowserManager, _BrowserTool
-from delta.tools.captcha_ocr import Hints, hints_from, pick, small_crop
+from delta.tools.captcha_ocr import Hints, fit, hints_from, pick, small_crop
 
 MAX_AUTO_ATTEMPTS = 3
 ATTEMPT_WINDOW_S = 15 * 60  # auto attempts per site are counted over this window, then reset
@@ -147,6 +152,20 @@ def clean_answer(reply: str) -> str | None:
     """The characters a vision model read, or None when its reply does not look like a captcha answer."""
     token = first_line(reply)
     return token if ANSWER.match(token) else None
+
+
+def _log_read(engine: str, readings: list[str], fitted: list[str | None], answer: str | None,
+              case_doubt: bool = False) -> None:
+    """Per-engine, per-pass log line: how many passes read something that fits the box, their lengths and whether they
+    agree. Never the readings or the answer, unless the user opts in with DELTA_CAPTCHA_DEBUG=1 (for a bug report)."""
+    import os
+
+    with contextlib.suppress(Exception):
+        log.info("captcha.read", engine=engine, passes=len(readings), fits=sum(1 for f in fitted if f),
+                 lengths=[len(f) if f else 0 for f in fitted], agree=bool(answer) and all(f == answer for f in fitted),
+                 answered=bool(answer), case_doubt=case_doubt)
+        if os.environ.get("DELTA_CAPTCHA_DEBUG") == "1":
+            log.debug("captcha.read.debug", engine=engine, readings=readings, answer=answer)
 
 
 # ---------------------------------------------------------------- the page, behind a small interface
@@ -284,6 +303,8 @@ class PlaywrightCaptchaPage:
 Vision = Callable[..., Awaitable[str]]  # (base64 jpeg[, hint=]) -> model reply
 # jpeg bytes -> what was read on this PC (Windows OCR): one text, or one per cleaned-up pass (captcha_ocr.variants)
 Reader = Callable[[bytes], Awaitable["str | list[str]"]]
+# (jpeg bytes, what the box takes) -> one reading per pass of the captcha model (delta.tools.captcha_model)
+ModelReader = Callable[[bytes, Hints], Awaitable[list[str]]]
 AskHuman = Callable[[str, str], Awaitable[bool]]  # (host, saved image name) -> user says they typed it
 
 
@@ -300,11 +321,13 @@ class CaptchaSolver:
     origin_allowed: Callable[[str], bool] | None = None
     # Whether a configured model takes pictures right now (asked at each read; None = whenever `vision` is set)
     vision_ready: Callable[[], bool] | None = None
+    # The captcha model on this PC (delta.tools.captcha_model), tried before Windows OCR; None when not installed
+    model: ModelReader | None = None
 
     def __post_init__(self) -> None:
         self._attempts: dict[str, tuple[int, float]] = {}  # host -> (auto attempts, first attempt time)
         self.vision_calls = 0  # pictures sent to a model (each one small); OCR reads are free
-        self.last_via = ""  # how the last answer was read: ocr | vision | ""
+        self.last_via = ""  # how the last answer was read: model | model+ocr | ocr | vision | ""
 
     def _used(self, host: str) -> int:
         count, since = self._attempts.get(host, (0, 0.0))
@@ -335,29 +358,70 @@ class CaptchaSolver:
         return False
 
     def can_read(self) -> bool:
-        return self.ocr is not None or self._can_see()
+        return self.model is not None or self.ocr is not None or self._can_see()
+
+    async def _engine(self, name: str, reader: Any, shot: bytes, hints: Hints) -> tuple[str | None, list[str], bool]:
+        """One engine's readings: (the answer they vote for or None, the readings that fit the box, sure = at least two
+        passes and every one of them fits and reads the same, and no letter's case was a close call). Logged as lengths
+        and agreement only; the readings themselves only with DELTA_CAPTCHA_DEBUG=1."""
+        readings: list[str] = []
+        doubt = False
+        with contextlib.suppress(Exception):  # an engine missing or failing: the next one still reads
+            got = await (reader(shot, hints) if name == "model" else reader(shot))
+            readings = [str(r or "") for r in got] if isinstance(got, list) else [str(got or "")]
+            doubt = bool(getattr(got, "case_doubt", False))
+        answer = pick(readings, hints) if readings else None
+        fitted = [fit(r, hints) for r in readings]
+        _log_read(name, readings, fitted, answer, doubt)
+        sure = bool(answer) and not doubt and len(fitted) >= 2 and all(f == answer for f in fitted)
+        return answer, [f for f in fitted if f], sure
 
     async def _read(self, shot: bytes, hints: Hints | None = None) -> str | None:
-        """OCR on this PC first (every pass votes); one small vision call only when OCR found nothing that fits."""
+        """The answer for one picture, read on this PC whenever the engines are sure:
+
+        1. the captcha model (delta.tools.captcha_model) on three passes: all three agree and no letter's case was a
+           close call -> taken, nothing else runs;
+        2. otherwise Windows OCR on its five passes: when it lands on what the model read (its vote, one of its
+           passes, or the same characters in another case), OCR's reading is taken;
+        3. the engines disagree, or a reading does not fit the box, or nothing was read: ONE small vision call when a
+           configured model takes pictures (counted in vision_calls), instead of typing a likely wrong guess;
+        4. no vision: the model's vote, else OCR's (a try costs one of the three, and the user is asked after)."""
         hints = hints or Hints()
-        answer: str | None = None
         self.last_via = ""
+        model_answer: str | None = None
+        model_fits: list[str] = []
+        if self.model is not None:
+            model_answer, model_fits, sure = await self._engine("model", self.model, shot, hints)
+            if sure:
+                self.last_via = "model"
+                return model_answer
+        ocr_answer: str | None = None
         if self.ocr is not None:
-            with contextlib.suppress(Exception):  # OCR missing or unreadable: the model may still read it
-                got = await self.ocr(shot)
-                answer = pick(got if isinstance(got, list) else [str(got or "")], hints)
-                if answer:
-                    self.last_via = "ocr"
-        if not answer and self._can_see() and self.vision is not None:
+            ocr_answer, _fits, _sure = await self._engine("ocr", self.ocr, shot, hints)
+        if model_answer and ocr_answer and (ocr_answer == model_answer or ocr_answer in model_fits
+                                            or ocr_answer.lower() == model_answer.lower()):
+            # the same characters: Windows OCR, a general text reader, also settles their case
+            self.last_via = "model+ocr"
+            return ocr_answer
+        if ocr_answer and self.model is None:  # Windows OCR is the only engine here: its vote is the answer
+            self.last_via = "ocr"
+            return ocr_answer
+        guess, via = (model_answer, "model") if model_answer else (ocr_answer, "ocr")
+        if self._can_see() and self.vision is not None:
             crop = base64.b64encode(small_crop(shot)).decode()
             self.vision_calls += 1
+            seen: str | None = None
             with contextlib.suppress(Exception):  # no model, model error: counts as a failed read
                 reply = (await self.vision(crop, hint=hints.describe()) if getattr(self.vision, "takes_hint", False)
                          else await self.vision(crop))
-                answer = pick([tok], hints) if (tok := clean_answer(reply)) else None
-                if answer:
-                    self.last_via = "vision"
-        return answer
+                seen = pick([tok], hints) if (tok := clean_answer(reply)) else None
+            _log_read("vision", [seen or ""], [seen], seen)
+            if seen:
+                self.last_via = "vision"
+                return seen
+        if guess:
+            self.last_via = via
+        return guess
 
     @staticmethod
     async def _hints(page: CaptchaPage, field: str = "") -> Hints:
@@ -404,7 +468,7 @@ class CaptchaSolver:
                 await page.fill("", answer)
             self._audit(host, "auto", bool(answer), attempt=attempt, via=self.last_via or "none")
             if answer:
-                how = "on this PC" if self.last_via == "ocr" else "by the AI model (one small picture)"
+                how = "by the AI model (one small picture)" if self.last_via == "vision" else "on this PC"
                 return True, f"read {how} (attempt {attempt} of {MAX_AUTO_ATTEMPTS})", shot
         return False, f"Delta could not read the captcha on {host} after {MAX_AUTO_ATTEMPTS} tries", shot
 
@@ -592,10 +656,20 @@ def pictures_allowed(settings: Any) -> bool:
     return str(getattr(att, "vision", "auto") or "auto").lower() != "off"
 
 
+def captcha_model_reader() -> ModelReader | None:
+    """The captcha model as a reader (None when it is not installed here: Windows OCR is then the first engine)."""
+    from delta.tools.captcha_model import shared_model
+
+    model = shared_model()
+    return None if model is None else model.read
+
+
 def make_solver(settings: Any, router: Any, approvals: ApprovalBroker, audit: AuditLog,
                 proof: Any = None) -> CaptchaSolver:
-    """The captcha solver wired to Delta's settings: local OCR first, the vision model only when pictures are on."""
+    """The captcha solver wired to Delta's settings: the captcha model, then Windows OCR, then (only when they are not
+    sure and pictures are on) one small vision call."""
     return CaptchaSolver(
+        model=captcha_model_reader(),
         allowed_sites=live_allowlist(settings.data_dir, settings.captcha.allowed_sites),
         vision=router_vision(router) if pictures_allowed(settings) else None,
         ask_human=approval_handoff(approvals), audit=audit,

@@ -135,8 +135,8 @@ From a terminal: `delta doctor` checks your setup, `delta app` opens Delta. The 
   tasks) need your PIN. The PIN is kept only as a salted hash in Windows Credential Manager, and wrong tries lock
   remote control.
 - **Captchas.** Delta never bypasses managed captchas: reCAPTCHA, hCaptcha and Cloudflare Turnstile are always
-  refused and handed to you. Only simple text captchas on sites you allowed for your own accounts are read, and
-  that is off by default.
+  refused and handed to you. Only simple text captchas are read, and only on your own accounts: on a saved login with
+  a password (on by default, one switch per login turns it off) or on a site you allowed with `delta captcha allow`.
 - **No posting for you.** Delta writes LinkedIn, Medium and Substack drafts but never presses Post; you paste and
   post yourself.
 - **Your data stays yours.** Keys live in Windows Credential Manager. Memory, chats and saved logins are encrypted

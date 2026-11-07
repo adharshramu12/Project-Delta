@@ -8,6 +8,9 @@ supported-markers = [
     "sys_platform == 'win32'",
 ]
 
+[manifest]
+overrides = [{ name = "opencv-python", marker = "sys_platform == 'never'" }]
+
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.7.1"
@@ -255,6 +258,20 @@ wheels = [
 ]
 
 [[package]]
+name = "ddddocr"
+version = "1.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/07/5f/7c06bbb594b77062e6d0d43f06dc88668aaeb699c8737c84542aaa39da8c/ddddocr-1.6.1.tar.gz", hash = "sha256:1c59d84d63d8703c6c486465a32389c9e41dd92852c794c5e4c0181a5f82d43a", size = 75943309, upload-time = "2026-03-11T10:48:41.681Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0e/48/cbaed3981b8d8d51141b9b4779b811f4728e65d952a1e3e2e5e929539183/ddddocr-1.6.1-py3-none-any.whl", hash = "sha256:c7c70f4ae2d0335440ae8b272eea48c9f6888ecef46785fe2311f0c97a133935", size = 75983593, upload-time = "2026-03-11T10:48:23.702Z" },
+]
+
+[[package]]
 name = "ddgs"
 version = "9.16.1"
 source = { registry = "https://pypi.org/simple" }
@@ -299,9 +316,15 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "aiohttp" },
+    { name = "ddddocr" },
     { name = "mcp" },
+    { name = "onnxruntime" },
     { name = "python-telegram-bot" },
     { name = "slack-bolt" },
+]
+captcha = [
+    { name = "ddddocr" },
+    { name = "onnxruntime" },
 ]
 channels = [
     { name = "aiohttp" },
@@ -331,8 +354,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", marker = "extra == 'channels'", specifier = ">=3.10" },
+    { name = "ddddocr", marker = "extra == 'captcha'", specifier = ">=1.6.1,<1.7" },
     { name = "ddgs", specifier = ">=9.0" },
-    { name = "delta-agent", extras = ["channels", "mcp"], marker = "extra == 'all'" },
+    { name = "delta-agent", extras = ["channels", "mcp", "captcha"], marker = "extra == 'all'" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.1" },
     { name = "httpx", specifier = ">=0.27" },
@@ -340,6 +364,7 @@ requires-dist = [
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0" },
     { name = "mss", specifier = ">=9.0" },
     { name = "nvidia-ml-py", specifier = ">=12.560" },
+    { name = "onnxruntime", marker = "extra == 'captcha'", specifier = ">=1.20" },
     { name = "openai", specifier = ">=1.60" },
     { name = "opencv-python-headless", specifier = ">=4.10" },
     { name = "openwakeword", marker = "extra == 'voice'", specifier = ">=0.6" },
@@ -361,7 +386,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.32" },
     { name = "websockets", specifier = ">=13" },
 ]
-provides-extras = ["channels", "voice", "mcp", "all"]
+provides-extras = ["channels", "voice", "mcp", "captcha", "all"]
 
 [package.metadata.requires-dev]
 dev = [

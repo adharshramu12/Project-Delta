@@ -50,7 +50,10 @@ dependencies = [
 channels = ["python-telegram-bot>=21.6", "slack-bolt>=1.21", "aiohttp>=3.10"]
 voice = ["faster-whisper>=1.1", "piper-tts>=1.2", "openwakeword>=0.6", "sounddevice>=0.5"]
 mcp = ["mcp>=2.0"]
-all = ["delta-agent[channels,mcp]"]
+# reading simple text captchas on saved logins: a small offline model made for them (MIT, ONNX on the CPU).
+# Part of the installer's `--extra all`; Delta falls back to Windows OCR when it is missing.
+captcha = ["ddddocr>=1.6.1,<1.7", "onnxruntime>=1.20"]
+all = ["delta-agent[channels,mcp,captcha]"]
 
 [project.scripts]
 delta = "delta.__main__:main"
@@ -61,6 +64,9 @@ dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "mypy>=1.13", "types-
 [tool.uv]
 # Delta targets Windows first; Linux/macOS support is a roadmap item.
 environments = ["sys_platform == 'win32'"]
+# ddddocr asks for the full opencv-python on Windows; Delta already ships opencv-python-headless (the same cv2,
+# without the GUI parts). Both at once would overwrite each other's files, so the full one is never installed.
+override-dependencies = ["opencv-python; sys_platform == 'never'"]
 
 [build-system]
 requires = ["hatchling"]

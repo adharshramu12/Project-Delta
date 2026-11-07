@@ -86,15 +86,28 @@ while remote control is locked nothing remote signs in. Change the setting in Se
   `delta logins captcha NAME --on / --off`). Turn it off for a login and Delta sends you the picture every time
   instead. It does what `delta captcha allow <host>` does, for that login's exact origin only.
   How Delta reads it, in order:
-  1. **Windows OCR on this PC.** The picture is cleaned up five ways (grayscale and contrast, Otsu threshold,
-     median denoise, thin lines and dots removed, darkest ink only), enlarged, and read in **one** OCR call. The
-     captcha box itself says what fits (its `maxlength`, `minlength`, `pattern` such as `[0-9]{5}`, `inputmode`):
-     other characters are dropped, the usual mix-ups (0/O, 1/l/I, 5/S, 2/Z) are fixed when the box takes only digits
-     or only letters, and the passes vote per character. A sign-in where OCR reads it makes **zero AI calls**.
-  2. **One small picture to your AI**, only when OCR read nothing usable (or this PC has no Windows OCR), only when a
-     configured model takes pictures and you let pictures go to the AI (`attachments.vision` is not `off`): a tight
-     crop of just the captcha (at most 256 x 72 pixels, low detail), one call per try. Counted in the audit
-     (`via: vision`).
+  1. **The captcha model on this PC.** [ddddocr](https://github.com/sml2h3/ddddocr) (MIT licence), a small offline
+     model made for simple text captchas, run on the CPU with onnxruntime (MIT). The installer adds it (the
+     `captcha` extra, part of `--extra all`; about 90 MB on disk, most of it the model). It reads three cleaned-up
+     versions of the picture (grayscale and contrast, Otsu threshold, median denoise), about 25 ms each. The captcha
+     box itself says what fits (its `maxlength`, `minlength`, `pattern` such as `[0-9]{5}`, `inputmode`): only
+     characters the box takes can be chosen, inside the model's own choice, and a box that says capitals only or
+     small letters only decides the case. When the three readings agree and no letter's case was a close call, that
+     answer is typed and nothing else runs: **zero AI calls**. Missing or broken (an unusual PC, a broken install):
+     Delta goes on with Windows OCR and nothing else changes.
+  2. **Windows OCR on this PC**, only when the model was not sure. The picture is cleaned up five ways (grayscale and
+     contrast, Otsu threshold, median denoise, thin lines and dots removed, darkest ink only), enlarged, and read in
+     **one** OCR call; the usual mix-ups (0/O, 1/l/I, 5/S, 2/Z) are fixed when the box takes only digits or only
+     letters, and the passes vote per character. When OCR lands on what the model read (its vote, one of its
+     readings, or the same characters in another case, which OCR then settles), that is typed.
+  3. **One small picture to your AI**, only when the engines disagree, a reading does not fit the box or nothing was
+     read, and only when a configured model takes pictures and you let pictures go to the AI (`attachments.vision`
+     is not `off`): a tight crop of just the captcha (at most 256 x 72 pixels, low detail), at most one call per try,
+     instead of typing a likely wrong guess. Counted in the audit (`via: vision`). With no such model, the captcha
+     model's best reading is typed (a wrong one costs one of the 3 tries).
+  What is logged: for each engine, how many passes read something that fits the box, their lengths and whether they
+  agree (`captcha.read`). Never the picture, the readings or the answer; set `DELTA_CAPTCHA_DEBUG=1` yourself to add
+  the readings to Delta's log for a bug report, and unset it afterwards.
   3. At most **3 tries** per site in 15 minutes, asking the site for a new picture when one cannot be read and filling
      the form again when the site says only the captcha was wrong ("The verification code is incorrect"). The
      sign-in is checked after every submit. A rejected *password* is never sent again.
@@ -107,8 +120,12 @@ while remote control is locked nothing remote signs in. Change the setting in Se
   picture could be taken at all, it says so and submits nothing.
   A captcha box is never taken for a one-time-code box, even when it says "Enter verification Code".
   Logins saved before this change: a one-time migration turns the switch on for each login with a password, unless
-  you had turned it off in Settings > Logins (Delta reads that from its audit log). A switch turned off with
-  `delta logins captcha NAME --off` before this change was not recorded, so check those logins once.
+  you had turned it off. A switch turned off in Settings > Logins is read from the audit log. A switch turned off
+  with `delta logins captcha NAME --off` (not audited then) is read from the login file itself: it says off, it was
+  written after the switch first shipped, and that write was not a save Delta stamps (a new login, a sign-in, an
+  own-browser consent). A permission change or a Replace from that time also reads as off, the safe side: you get
+  the picture and can turn reading back on. If you already ran the version that brought the new default before
+  this fix, that version had already rewritten those files, so check the switch on each login once.
 - **Wrong password.** Delta stops at once and says so. It never retries a rejected password.
 
 ## Which browser: Delta's private browser or your own
