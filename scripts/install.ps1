@@ -67,6 +67,25 @@ function Get-SourceZipUrl([string]$repo, [string]$ref) {
     return "https://github.com/$repo/archive/refs/heads/$ref.zip"
 }
 
+function Test-SignatureValid([string]$path) {
+    # Get-AuthenticodeSignature lives in PowerShell's Security module. Under AllSigned, PowerShell 7 refuses to load
+    # that module when Microsoft's certificate is not in the account's Trusted Publishers ("AuthorizationManager
+    # check failed"), found by the install CI job on pwsh. Windows PowerShell 5.1 (on every Windows) loads its own
+    # catalog-signed copy under AllSigned, so the same check is asked of it then. The path goes through the
+    # environment, so a folder name with quotes or non-English letters needs no escaping.
+    try {
+        return ((Get-AuthenticodeSignature -LiteralPath $path -ErrorAction Stop).Status -eq "Valid")
+    } catch {
+        $ps51 = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+        if ($PSVersionTable.PSEdition -ne "Core" -or -not (Test-Path -LiteralPath $ps51)) { throw }
+        $env:DELTA_SIGNATURE_CHECK = $path
+        try {
+            $status = & $ps51 -NoProfile -NonInteractive -Command "(Get-AuthenticodeSignature -LiteralPath `$env:DELTA_SIGNATURE_CHECK).Status.ToString()" 2>$null
+        } finally { Remove-Item Env:DELTA_SIGNATURE_CHECK -ErrorAction SilentlyContinue }
+        return ("$status".Trim() -eq "Valid")
+    }
+}
+
 function Step($n, $text) { Write-Host "`n[$n/6] $text" -ForegroundColor Cyan }
 function Done($text) { Write-Host "      OK  $text" -ForegroundColor Green }
 function Fail($text) {
@@ -107,7 +126,7 @@ function Test-Python312x64($exe) {
         # refused on ARM PCs ("Python 3.12 (64-bit, x64) did not install"), found by the windows-11-arm CI job.
         $ok = & $exe -c "import sys, sysconfig; print(sys.version_info[:2] == (3, 12) and sysconfig.get_platform() == 'win-amd64')" 2>$null
         if ($LASTEXITCODE -ne 0 -or "$ok".Trim() -ne "True") { return $false }
-        return ((Get-AuthenticodeSignature $exe).Status -eq "Valid")
+        return (Test-SignatureValid $exe)
     } catch { return $false }
 }
 
@@ -226,7 +245,7 @@ try {
         if (-not (Test-Python312x64 $py)) {   # no winget (or it failed): python.org's own signed x64 installer
             $exe = Join-Path $env:TEMP "python-3.12.10-amd64.exe"
             Invoke-WebRequest "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe" -OutFile $exe -UseBasicParsing
-            if ((Get-AuthenticodeSignature $exe).Status -ne "Valid") { Fail "the Python installer's signature is not valid" }
+            if (-not (Test-SignatureValid $exe)) { Fail "the Python installer's signature is not valid" }
             $setup = Start-Process $exe -ArgumentList "/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=0 Include_test=0" -Wait -PassThru
             if ($setup.ExitCode -ne 0) { Write-Host "      python.org's installer ended with code $($setup.ExitCode)" -ForegroundColor Yellow }
         }
@@ -288,7 +307,7 @@ try {
     # 3. Environment ---------------------------------------------------------------------------------
     Step 3 "Delta's environment (exact package versions)"
     $venvPy = Join-Path $InstallDir ".venv\Scripts\python.exe"
-    if ((Test-Path $venvPy) -and (Get-AuthenticodeSignature $venvPy).Status -ne "Valid") {
+    if ((Test-Path $venvPy) -and -not (Test-SignatureValid $venvPy)) {
         Remove-Item (Join-Path $InstallDir ".venv") -Recurse -Force   # an unsigned one would be blocked
     }
     if ((Test-Path $venvPy) -and -not (Test-Python312x64 $venvPy)) {

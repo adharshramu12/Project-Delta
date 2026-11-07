@@ -54,9 +54,19 @@ function Install([string]$dir, [string]$policy) {
     $envs = @{ DELTA_REF = $Ref; DELTA_REPO = $Repo; DELTA_NO_LAUNCH = "1" }
     if ($dir) { $envs["DELTA_INSTALL_DIR"] = $dir }
     $t = Get-Date
-    $r = Child "Write-Host ('policy: ' + (Get-ExecutionPolicy)); irm '$url' | iex" $envs
+    # Under AllSigned, PowerShell 7 cannot load its own Security module (Get-ExecutionPolicy lives there) while
+    # Microsoft's certificate is not in Trusted Publishers, as on the runners: the readout then says "unreadable"
+    # and the saved policy is read back on its own below. The installer itself must still work there.
+    $r = Child ("`$p = try { [string](Get-ExecutionPolicy) } catch { 'unreadable' }; Write-Host ('policy: ' + `$p); " +
+                "irm '$url' | iex") $envs
     Check ($r.Code -eq 0) "one-liner exit code under $policy (got $($r.Code)) in $([int]((Get-Date) - $t).TotalSeconds) s"
-    Check ($r.Out -match "policy: $policy") "the one-liner really ran under $policy"
+    if ($r.Out -match "policy: unreadable") {
+        $saved = Child "Get-ExecutionPolicy -Scope CurrentUser" @{ PSExecutionPolicyPreference = "Bypass" }
+        Check ($Shell -eq "pwsh" -and $policy -eq "AllSigned" -and $saved.Out -match $policy) `
+            "the one-liner really ran under $policy (PowerShell 7 could not load its Security module; saved policy: $($saved.Out.Trim()))"
+    } else {
+        Check ($r.Out -match "policy: $policy") "the one-liner really ran under $policy"
+    }
     Check ($r.Out -match "Delta is installed") "installer says Delta is installed"
 }
 
@@ -91,7 +101,10 @@ function Uninstall([string]$dir) {
     Check (-not ("$userPath" -split ";" | Where-Object { $_.TrimEnd("\") -ieq (Join-Path $dir "bin") })) "bin is off the user Path"
 }
 
-$setPolicy = { param($p) Child "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy $p -Force" | Out-Null }
+# Bypass for this one process only (PSExecutionPolicyPreference is the Process scope), so PowerShell 7 can load
+# Set-ExecutionPolicy even while AllSigned is in force; PowerShell then notes that the Process scope overrides it.
+$setPolicy = { param($p) Child "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy $p -Force -ErrorAction SilentlyContinue" `
+                             @{ PSExecutionPolicyPreference = "Bypass" } | Out-Null }
 try {
     & $setPolicy Restricted
     Install "" "Restricted"

@@ -21,7 +21,10 @@ $installed = -not (Test-Path (Join-Path $root ".git"))   # an installed copy, no
 $pythonw = Join-Path $root ".venv\Scripts\pythonw.exe"
 if (-not (Test-Path $pythonw)) { throw "Delta's environment is missing: run Delta's installer first (or 'uv sync --extra all' in a developer checkout)." }
 $sac = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState
-if ($sac -eq 1 -and (Get-AuthenticodeSignature $pythonw).Status -ne "Valid") {
+# install.ps1 runs this text with its Test-SignatureValid in reach (it also works under AllSigned on PowerShell 7)
+$signed = if (Get-Command Test-SignatureValid -ErrorAction SilentlyContinue) { { Test-SignatureValid $pythonw } } else {
+    { (Get-AuthenticodeSignature -LiteralPath $pythonw).Status -eq "Valid" } }
+if ($sac -eq 1 -and -not (& $signed)) {
     Write-Warning ("Smart App Control is on and .venv uses an unsigned Python, so Windows will block the shortcut. " +
                    "Run Delta's installer again to rebuild .venv on the official python.org Python 3.12.")
 }
