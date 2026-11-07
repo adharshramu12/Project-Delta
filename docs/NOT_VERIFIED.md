@@ -93,12 +93,24 @@ saying what you found (it worked, or how it failed) is very welcome.
 - **DPAPI on a fresh laptop**: saving, opening and refusing logins and watcher snapshots with real DPAPI on a newly
   set up Windows account. CI's Windows runners use real DPAPI in the end-to-end test, but not on a user's PC or
   after a Windows password change.
-- **OCR on real captchas**: the five clean-up passes and the voting are tested with noisy captchas drawn by the fake
-  portal (lines, dots, random answers). Windows OCR itself runs only on a Windows PC: the CI test
-  `tests/e2e/test_captcha_ocr_windows_e2e.py` reports its read rate on those pictures when the runner has an OCR
-  language, and no real college portal captcha (warped letters, heavy noise) was tried, so expect some hand-offs.
-- **The vision fallback with your own AI**: one small low-detail picture per try only after OCR fails. Tested with a
-  stand-in model; whether the Codex CLI provider reads such a small crop well was not tried.
+- **Captcha reading on real portals**: the captcha model and Windows OCR are measured only on generated pictures
+  (`delta.evals.captcha_bench`, three styles drawn with Pillow's built-in font, 120 pictures; the table is in
+  docs/LOGINS.md). No real college or government portal captcha was tried, including the KL ERP one: real fonts,
+  heavier warping and other noise may read worse. Mixed-case captchas are the weak spot (the model often cannot
+  tell a small letter from its capital); a site that checks case-blind does better than the exact-match numbers.
+  The model's settings (passes, capital lean, case margin) were chosen on benchmark seeds that are not the reported
+  ones, but from the same generator, so the numbers may flatter it.
+- **The captcha model on other PCs**: installed and run on CI's Windows x64 runners (`--extra all`) and on Linux.
+  Not tried on Windows on ARM64 (onnxruntime ships a wheel; if it fails to load, Delta falls back to Windows OCR,
+  which is tested only with a stand-in), on a PC without AVX, or with antivirus that blocks onnxruntime's DLLs.
+- **The #40 terminal turn-off migration**: read from the login file's last write time. Tested with files whose times
+  are set by the test; a PC whose clock was wrong when the switch was changed, or files copied in a way that resets
+  their times, may read the switch as on. A permission change or Replace made under #40 reads as off (the safe
+  side). Logins already rewritten by #43's migration cannot be recovered and keep the new default.
+- **The vision fallback with your own AI**: one small low-detail picture per try, only when the captcha model and
+  Windows OCR are not sure. Tested with a stand-in model; whether a real vision model (or the Codex CLI provider)
+  reads such a small crop well, and so how many of the unsure captchas it rescues, was not measured (the benchmark
+  makes no vision calls and only counts them).
 - **Real ERP and LMS sign-ins**: multi-step forms (user name first, password on the next page), single sign-on
   that sends you through another site, and forms submitted by JavaScript were tested only against the fake college
   portal. A portal that signs in on another address (SSO) is refused by design until you save a login for that

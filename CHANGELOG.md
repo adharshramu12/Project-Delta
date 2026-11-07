@@ -7,6 +7,26 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Changed
+- **Simple captchas are read far more often by Delta itself.** A small offline model made for text captchas
+  ([ddddocr](https://github.com/sml2h3/ddddocr), MIT, run on the CPU with onnxruntime, MIT) is now the first reader,
+  added by the installer (`captcha` extra, part of `--extra all`, about 90 MB). It reads three cleaned-up versions of
+  the picture, held to the captcha box's own rules (`maxlength`, `pattern`, `inputmode`) inside its own choice, and
+  types the answer when all three agree and no letter's case was a close call. Otherwise Windows OCR reads it, and
+  when the two still disagree (or nothing fits the box) one small low-detail vision call is made, counted, instead
+  of typing a likely wrong guess. Without the model (an unusual PC, a broken install) Windows OCR is the first reader
+  as before. Per-engine log lines hold only lengths and agreement, never the picture or the answer
+  (`DELTA_CAPTCHA_DEBUG=1` adds the readings, for a bug report). New benchmark of 120 generated ERP-style captchas in
+  three styles (`python -m delta.evals.captcha_bench`, run in CI on Windows; a fast subset in the tests); results
+  in [docs/LOGINS.md](docs/LOGINS.md). reCAPTCHA, hCaptcha, Turnstile and other managed challenges are still never
+  solved.
+
+### Fixed
+- **A captcha switch turned off from the terminal stays off.** `delta logins captcha NAME --off` under the first
+  version of the switch was not audited, so the migration to the new default could turn it back on. The migration
+  now also reads the login file itself (it says off and its last write was not a save Delta stamps). Logins already
+  rewritten by the version that brought the new default cannot be told apart any more: check their switch once.
+- **README**: the security list no longer says captcha reading is off by default.
+
 - **Licence: now GNU AGPL-3.0-or-later.** Project Delta is relicensed from Apache-2.0 to AGPL-3.0-or-later from
   this commit. Versions up to and including 0.2.0 (every commit before this one) were released under Apache-2.0,
   and copies received under it keep those terms. Anyone can still use, study, change and share Delta; a modified
