@@ -15,7 +15,7 @@ import sys
 import webbrowser
 from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from delta.config import Settings, load_settings
 from delta.system.logging import log, setup_logging
@@ -439,6 +439,15 @@ async def run(open_ui: bool = False) -> int:
     if c.scheduler is not None:  # scheduled tasks: after the channels, so results can reach the phone
         await c.scheduler.start()
         c.lifecycle.on_shutdown("scheduler", c.scheduler.stop)
+    if c.updates is not None:  # newer-version check: soon after start, then every 12 hours; never installs
+        from delta.updates.service import notify_telegram
+
+        async def tell_phone(view: dict[str, Any]) -> bool:
+            return await notify_telegram(c, view)
+
+        c.updates.notify = tell_phone
+        c.updates.start()
+        c.lifecycle.on_shutdown("updates", c.updates.stop)
     if sys.platform == "win32" and (opener := c.registry.get("open_app")) is not None:
         with contextlib.suppress(Exception):  # the first "open X" then needs no PowerShell (background, cheap)
             opener.index.warm()  # type: ignore[attr-defined]

@@ -521,6 +521,9 @@ def create_app(c: Container, token: str) -> FastAPI:
     from delta.api.tasks_routes import register as register_tasks
 
     register_tasks(app, c, auth, launch)  # task history, run timeline, resume / discard (delta.engine)
+    from delta.api.updates_routes import register as register_updates
+
+    register_updates(app, c, auth)  # newer-version banner, Update now, What's new, and the first-run tour
 
     @app.get("/api/runs/unfinished", dependencies=[Depends(auth)])
     async def unfinished_run() -> dict[str, Any]:

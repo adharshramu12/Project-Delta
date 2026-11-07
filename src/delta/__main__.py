@@ -106,36 +106,73 @@ def _own_processes(root: Path) -> list[int]:
     return pids
 
 
-def _update(stop: bool = False, root: Path | None = None) -> int:
+def _update(stop: bool = False, root: Path | None = None, *, from_dashboard: bool = False,
+            pin: object | None = None) -> int:
     """Newest version over the installed one (data untouched): the installer again, from GitHub.
+
+    Pinned: the version to install is worked out first (the latest GitHub release, else main), down to one commit
+    and the SHA-256 of its pyproject.toml and uv.lock; the installer downloads exactly that commit and checks both
+    files before it changes anything (delta.updates). If GitHub cannot be asked (offline, rate limit), it falls
+    back to the main branch over HTTPS as before, and says so.
 
     Safe while Delta runs: files in use cannot be replaced (Windows locks loaded .pyd files), so a running Delta
     must be closed first. Without --stop this only explains how; with --stop the installer closes it. The
     installer itself runs in its own window and starts only after this command has exited, so this command's
-    own Python is not holding any of Delta's files either."""
-    import subprocess
+    own Python is not holding any of Delta's files either. --from-dashboard (Update now): Delta opens again
+    afterwards, and only this process is waited for (the Delta that started it is closed by the installer)."""
+    from delta.updates.install import installer_command, run_installer
 
     root = root or Path(__file__).resolve().parents[2]
     if (root / ".git").exists():
         print("This is a developer checkout: update it with 'git pull', then 'uv sync --extra all'.")
         return 1
-    script = root / "scripts" / "install.ps1"
     pid = running_delta(load_settings().data_dir)
     if pid is not None and not stop:
         print(f"Delta is running (process {pid}). Its files cannot be replaced while it runs.\n"
               "Close it (the Shut down button in Delta's window), then run 'delta update' again,\n"
               "or run 'delta update --stop' to close it and update now.")
         return 1
-    cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-FromGitHub",
-           "-InstallDir", str(root), "-NoLaunch", "-WaitForPid", ",".join(map(str, _own_processes(root)))]
-    if stop:
-        cmd.append("-StopRunning")
-    flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-    # A fixed command line that runs Delta's own installer script (nothing from the user or the model).
-    subprocess.Popen(cmd, creationflags=flags, close_fds=True)  # nosec B603
+    target = pin if pin is not None else _update_target()
+    if target is False:
+        return 1
+    from delta.updates.checker import Target
+
+    wait = [os.getpid()] if from_dashboard else _own_processes(root)
+    run_installer(installer_command(root, wait, stop, target if isinstance(target, Target) else None,
+                                    relaunch=from_dashboard))
     print("The update runs in a new window. It starts as soon as this command has finished, and your data is "
           "kept.\nOpen Delta again from its icon when it says it is done.")
     return 0
+
+
+def _update_target() -> object:
+    """What `delta update` installs: a pinned Target, None (main, unpinned, as before) or False (stop: a check
+    failed). DELTA_REF (a branch, tag or commit) picks the version, as it does for the installer."""
+    from delta.updates.checker import UpdateChecker, UpdateError, disabled_by_env, resolve_ref
+    from delta.updates.version import is_newer
+
+    if disabled_by_env():
+        print("Update checks are off here (DELTA_NO_UPDATE_CHECK): updating from the main branch.")
+        return None
+    checker = UpdateChecker(load_settings())
+    ref = os.environ.get("DELTA_REF", "").strip()
+    try:
+        if ref:
+            target = resolve_ref(checker, ref)
+        else:
+            rel = checker.latest()
+            target = checker.resolve(rel) if is_newer(rel.version, __version__) else resolve_ref(
+                checker, rel.tag if rel.source == "release" and rel.tag else "main")
+    except UpdateError as e:
+        if e.kind == "integrity":
+            print(f"Update stopped: {e}")
+            return False
+        print(f"Could not ask GitHub for the newest version ({e}). Updating from the main branch instead.")
+        return None
+    same = "" if is_newer(target.version, __version__) else " (the version you have; this repairs it)"
+    print(f"Updating to Delta {target.version}{same}: commit {target.sha[:12]} of {target.repo}. Its files are "
+          "checked before anything is installed.")
+    return target
 
 
 def _doctor() -> int:
@@ -209,7 +246,48 @@ def _doctor() -> int:
         print("  Desktop is synced by OneDrive, so files are kept locally; a 'Delta' shortcut on the "
               "Desktop opens them.")
     print(f"Boundaries: autonomy={s.boundaries.autonomy}, {len(s.boundaries.denied_paths)} denied paths")
+    print("\nUpdates:")
+    for line in _update_lines(s):
+        print(f"  {line}")
     return 0 if ok and audit_ok else 1
+
+
+def _update_lines(s: object) -> list[str]:
+    """`delta doctor`: this version and the newest one (a fresh check; never fails the doctor)."""
+    from delta.updates.checker import UpdateChecker
+
+    try:
+        view = UpdateChecker(s).check(force=True)  # type: ignore[arg-type]
+    except Exception as e:  # never a traceback from doctor
+        return [f"this PC  Delta {__version__}", f"latest   could not check ({type(e).__name__})"]
+    lines = [f"this PC  Delta {view['current']}"]
+    if not view["enabled"]:
+        lines.append("latest   update checks are off (Settings > Updates and help)")
+    elif view["latest"]:
+        where = "GitHub release" if view["source"] == "release" else "main branch, no GitHub release yet"
+        how = ": you are up to date"
+        if view["newer"]:
+            how = ": update with Update now in the dashboard, or 'delta update'"
+        lines.append(f"latest   Delta {view['latest']} ({where}){how}")
+    else:
+        lines.append(f"latest   could not check: {view['error'] or 'no answer yet'}")
+    return lines
+
+
+def _pin_from_args(args: argparse.Namespace) -> object | None:
+    """The --pin* arguments of Update now as a Target, checked again here; None when they were not given."""
+    if not args.pin:
+        return None
+    from delta.updates.checker import REPO_RE, SHA_RE, Target
+    from delta.updates.install import parse_expect
+    from delta.updates.version import parse
+
+    hashes = parse_expect(args.pin_sha256)
+    if not (SHA_RE.match(args.pin) and REPO_RE.match(args.pin_repo) and parse(args.pin_version) and hashes):
+        print("Update stopped: the update details are not valid.", file=sys.stderr)
+        sys.exit(2)
+    return Target(repo=args.pin_repo, sha=args.pin, version=args.pin_version, pyproject_sha256=hashes[0],
+                  lock_sha256=hashes[1])
 
 
 def _secrets(action: str, name: str | None) -> int:
@@ -264,6 +342,10 @@ def main() -> None:
     cp.add_argument("host", nargs="?")
     up = sub.add_parser("update", help="update Delta to the newest version (keeps your data)")
     up.add_argument("--stop", action="store_true", help="close a running Delta first, then update")
+    # Update now in the dashboard: an exact commit with the hashes Delta checked (delta.updates.install)
+    for flag in ("--pin", "--pin-repo", "--pin-version", "--pin-sha256"):
+        up.add_argument(flag, default="", help=argparse.SUPPRESS)
+    up.add_argument("--from-dashboard", action="store_true", help=argparse.SUPPRESS)
     from delta.scheduler.cli import add_parser as add_schedule_parser
 
     add_schedule_parser(sub)
@@ -302,7 +384,7 @@ def _dispatch(args: argparse.Namespace, no_console: bool) -> None:
     if args.cmd == "doctor":
         sys.exit(_doctor())
     if args.cmd == "update":
-        sys.exit(_update(stop=args.stop))
+        sys.exit(_update(stop=args.stop, from_dashboard=args.from_dashboard, pin=_pin_from_args(args)))
     if args.cmd == "secrets":
         sys.exit(_secrets(args.action, args.name))
     if args.cmd == "schedule":

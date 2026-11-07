@@ -56,6 +56,7 @@
     <div class="popover" id="sysinfo" hidden role="dialog" aria-label="System status"></div>
   </header>
   <div id="warnings" class="banner warn" role="status" hidden></div>
+  <div id="updbanner" class="banner upd" role="region" aria-label="New version of Delta" hidden></div>
 
   <div class="views" id="views" tabindex="-1">
     <!-- Chat -->
@@ -171,7 +172,7 @@
     <a href="#set_perm">Permissions</a><a href="#set_browser">Browser</a><a href="#set_logins">Logins</a><a href="#set_folders">Folders</a>
     <a href="#set_sites">Apps and websites</a><a href="#set_files">Attachments</a><a href="#set_learning">Learning and memory</a><a href="#set_remote">Phone and PIN</a>
     <a href="#set_sos">Emergency contacts</a><a href="#set_notify">Notifications</a><a href="#set_look">Appearance</a>
-    <a href="#set_addons">Add-ons</a><a href="#set_keys">Keys</a><a href="#set_about">Setup and shutdown</a>
+    <a href="#set_addons">Add-ons</a><a href="#set_keys">Keys</a><a href="#set_about">Setup and shutdown</a><a href="#set_help">Updates and help</a>
     </nav>
     <div class="settings-body" id="settingsbody">
     <header class="view-head"><div><h2>Settings</h2><p class="muted">Changes apply to Delta's very next action.</p></div></header>
@@ -275,6 +276,14 @@
     <div id="s_autostart"><label class="check"><input type="checkbox" id="s_autostart_on"> Start Delta when I sign in to Windows</label>
     <p class="muted small" id="s_autostart_msg" role="status">In the background, no window: Telegram and schedules keep working after a restart.</p></div>
     <div class="row"><button class="btn" id="opensetup">Run setup again</button><button class="btn danger-outline" id="shutdown2">Shut Delta down</button></div>
+    </section>
+    <section class="group" id="set_help"><h3>Updates and help</h3>
+    <p class="muted small" id="u_state" role="status">Delta checks GitHub for a newer version when it starts and every 12 hours.</p>
+    <label class="check"><input type="checkbox" id="u_check"> Check for new versions (nothing is installed until you press Update now)</label>
+    <label class="check"><input type="checkbox" id="u_beta"> Include test versions (beta)</label>
+    <label class="check"><input type="checkbox" id="u_tg"> Tell me on Telegram when a new version is out</label>
+    <div class="row"><button class="btn" id="u_now">Check now</button><button class="btn" id="tour_start">Take the tour</button></div>
+    <p class="muted small">You can also type /tour in the chat box to see the tour again.</p>
     </section>
     <div class="savebar"><span class="msg" id="s_err" role="status"></span><button class="btn" id="s_reset">Undo changes</button><button class="btn primary" id="s_save">Save changes</button></div>
     </div>
@@ -384,6 +393,8 @@
 <script src="/ui/settings.js"></script>
 <script src="/ui/logins.js"></script>
 <script src="/ui/setup.js"></script>
+<script src="/ui/updates.js"></script>
+<script src="/ui/tour.js"></script>
 <script src="/ui/main.js"></script>
 </body>
 </html>

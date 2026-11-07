@@ -120,7 +120,7 @@
     if (v) { $("s_err").className = "msg"; $("s_err").textContent = "You have unsaved changes."; }
     else if ($("s_err").textContent === "You have unsaved changes.") $("s_err").textContent = "";
   }
-  const own = el => el.closest("#s_guard, #s_sos, #set_notify, #set_look, #s_autostart") || el.id === "s_signin_url";
+  const own = el => el.closest("#s_guard, #s_sos, #set_notify, #set_look, #s_autostart, #set_help") || el.id === "s_signin_url";
   // ---- Start Delta when I sign in to Windows (applied at once: a Windows setting, not part of Save changes)
   async function autostartCard() {
     const a = await api("/api/autostart").catch(() => null);

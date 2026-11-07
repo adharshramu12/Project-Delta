@@ -165,10 +165,13 @@ def test_the_payload_stays_small():
     form and each card, Replace for a name saved before, the no-password warning, and the captcha picture shown with
     a sign-in's answer in Chat (about 2.2 KB; the dashboard then ships about 225.3 KB). Then to 229 KB for "Start Delta
     when I sign in to Windows": the switch in Settings > Setup and shutdown and its offer on the setup wizard's
-    Telegram step (about 3 KB; the dashboard then ships about 228.4 KB). Lazy loading would not lower this total: it
-    counts every file the dashboard ships."""
+    Telegram step (about 3 KB; the dashboard then ships about 228.4 KB). Then to 247 KB for 0.3.0's first-run tour
+    (tour.js: nine spotlight steps, keyboard and screen-reader support, no library, about 9 KB) and update
+    notifications (updates.js: the new-version banner, Update now, What's new, Settings > Updates and help, about
+    5.5 KB), with their markup and styles (about 3 KB); the dashboard then ships about 246.1 KB. Lazy loading would
+    not lower this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 229_000, total
+    assert total < 247_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 

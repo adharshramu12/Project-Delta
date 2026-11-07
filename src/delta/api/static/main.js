@@ -147,6 +147,7 @@
   D.memory.start();
   refreshStatus(); refreshChips();
   D.setup.start();
+  D.updates.start().catch(() => {}).finally(() => D.tour.maybe());  // What's new after an update first, then the tour
   D.every(5000, refreshStatus);
   D.every(60000, refreshChips);
   D.on("visible", refreshStatus);
