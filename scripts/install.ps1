@@ -102,7 +102,10 @@ function Test-Python312x64($exe) {
     if (-not $exe -or -not (Test-Path $exe)) { return $false }
     if ($exe -like "*\WindowsApps\*") { return $false }
     try {
-        $ok = & $exe -c "import sys, platform; print(sys.version_info[:2] == (3, 12) and platform.machine() == 'AMD64')" 2>$null
+        # sysconfig's platform is what the interpreter was BUILT for. platform.machine() reads the environment, and an
+        # x64 Python running under emulation on Windows on ARM can report ARM64 there, so the right Python was
+        # refused on ARM PCs ("Python 3.12 (64-bit, x64) did not install"), found by the windows-11-arm CI job.
+        $ok = & $exe -c "import sys, sysconfig; print(sys.version_info[:2] == (3, 12) and sysconfig.get_platform() == 'win-amd64')" 2>$null
         if ($LASTEXITCODE -ne 0 -or "$ok".Trim() -ne "True") { return $false }
         return ((Get-AuthenticodeSignature $exe).Status -eq "Valid")
     } catch { return $false }
@@ -224,7 +227,8 @@ try {
             $exe = Join-Path $env:TEMP "python-3.12.10-amd64.exe"
             Invoke-WebRequest "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe" -OutFile $exe -UseBasicParsing
             if ((Get-AuthenticodeSignature $exe).Status -ne "Valid") { Fail "the Python installer's signature is not valid" }
-            Start-Process $exe -ArgumentList "/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=0 Include_test=0" -Wait
+            $setup = Start-Process $exe -ArgumentList "/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=0 Include_test=0" -Wait -PassThru
+            if ($setup.ExitCode -ne 0) { Write-Host "      python.org's installer ended with code $($setup.ExitCode)" -ForegroundColor Yellow }
         }
     }
     if (-not (Test-Python312x64 $py)) {
@@ -247,7 +251,10 @@ try {
         $Source = $zip
     }
     if ($Source -like "*.zip") {
-        Expand-Archive $Source -DestinationPath $staging -Force
+        # .NET's own zip reader, not Expand-Archive: that cmdlet lives in a script module (.psm1), which PowerShell 7
+        # refuses to load under the Restricted policy of a new PC ("running scripts is disabled"), found by CI.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($Source, $staging)
         $inner = Get-ChildItem $staging -Directory | Where-Object { Test-Path (Join-Path $_.FullName "pyproject.toml") } | Select-Object -First 1
         $Source = if ($inner) { $inner.FullName } else { $staging }
     }
