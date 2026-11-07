@@ -1,11 +1,11 @@
 cff-version: 1.2.0
-message: "If you use or build on Delta, please credit its creator."
-title: "Delta: a personal, local-first AI agent for Windows"
+message: "If you use or build on Delta, please credit its creator, Adharsh Kumar Bachu."
+title: "Project Delta: a personal, local-first AI agent for Windows"
 authors:
   - family-names: "Bachu"
     given-names: "Adharsh Kumar"
 repository-code: "https://github.com/adharshramu12/Project-Delta"
-license: Apache-2.0
+license: AGPL-3.0-or-later
 version: 0.1.0
 date-released: 2026-11-03
 keywords:

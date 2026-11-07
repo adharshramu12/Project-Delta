@@ -6,6 +6,15 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Changed
+- **Licence: now GNU AGPL-3.0-or-later.** Project Delta is relicensed from Apache-2.0 to AGPL-3.0-or-later from
+  this commit. Versions up to and including 0.2.0 (every commit before this one) were released under Apache-2.0,
+  and copies received under it keep those terms. Anyone can still use, study, change and share Delta; a modified
+  version that is shared or offered over a network must stay open under the same licence, with the NOTICE credit
+  kept. New [TRADEMARKS.md](TRADEMARKS.md): the names "Project Delta" and "ARVA Talks Academy" and the Delta logo
+  need written approval for forks, products or endorsements. NOTICE, pyproject, CITATION.cff and CONTRIBUTING
+  (DCO sign-off) are updated to match, and the README is rewritten.
+
 ### Added
 - **"Delta is in control" signal**: while Delta drives the mouse, the keyboard or a browser (your own browser or
   Delta's private one), an orange ring follows the pointer, a thin orange border marks each screen it works on,

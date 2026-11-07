@@ -1,8 +1,22 @@
-# Contributing to Delta
+# Contributing to Project Delta
 
-Delta is created and maintained by **Adharsh Kumar Bachu**. Contributions are welcome under the
-Apache 2.0 license; by sending a pull request you agree your work is licensed the same way.
-Forks and derivatives must keep the [NOTICE](NOTICE) file and its credit.
+Project Delta is created and maintained by **Adharsh Kumar Bachu**. Contributions are welcome.
+
+## Licence and sign-off
+
+Project Delta is licensed under the [GNU AGPL-3.0-or-later](LICENSE). Contributions are licensed under
+AGPL-3.0-or-later. By sending a pull request you agree to that and confirm the
+[Developer Certificate of Origin 1.1](https://developercertificate.org/): you wrote the change, or have the right
+to submit it under this licence.
+
+Sign off every commit with `git commit -s`, which adds a line like this with your real name and email:
+
+```
+Signed-off-by: Your Name <you@example.com>
+```
+
+Forks and modified versions must keep the [NOTICE](NOTICE) file and its credit, and must use their own name and
+logo: see [TRADEMARKS.md](TRADEMARKS.md).
 
 ## Before you open a pull request
 These are the same checks CI runs:
@@ -18,7 +32,7 @@ uv run mypy
 ## Adding a tool
 1. Subclass `delta.tools.base.Tool` with a pydantic `Args` model.
 2. Declare `risk` honestly; override `risk_for`, `paths`, `domains`, `app` so the policy engine can see what the call touches.
-3. Return `ToolResult(ok, output, evidence)` — put checkable facts in `evidence` for the verifier.
+3. Return `ToolResult(ok, output, evidence)`; put checkable facts in `evidence` for the verifier.
 4. Register it in `bootstrap.build` and add a test.
 
 Tools never bypass `ToolExecutor`. PRs that weaken the hard safety floor or the Remote Guard will not be merged.
@@ -29,4 +43,4 @@ Tools never bypass `ToolExecutor`. PRs that weaken the hard safety floor or the 
 - Optional features must import lazily, and their tests must skip cleanly without the extra installed.
 
 ## Style
-Small modules, typed, docstring explaining *why* at the top of each file. Tests use fakes from `tests/fakes.py` — no network or GPU in CI.
+Small modules, typed, docstring explaining *why* at the top of each file. Tests use fakes from `tests/fakes.py`, with no network or GPU in CI.
