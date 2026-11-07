@@ -1,12 +1,21 @@
 [project]
 name = "delta-agent"
 version = "0.2.0"
-description = "Delta by Adharsh Kumar Bachu - a personal, local-first, OS-level AI agent with human approval and verified task execution."
+description = "Project Delta by Adharsh Kumar Bachu: a personal, local-first, OS-level AI agent with human approval and verified task execution."
 readme = "README.md"
-license = "Apache-2.0"
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "Adharsh Kumar Bachu" }]
 maintainers = [{ name = "Adharsh Kumar Bachu" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 keywords = ["ai agent", "personal ai assistant", "windows ai agent", "local-first ai", "computer use", "telegram bot", "deep research", "mcp", "llm", "automation"]
 dependencies = [
     "openai>=1.60",

@@ -1,13 +1,26 @@
-Delta - personal, local-first AI agent for Windows
-Copyright 2026 Adharsh Kumar Bachu
+Project Delta
+Copyright (C) 2026 Adharsh Kumar Bachu
 
-Created, designed and maintained by Adharsh Kumar Bachu.
+Created, designed and maintained by Adharsh Kumar Bachu, founder of ARVA Talks Academy.
 https://github.com/adharshramu12/Project-Delta
 
-This product is licensed under the Apache License, Version 2.0 (see LICENSE).
-Under section 4(d) of that license, any redistribution or derivative work must
-keep this NOTICE file, including the credit to the original author.
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version.
 
-"Delta" as the name of this project and its logo are not licensed for use by
-others (Apache License 2.0, section 6): forks must not present themselves as
-the original Delta or as made by Adharsh Kumar Bachu without permission.
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
+General Public License for more details. You should have received a copy of it in the LICENSE file;
+if not, see <https://www.gnu.org/licenses/>.
+
+Attribution (section 7(b) of the AGPL): any copy or modified version must keep this NOTICE file,
+the copyright line above and the credit to the original author.
+
+Trademarks (section 7(e) of the AGPL): the licence gives no rights to the names "Project Delta"
+and "ARVA Talks Academy" or to the Delta logo. Their use is covered by TRADEMARKS.md. A fork must
+use its own name and logo and must not present itself as the original Project Delta or as made or
+endorsed by Adharsh Kumar Bachu or ARVA Talks Academy.
+
+Licence history: versions up to and including 0.2.0 were released under the Apache License 2.0.
+Copies received under those terms keep them. Everything from the relicensing commit onwards is
+under AGPL-3.0-or-later (see CHANGELOG.md).
