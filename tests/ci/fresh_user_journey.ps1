@@ -12,8 +12,8 @@
 #   8. a task opens Notepad; a task is stopped while it waits
 #   9. delta update (refused while running), delta update --stop, then Delta opened again from its icon
 #  10. logs\crashes.log empty, no traceback in the service log, Shut down leaves no process behind
-#  11. uninstall -RemoveData: folder, icons, Start-menu folder, Path, data, Delta's saved keys gone; a stranger's
-#      saved key with "delta" in its name kept; no startup entry or scheduled task added
+#  11. uninstall -RemoveData: folder, icons, Start-menu folder, Path, data, Delta's saved keys and download caches
+#      gone; a stranger's saved key with "delta" in its name kept; no startup entry or scheduled task added
 # Findings are collected (every check runs) and the job fails at the end if any check failed. Logs go to
 # $env:RUNNER_TEMP\fresh-user (uploaded as an artifact).
 # Keep this file ASCII: Windows PowerShell 5.1 reads a file without a BOM in the ANSI code page.
@@ -226,7 +226,7 @@ try {
     # 5. the first message, with no AI model at all ----------------------------------------------------------
     $first = RunTask "what is the capital of France?" 90   # not a greeting: those are answered without a model
     Check ($first.status -in "failed", "done", "answered") "the first message without a model ends (status $($first.status))" | Out-Null
-    Check ("$($first.answer)" -match "Groq|Setup|LM Studio|Ollama") "with no model the reply says how to add one (got: $($first.answer))" | Out-Null
+    Check ("$($first.answer)" -cmatch "No AI model is set up yet" -and "$($first.answer)" -cmatch "Groq key") "with no model the reply says how to add one (got: $($first.answer))" | Out-Null
     Check ("$($first.answer)" -notmatch "not reachable at|Errors:|http://127") "with no model the reply has no internal error text (got: $($first.answer))" | Out-Null
 
     # 6. onboarding and settings -----------------------------------------------------------------------------
@@ -346,10 +346,10 @@ try {
     $new = @(Leftovers | Where-Object { $_ -notin $before })
     Check ($new.Count -eq 0) "no startup entry, Run key or scheduled task was added (new: $($new -join '; '))" | Out-Null
     Check (@(DeltaProcesses).Count -eq 0) "no Delta process runs after uninstall" | Out-Null
-    # Not failures, but what a user still finds on the PC afterwards (reported in the summary).
+    # Delta's download caches go with it; the rest is noted, not a failure (user files, the shared Python).
     foreach ($k in "uv", "pip") {
         $mb = SizeMB (Join-Path $env:LOCALAPPDATA "$k\cache")
-        if ($mb - $cachesBefore[$k] -gt 1) { Info "after uninstall, $k's download cache still holds $([math]::Round($mb - $cachesBefore[$k], 1)) MB more than before Delta (%LOCALAPPDATA%\$k\cache)" }
+        Check ($mb - $cachesBefore[$k] -lt 5) "no download cache of Delta's is left in %LOCALAPPDATA%\$k\cache (grew by $([math]::Round($mb - $cachesBefore[$k], 1)) MB)" | Out-Null
     }
     $files = Join-Path ([Environment]::GetFolderPath("Desktop")) "Delta files"
     if (Test-Path $files) { Info "after uninstall, the Desktop folder 'Delta files' (Delta's save folder) is still there" }

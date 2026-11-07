@@ -168,8 +168,10 @@ function Unblock-DeltaFiles([string]$dir) {
     # the Start-menu items and the fix commands below are not treated as downloaded scripts. Not the environment
     # (.venv): it is built here and has no mark.
     $venv = (Join-Path $dir ".venv").TrimEnd("\") + "\"
+    $cache = (Join-Path $dir ".uv-cache").TrimEnd("\") + "\"
     Get-ChildItem -LiteralPath $dir -Recurse -File -Force -ErrorAction SilentlyContinue |
-        Where-Object { -not $_.FullName.StartsWith($venv, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Where-Object { -not $_.FullName.StartsWith($venv, [System.StringComparison]::OrdinalIgnoreCase) -and
+                       -not $_.FullName.StartsWith($cache, [System.StringComparison]::OrdinalIgnoreCase) } |
         Unblock-File -ErrorAction SilentlyContinue
 }
 
@@ -297,7 +299,7 @@ try {
         New-Item -ItemType Directory -Force $InstallDir | Out-Null
         # mirror the code; keep the installed .venv so an update does not rebuild it from nothing
         # and bin (the delta command): `delta update` may still be finishing in it while this runs.
-        robocopy $Source $InstallDir /MIR /XD .git .venv .venv-* bin .mypy_cache .pytest_cache .ruff_cache __pycache__ `
+        robocopy $Source $InstallDir /MIR /XD .git .venv .venv-* .uv-cache bin .mypy_cache .pytest_cache .ruff_cache __pycache__ `
             /XF *.lnk .outside-* .realview-* /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { Fail "copying Delta's files failed (robocopy code $LASTEXITCODE)" }
     }
@@ -317,15 +319,23 @@ try {
         & $py -m venv (Join-Path $InstallDir ".venv")
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path $venvPy)) { Fail "Python could not create Delta's environment in $InstallDir (see the log)" }
     }
-    & $venvPy -m pip install --quiet --disable-pip-version-check --upgrade uv
+    # No pip cache and uv's download cache inside Delta's own folder (.uv-cache): an update reuses it, and the
+    # uninstaller removes it with the folder. In uv's shared cache (%LOCALAPPDATA%\uv\cache) about 500 MB stayed on
+    # the PC after uninstall (found by the fresh-user CI journey). A cache folder the user chose (UV_CACHE_DIR) wins.
+    & $venvPy -m pip install --quiet --disable-pip-version-check --no-cache-dir --upgrade uv
     if ($LASTEXITCODE -ne 0) {
         Fail ("uv (the package installer Delta uses) could not be downloaded. Check the internet connection. Behind a " +
               "company proxy, set HTTPS_PROXY (for example: setx HTTPS_PROXY http://proxy.example:8080), open a new " +
               "window and run this again.")
     }
     Push-Location $InstallDir
+    # `irm ... | iex` runs in the user's own PowerShell window: uv's settings for this one install are put back
+    # afterwards, so a later `uv sync` of the user's own project in that window does not go into Delta's folder.
+    $uvSaved = @{}
+    foreach ($k in "UV_PROJECT_ENVIRONMENT", "UV_CACHE_DIR", "UV_NATIVE_TLS") { $uvSaved[$k] = [Environment]::GetEnvironmentVariable($k) }
     try {
         $env:UV_PROJECT_ENVIRONMENT = Join-Path $InstallDir ".venv"
+        if (-not "$env:UV_CACHE_DIR".Trim()) { $env:UV_CACHE_DIR = Join-Path $InstallDir ".uv-cache" }
         # Windows' own certificate store, as pip already uses: behind a company proxy that inspects HTTPS its
         # certificate is in that store (put there by the company), not in uv's built-in list.
         if (-not "$env:UV_NATIVE_TLS".Trim()) { $env:UV_NATIVE_TLS = "1" }
@@ -334,7 +344,10 @@ try {
             Fail ("installing Delta's packages failed (see the log). Usual causes: no internet, a company proxy " +
                   "(set HTTPS_PROXY and run this again), or antivirus blocking files in $InstallDir.")
         }
-    } finally { Pop-Location }
+    } finally {
+        Pop-Location
+        foreach ($k in $uvSaved.Keys) { [Environment]::SetEnvironmentVariable($k, $uvSaved[$k]) }
+    }
     Done "packages installed"
 
     # 4. Check ---------------------------------------------------------------------------------------

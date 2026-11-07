@@ -86,6 +86,9 @@ class ModelRouter:
         self.fallbacks: list[str] = []
         self.fallback_used: str = ""  # the fallback provider that answered this task, if any
         self.model_calls: dict[str, int] = {}  # calls per provider since reset_meter() (token meter: which model)
+        # Local servers resting because nothing answered (UNREACHABLE_COOLDOWN_S). One that answers again (the user
+        # started LM Studio or Ollama after Delta) is used at once instead of after the rest of the cooldown.
+        self._resting_unreachable: set[str] = set()
 
     def refresh(self) -> None:
         """Pick up new or changed keys immediately and forget earlier failures."""
@@ -93,6 +96,25 @@ class ModelRouter:
             if callable(refresh := getattr(p, "refresh", None)):
                 refresh()
             self.breakers[name] = CircuitBreaker()
+        self._resting_unreachable.clear()
+
+    def _ready(self, name: str, p: Provider) -> bool:
+        """The provider's breaker lets it be tried, or it is a local server that rested only because nothing
+        answered and that answers now (its ping is cached for 30 s, so this costs at most one quick request)."""
+        if self.breakers[name].available():
+            return True
+        if name not in self._resting_unreachable or not callable(ping := getattr(p, "ping", None)):
+            return False
+        try:
+            back = bool(ping())
+        except Exception:
+            return False
+        if back:
+            self._resting_unreachable.discard(name)
+            self.breakers[name] = CircuitBreaker()
+            self.why_down.pop(name, None)
+            log.info("router.local_back", provider=name)
+        return back
 
     def route(self, task: str) -> list[str]:
         route = self.routes.get(task) or self.routes.get("chat") or list(self.providers)
@@ -108,7 +130,7 @@ class ModelRouter:
             p = self.providers.get(name)
             if p is None:
                 continue
-            if not p.supports("chat") or not self.breakers[name].available():
+            if not p.supports("chat") or not self._ready(name, p):
                 continue
             if p.local and callable(ping := getattr(p, "ping", None)) and not ping():
                 continue
@@ -121,7 +143,7 @@ class ModelRouter:
             p = self.providers.get(name)
             if p is None or not p.supports(task):
                 continue
-            if not self.breakers[name].available():
+            if not self._ready(name, p):
                 self.skipped.setdefault(name, self.why_down.get(name, "resting after errors"))
                 continue
             if p.local and not self.allow_local():
@@ -229,6 +251,9 @@ class ModelRouter:
                 elif e.kind == "unreachable" and p.local:
                     # Nothing listening on this PC (e.g. Ollama not installed): stop trying for a while.
                     self.breakers[p.name].trip(UNREACHABLE_COOLDOWN_S)
+                    self._resting_unreachable.add(p.name)
+                    if callable(forget := getattr(p, "forget_ping", None)):
+                        forget()  # its last "it answers" is stale now: ask again before using it
                 elif e.kind not in ("rate_limit", "too_large", "bad_tool_call", "quota"):  # not a provider health issue
                     self.breakers[p.name].record_failure()
                 errors.append(str(e))
@@ -236,6 +261,7 @@ class ModelRouter:
                 log.warning("router.fallback", provider=p.name, task=task, error=str(e))
                 continue
             self.breakers[p.name].record_success()
+            self._resting_unreachable.discard(p.name)
             self._count(p, resp, messages, tools)
             if self.last_provider != p.name:
                 log.info("router.provider", provider=p.name, model=resp.model, task=task)
@@ -246,6 +272,8 @@ class ModelRouter:
             "No model provider is available for task "
             f"'{task}'. Errors: {'; '.join(errors) or 'none configured (add API keys or start Ollama)'}",
             kinds,
+            nothing_set_up=bool(candidates) and all(p.local for p in candidates)
+            and all(k == "unreachable" for k in kinds),
         )
 
     def _count(self, p: Provider, resp: LLMResponse, messages: list[Message], tools: list[dict] | None) -> None:

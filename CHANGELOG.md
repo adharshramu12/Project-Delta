@@ -21,6 +21,31 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   solved.
 
 ### Fixed
+- **First message with no AI model says how to add one.** On a new PC with no key, the only models Delta could try
+  are Ollama and LM Studio, which are not running, so the reply was router internals ("No model provider is
+  available for task 'plan'. Errors: lmstudio: not reachable at http://127.0.0.1:1234/v1; ...") instead of how to
+  set one up. It now says to add a free Groq key in Settings > Keys, sign in to Claude Code or Codex, or start
+  Ollama or LM Studio. A cloud provider that is down is still reported as an outage, not as "nothing set up".
+- **Starting LM Studio or Ollama after a failed message works at once.** The failed call put the local server to
+  rest for 5 minutes, so the top bar kept saying "No AI model" and every message failed until then. A local server
+  resting only because nothing answered is now asked again (one quick request, cached for 30 s) and used as soon
+  as it answers.
+- **Another program on Delta's port.** With something else listening on 127.0.0.1:7878, the Delta icon opened that
+  program's page in Delta's window and never started Delta, and `delta run` stopped on a bind error. Delta now
+  checks that the program on its port is Delta, and otherwise says which port is taken and how to pick another.
+- **Uninstall `-RemoveData` removes only Delta's own saved keys.** It deleted every saved Windows credential with
+  "delta" anywhere in its name, so another program's login (a bank or an airline called Delta) went too. It now
+  removes only Delta's own entries (`delta-agent`), whatever the language of Windows.
+- **Uninstall leaves no download cache behind.** The installer kept about 500 MB of packages in uv's shared cache
+  (`%LOCALAPPDATA%\uv\cache`) and 15 MB in pip's, which stayed after uninstall. uv's cache is now in Delta's own
+  folder (`.uv-cache`, reused by updates, removed with Delta) and pip keeps none. The installer also puts the uv
+  settings it uses back afterwards, so a later `uv sync` in the same PowerShell window no longer goes into Delta's
+  folder.
+- **New CI job: the fresh-user journey** (`tests/ci/fresh_user_journey.ps1`) on Windows Server 2025 and 2022: the
+  README one-liner, a new PowerShell, Delta from its Desktop icon, every first-run dashboard page and API, the first
+  message with no model, onboarding, settings, a login, a schedule, chat with a local model (a stand-in for LM
+  Studio, no keys), a task that opens Notepad, Stop, `delta update`, a restart, crashes.log, Shut down and
+  uninstall with nothing left behind.
 - **A captcha switch turned off from the terminal stays off.** `delta logins captcha NAME --off` under the first
   version of the switch was not audited, so the migration to the new default could turn it back on. The migration
   now also reads the login file itself (it says off and its last write was not a save Delta stamps). Logins already

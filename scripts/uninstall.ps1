@@ -63,8 +63,13 @@ if (Test-Path $InstallDir) {
 
 if ($RemoveData) {
     if (Test-Path $data) { Remove-Item $data -Recurse -Force; Write-Host "removed your Delta data ($data)" }
-    cmdkey /list | Select-String -Pattern "Target: (.*delta.*)" | ForEach-Object {
-        cmdkey /delete:$($_.Matches[0].Groups[1].Value.Trim()) | Out-Null
+    # Only Delta's own entries: service "delta-agent", saved by Python's keyring as "delta-agent" or
+    # "<name>@delta-agent". Matching any "delta" in the name also deleted other programs' saved logins (a bank or
+    # airline called Delta...). The "Target:" label is translated on non-English Windows, so it is not matched.
+    cmdkey /list | Select-String -Pattern 'target=((?:[^\s@]+@)?delta-agent)\s*$' | ForEach-Object {
+        $name = $_.Matches[0].Groups[1].Value
+        cmdkey "/delete:LegacyGeneric:target=$name" 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { cmdkey "/delete:$name" 2>$null | Out-Null }
     }
     Write-Host "removed Delta's saved keys"
 } else {
