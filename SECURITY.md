@@ -108,12 +108,18 @@ Delta controls a real computer, so its safety rules are part of the design, not 
 - **Dashboard downloads** use the same bearer token as every other route and serve only files listed in the
   documents folder, matched by exact name.
 
-## Captchas (opt-in, your own accounts only)
+## Captchas (your own accounts only)
 
 Delta can help with **simple image/text captchas** on sites where you log in to **your own account**
 (for example a university ERP portal). Use it only within the site's terms.
 
-- **Off by default.** With an empty allowlist every captcha is handed to you.
+- **Saved logins: on by default.** For a login you saved in Settings > Logins **with a password**, Delta reads
+  that exact site's simple captcha by itself, with no approval: Windows OCR on this PC first, then (only if OCR
+  fails and a model that takes pictures is configured) one small low-detail crop of the captcha to that model,
+  at most 3 tries, then the picture is sent to you in the chat. Turn it off per login in Settings > Logins or
+  with `delta logins captcha NAME --off`. Managed challenges below are still never solved. Details:
+  [docs/LOGINS.md](docs/LOGINS.md).
+- **Other sites: off by default.** With an empty allowlist every other captcha is handed to you.
 - **You turn it on per site**, from a terminal on the PC: `delta captcha allow erp.example.edu`
   (`delta captcha remove <host>`, `delta captcha list`). The list lives in your settings file in Delta's data
   folder, which Delta's own tools can never write, so Delta cannot add sites for itself. A removal applies

@@ -440,6 +440,8 @@
     }
     const last = data.messages[data.messages.length - 1];
     if (last && last.role === "delta" && last.meta.status === "needs_user" && last.meta.asked_about) showOptions({...last.meta, answer: last.text});
+    const cap = data.captcha;  // a sign-in still waiting for the captcha reply (expires after 10 minutes)
+    if (cap && /^[A-Za-z0-9+/=]+$/.test(cap.image)) put(h("div", {class: "msg delta"}, h("span", {class: "avatar"}, icon("logo")), h("div", {class: "answer"}, h("div", {class: "answer-text", text: `Captcha for ${cap.login}: reply with just these characters, or 'cancel'.`}), h("img", {class: "captcha-pic", alt: "Captcha: reply with these characters", src: "data:image/jpeg;base64," + cap.image}))));
     for (const tid of data.running || []) { taskChat[tid] = id; runFor(tid); stepLine(tid, "", "", "Still working on this..."); active = tid; renderProgress(); }
     for (const a of pending.values()) if (a.task_id && taskChat[a.task_id] === id) put(approvalCard(a, "log"));
     log.scrollTop = log.scrollHeight;

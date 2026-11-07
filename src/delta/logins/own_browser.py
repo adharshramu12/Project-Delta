@@ -24,9 +24,12 @@ What is added for the user's own browser:
 - One submit, the normal one (Enter in the password box). A simple image captcha follows the same rule as in the
   private browser: read on this PC only where the user allowed it (the login's captcha switch or `delta captcha
   allow`), else the picture goes to the user, who replies with the characters (LoginService parks the filled form in
-  its tab; answer_captcha() checks the tab and the origin again before typing it). When the driver cannot take a
-  picture of the captcha, the user types it and presses Sign in themselves, as before. A "code" box that sits on the
-  same form as the password box is a captcha (or a same-form code), never submitted empty.
+  its tab; answer_captcha() checks the tab and the origin again before typing it). When the driver finds no picture
+  element, the user gets a band of the page around the captcha box with the password boxes painted over
+  (captcha_region_image). Only when no picture at all can be taken, and only when the user is AT the PC (the request
+  came from the dashboard or the terminal), does Delta ask them to type it and press Sign in themselves; a user who is
+  away (Telegram) is never told to "complete it in the open browser". A "code" box that sits on the same form as the
+  password box is a captcha (or a same-form code), never submitted empty.
 - The first-use consent per site and browser lives in delta.logins.service (it is a permission question).
 """
 
@@ -156,12 +159,23 @@ class _OwnCaptchaPage:
         new = getattr(self.d, "refresh_captcha", None)
         return bool(await new(self.box)) if callable(new) else False
 
+    async def region_shot(self) -> bytes | None:
+        """For the user only: the page around the captcha box, password boxes painted over."""
+        take = getattr(self.d, "captcha_region_image", None)
+        return await take(self.box) if callable(take) else None
+
+
+async def _no_fill(value: str) -> str:
+    return "not used here"
+
 
 class OwnBrowserSignIn:
-    def __init__(self, handoff: Handoff, settle_s: float = SETTLE_S, captcha: OwnCaptchaHook | None = None) -> None:
+    def __init__(self, handoff: Handoff, settle_s: float = SETTLE_S, captcha: OwnCaptchaHook | None = None,
+                 remote: bool = False) -> None:
         self.handoff = handoff
         self.settle_s = settle_s
         self.captcha = captcha
+        self.remote = remote  # the request came from a phone: the user is not at the PC
         self.bound: TabBinding | None = None  # the tab this sign-in is bound to (kept when it waits for the user)
 
     # --- checks --------------------------------------------------------------------------------------------
@@ -410,11 +424,16 @@ class OwnBrowserSignIn:
         if step.image is None:
             image = None
             with contextlib.suppress(Exception):
-                image = await cpage.screenshot("")
+                image = await cpage.screenshot("") or await cpage.region_shot()
             step = CaptchaStep(False, step.note, image)
         if step.image is not None:
             return SignInResult("needs_user", f"CAPTCHA: {step.note or 'it needs a person to read it'}", url,
                                 captcha_image=step.image)
+        if self.remote:  # away from the PC: never "complete it in the open browser"
+            return SignInResult("needs_user", f"NEEDS HUMAN: {saved.host} shows a captcha and Delta could not read "
+                                              "it or take a picture of it to send you. Nothing was submitted. Ask "
+                                              "again in a minute (a new picture often reads), or sign in when you "
+                                              "are back at the PC.", url)
         done = await self.handoff("captcha", saved.host, f"{saved.host} shows a captcha: type the characters and "
                                                          f"press Sign in in your {d.browser_label}, then Approve")
         if not done:
@@ -460,9 +479,10 @@ class OwnBrowserSignIn:
             if result.outcome in ("wrong_password", "failed") and captcha_rejected(await d.text()):
                 boxes, _ = await self._form(d, saved)
                 image = None
-                if (cap := self._captcha_box(boxes)) is not None and callable(getattr(d, "captcha_image", None)):
+                if (cap := self._captcha_box(boxes)) is not None:
+                    shot = _OwnCaptchaPage(d, cap, await d.top_url(), _no_fill)
                     with contextlib.suppress(Exception):
-                        image = await d.captcha_image(cap)  # type: ignore[attr-defined]
+                        image = await shot.screenshot("") or await shot.region_shot()
                 return SignInResult("needs_user", f"CAPTCHA: {saved.host} said the characters were wrong; here is "
                                                   "the new picture.", await d.top_url(), captcha_image=image)
             return result

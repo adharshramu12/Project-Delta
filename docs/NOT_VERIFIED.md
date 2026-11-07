@@ -91,8 +91,12 @@ saying what you found (it worked, or how it failed) is very welcome.
 - **DPAPI on a fresh laptop**: saving, opening and refusing logins and watcher snapshots with real DPAPI on a newly
   set up Windows account. CI's Windows runners use real DPAPI in the end-to-end test, but not on a user's PC or
   after a Windows password change.
-- **OCR on real captchas**: the "OCR first, at most 3 attempts" rule is tested with a captcha picture drawn by the
-  fake portal. Real portal captchas (noise, warped letters) were not tried, so expect more hand-offs than in tests.
+- **OCR on real captchas**: the five clean-up passes and the voting are tested with noisy captchas drawn by the fake
+  portal (lines, dots, random answers). Windows OCR itself runs only on a Windows PC: the CI test
+  `tests/e2e/test_captcha_ocr_windows_e2e.py` reports its read rate on those pictures when the runner has an OCR
+  language, and no real college portal captcha (warped letters, heavy noise) was tried, so expect some hand-offs.
+- **The vision fallback with your own AI**: one small low-detail picture per try only after OCR fails. Tested with a
+  stand-in model; whether the Codex CLI provider reads such a small crop well was not tried.
 - **Real ERP and LMS sign-ins**: multi-step forms (user name first, password on the next page), single sign-on
   that sends you through another site, and forms submitted by JavaScript were tested only against the fake college
   portal. A portal that signs in on another address (SSO) is refused by design until you save a login for that
@@ -122,8 +126,8 @@ saying what you found (it worked, or how it failed) is very welcome.
 - **Masked pictures of your own browser**: the painted-over password area follows the box's position when it was
   filled; a page that scrolls or moves the box afterwards was not checked on a real screen.
 - **The captcha picture from your own browser**: Delta finds the Image next to the captcha box through UI Automation
-  and captures that rectangle from the screen (`UIAOwnDriver.captcha_image`). Not tried on a real PC: display scaling
-  above 100%, a captcha drawn on a canvas or as a CSS background (no Image element), and whether "clicking" the
+  and captures that rectangle from the screen (`UIAOwnDriver.captcha_image`), now per-monitor DPI aware, with a band
+  around the box as the fallback picture. Not tried on a real PC: display scaling above 100%, a captcha drawn on a canvas or as a CSS background (no Image element), and whether "clicking" the
   picture through UI Automation gives a new one on real portals.
 - **The captcha reply from a phone**: the picture is sent to Telegram as a photo and the reply goes through the same
   chat; tested with the dashboard path and fakes, not with a real phone. The dashboard shows the picture with the

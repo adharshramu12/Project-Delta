@@ -14,6 +14,22 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   kept. New [TRADEMARKS.md](TRADEMARKS.md): the names "Project Delta" and "ARVA Talks Academy" and the Delta logo
   need written approval for forks, products or endorsements. NOTICE, pyproject, CITATION.cff and CONTRIBUTING
   (DCO sign-off) are updated to match, and the README is rewritten.
+- **Saved logins read simple captchas by themselves (on by default).** Every saved login with a password now has
+  "This site has a simple text captcha, let Delta read it" on, with no approval; you can still turn it off per login
+  (Settings > Logins, `delta logins captcha NAME --off`, `delta logins add ... --no-simple-captcha`). A one-time
+  migration turns it on for logins saved earlier, unless you had turned it off in Settings > Logins. The binding to
+  the login's exact origin is unchanged; reCAPTCHA, hCaptcha, Turnstile and other managed challenges are never
+  solved.
+- **Better captcha reading on this PC**: the picture is cleaned up five ways (grayscale, threshold, denoise, thin
+  lines removed, darkest ink) and read in one Windows OCR call; the answer is fitted to the captcha box's
+  maxlength / pattern / inputmode, 0/O, 1/l/I, 5/S mix-ups are fixed for digits-only or letters-only boxes, and the
+  passes vote. Only when OCR fails, and a configured model takes pictures, one small low-detail crop goes to the AI
+  per try (counted in the audit). A sign-in where OCR reads the captcha makes zero AI calls.
+- **Captcha fallback that works away from the PC**: after 3 automatic tries the picture goes to the chat you asked
+  from (dashboard, shown again after a reload; Telegram as a photo). A captcha with no picture element (a bare
+  `<canvas>`, a Yii `verifyCode` box) is found next to its box; failing that you get a band of the page around it
+  with the password boxes painted over. A request from your phone is never told to "complete it in the open
+  browser". Own-browser captures are per-monitor DPI aware.
 
 ### Added
 - **"Delta is in control" signal**: while Delta drives the mouse, the keyboard or a browser (your own browser or

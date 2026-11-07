@@ -18,7 +18,8 @@ from delta.evals.spec import SUITES, SpecError, fill, load_specs
 
 def test_the_suite_is_30_to_50_tasks_over_every_area():
     tasks = load_specs(SPECS_DIR)
-    assert 30 <= len(tasks) <= 130  # 130: + the style suite (identity, slop check, warmth, academy line, email)
+    assert 30 <= len(tasks) <= 140  # 130: + the style suite (identity, slop check, warmth, academy line, email);
+    # 140: + three saved-login captcha tasks (noisy captcha default-on, canvas digits, fallback after three)
     assert {t.suite for t in tasks} == set(SUITES)
     for t in tasks:
         assert t.script.get("plan"), f"{t.id} has no scripted plan"

@@ -236,8 +236,10 @@ writer:
   voice_file: ""            # your past posts to copy your voice ("" = <output_dir>\my-posts.txt if present)
   substack_publication: ""  # e.g. yourname -> opens yourname.substack.com/publish/post
 
-# Simple image captchas on YOUR OWN accounts (e.g. your university portal). Off by default: every
-# captcha is handed to you. Listed hosts are read by the vision model (2 tries, then you are asked).
+# Simple image captchas on YOUR OWN accounts (e.g. your university portal). A login saved in Settings > Logins
+# with a password reads its own site's captcha by default (turn it off per login there). For OTHER sites this
+# list is empty by default: every captcha is handed to you. Listed hosts are read on this PC with Windows OCR
+# first, then one small picture to the vision model only if OCR fails (3 tries, then you are asked).
 # Exact host match; "*.example.in" also covers its subdomains. Add with `delta captcha allow <host>`.
 # reCAPTCHA, hCaptcha and Cloudflare Turnstile are always refused. See SECURITY.md.
 captcha:
