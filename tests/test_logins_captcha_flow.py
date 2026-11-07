@@ -94,19 +94,20 @@ def test_strict_get_for_changes_never_takes_a_vague_match(tmp_path):
 
 def test_replace_updates_in_place_and_keeps_the_captcha_switch(tmp_path):
     s = store(tmp_path)
-    s.add("fuerp", SITE, USER, "", simple_captcha=True)
+    s.add("fuerp", SITE, USER, "", simple_captcha=False)  # the user's own choice: off
     with pytest.raises(LoginError, match="Replace"):
         s.add("fuerp", SITE, USER, SECRET)
     s.add("fuerp", SITE, USER, SECRET, replace=True)
     items = s.list()
-    assert len(items) == 1 and items[0].password == SECRET and items[0].simple_captcha  # one login, updated
+    assert len(items) == 1 and items[0].password == SECRET and not items[0].simple_captcha  # one login, choice kept
     s.add("fuerp", "https://other.example.edu", USER, SECRET, replace=True)
-    assert not s.get("fuerp").simple_captcha  # another site: the switch does not follow
+    other = s.get("fuerp")
+    assert other.captcha_choice == "" and other.simple_captcha  # another site: the choice does not follow, default on
 
 
 def test_captcha_switch_is_exact_origin_only(tmp_path):
     s = store(tmp_path)
-    s.add("fuerp", SITE, USER, SECRET)
+    s.add("fuerp", SITE, USER, SECRET, simple_captcha=False)
     assert not s.captcha_allowed(SITE + "/")
     assert s.set_simple_captcha("fuerp", True).simple_captcha
     assert s.captcha_allowed(SITE + "/index.php?r=site/login")
@@ -129,7 +130,8 @@ async def test_list_logins_says_whether_a_password_is_saved(tmp_path):
     s.add("fuerp", SITE, USER, SECRET)
     s.add("Library", "https://lib.example.edu", USER, "")
     out = (await ListLogins(LoginService(s, AuditLog(tmp_path / "a.jsonl"), None)).run(ListLoginsArgs())).output
-    assert "fuerp: https://newerp.fixtureuniversity.in (ask every time; password saved)" in out
+    assert "fuerp: https://newerp.fixtureuniversity.in (ask every time; password saved; Delta reads its simple " \
+           "captcha)" in out
     assert "Library: https://lib.example.edu (ask every time; NO password saved" in out
     assert SECRET not in out and USER not in out
 
@@ -529,7 +531,11 @@ def test_routes_replace_warn_and_captcha_switch(tmp_path):
                                             "replace": True})
     assert done.json()["message"].startswith("Updated fuerp") and "No password" not in done.json()["message"]
     listing = client.get("/api/logins").json()["logins"]
-    assert len(listing) == 1 and listing[0]["has_password"] and not listing[0]["simple_captcha"]
+    assert len(listing) == 1 and listing[0]["has_password"] and listing[0]["simple_captcha"]  # on by default
+    assert listing[0]["captcha_default"] is True
+    off = client.put("/api/logins/fuerp/captcha", json={"on": False}).json()
+    assert not off["login"]["simple_captcha"] and not svc.store.captcha_allowed(SITE + "/")
+    assert off["login"]["captcha_default"] is False  # the user's own choice now, kept from here on
     on = client.put("/api/logins/fuerp/captcha", json={"on": True}).json()
     assert on["login"]["simple_captcha"] and svc.store.captcha_allowed(SITE + "/")
     assert client.put("/api/logins/nope/captcha", json={"on": True}).status_code == 400

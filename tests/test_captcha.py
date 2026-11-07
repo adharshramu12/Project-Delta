@@ -142,7 +142,7 @@ async def test_allowed_site_is_read_and_typed_without_leaking_the_answer(tmp_pat
     assert SECRET not in res.output and SECRET not in json.dumps(res.evidence)
     rec = AuditLog(tmp_path / "audit.jsonl").tail(1)[0]
     assert rec["event"] == "captcha"
-    assert rec["data"] == {"site": "erp.example.edu", "mode": "auto", "ok": True, "attempt": 1}
+    assert rec["data"] == {"site": "erp.example.edu", "mode": "auto", "ok": True, "attempt": 1, "via": "vision"}
     assert SECRET not in audit_text(tmp_path)
 
 

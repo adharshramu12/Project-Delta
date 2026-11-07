@@ -1,23 +1,27 @@
-"""Opt-in help with simple image captchas on the user's OWN accounts (e.g. a university portal).
+"""Simple image captchas on the user's OWN accounts (e.g. a university portal), read on this PC.
 
-Off by default. How it decides, for the site open in Delta's browser:
+How it decides, for the site open in the browser:
 
-1. reCAPTCHA, hCaptcha and Cloudflare Turnstile are refused outright: they exist to tell people
-   from programs, so Delta never tries to get past them and hands the page back to the user.
-2. The site's host is in `captcha.allowed_sites` (set by the user with `delta captcha allow <host>`,
-   never by Delta itself: its settings file is a protected path), or a saved login for exactly this origin has the
-   user's switch "This site has a simple text captcha, let Delta read it" on (Settings > Logins; delta.logins.store,
-   whose sealed files sit in the same protected folder): the captcha image is read on this PC
-   with Windows OCR first and, only when the user lets pictures go to a model (attachments.vision is not
-   "off"), by the vision model, then typed into the field. At most MAX_AUTO_ATTEMPTS (3) times per site in
-   ATTEMPT_WINDOW_S; from the second attempt on the captcha is refreshed first (a new picture), never more.
-3. Otherwise, or once those attempts are used up: human handoff. Delta saves the captcha image to the
-   run's proof folder and pauses on an approval ("type the characters into the page on your PC, then
-   Approve"), sent to every approval channel (dashboard, Telegram, terminal). Approve = typed it,
-   Deny or no answer = stop. The answer never leaves the PC and is never seen by Delta.
+1. reCAPTCHA, hCaptcha, Cloudflare Turnstile and other managed challenges are refused outright: they exist to tell
+   people from programs, so Delta never tries to get past them and hands the page back to the user.
+2. A saved login for exactly this origin with a password has "This site has a simple text captcha, let Delta read it"
+   on (Settings > Logins; ON by default for every login with a password since 2026-11, the user can turn it off per
+   login; delta.logins.store), or the site's host is in `captcha.allowed_sites` (`delta captcha allow <host>`, set by
+   the user, never by Delta: its settings file is a protected path): the captcha picture is read automatically, with
+   no approval:
+     a. Windows OCR on this PC, on five cleaned-up versions of the picture at once (delta.tools.captcha_ocr:
+        grayscale, threshold, denoise, thin lines removed, darkest ink only), the answer fitted to the box's own
+        maxlength / pattern and the usual 0/O, 1/l/I, 5/S mix-ups fixed when the box says digits or letters;
+     b. only when OCR read nothing usable (or is not on this PC), and only when a configured model takes pictures and
+        the user lets pictures go to a model (attachments.vision is not "off"): ONE vision call on a small crop of
+        the captcha (a few hundred bytes, low detail). Counted (CaptchaSolver.vision_calls, the audit's via=vision).
+   At most MAX_AUTO_ATTEMPTS (3) tries per site in ATTEMPT_WINDOW_S; from the second try on the captcha is refreshed
+   first (a new picture). A sign-in where OCR reads the captcha makes zero AI calls.
+3. Otherwise, or once those tries are used up: the user. For a sign-in, the captcha picture goes to the chat the
+   request came from (delta.logins.service parks the filled form); for the solve_captcha tool, Delta saves the
+   picture with the run's proof and pauses on an approval. The answer is never logged, audited or shown to a model.
 
-Every attempt is written to the audit log (site, mode, success). The answer text never is, and it is
-never returned to the model either.
+Every attempt is written to the audit log (site, mode, how it was read, success). The answer text never is.
 """
 
 from __future__ import annotations
@@ -39,6 +43,7 @@ from delta.safety.approvals import ApprovalBroker, ApprovalRequest
 from delta.safety.audit import AuditLog
 from delta.tools.base import Risk, ToolResult
 from delta.tools.browser import BrowserManager, _BrowserTool
+from delta.tools.captcha_ocr import Hints, hints_from, pick, small_crop
 
 MAX_AUTO_ATTEMPTS = 3
 ATTEMPT_WINDOW_S = 15 * 60  # auto attempts per site are counted over this window, then reset
@@ -61,12 +66,33 @@ CHALLENGE_JS = """() => {
 }"""
 
 AUTO_IMAGE = ("img[id*=captcha i], img[class*=captcha i], img[src*=captcha i], img[alt*=captcha i], "
-              "canvas[id*=captcha i]")
+              "canvas[id*=captcha i], canvas[class*=captcha i], img[id*=verifycode i], img[src*=verifycode i], "
+              "canvas[id*=verifycode i]")
 # A "new picture" control next to the captcha. Clicking the picture itself refreshes many simple captchas too.
 REFRESH = ("[id*=captcha i][id*=refresh i], [class*=captcha i][class*=refresh i], [id*=refresh i], "
            "[class*=refresh i], [title*=refresh i], [aria-label*=refresh i], [alt*=refresh i]")
 AUTO_FIELD = ("input[name*=captcha i], input[id*=captcha i], input[placeholder*=captcha i], "
-              "input[aria-label*=captcha i]")
+              "input[aria-label*=captcha i], input[name*=verifycode i], input[id*=verifycode i]")
+# The picture next to a captcha box when nothing on the page says "captcha" (a bare <canvas>, an <img> with a random
+# id): the visible img or canvas of a sensible size closest to the box, in the box's own form first.
+NEAREST_IMAGE_JS = """(box) => {
+  const r = box.getBoundingClientRect();
+  const scope = box.form || document;
+  let best = null, bestD = 1e9;
+  for (const el of [...scope.querySelectorAll('img, canvas'), ...document.querySelectorAll('img, canvas')]) {
+    const b = el.getBoundingClientRect();
+    if (b.width < 30 || b.height < 12 || b.width > 600 || b.height > 250) continue;
+    const st = getComputedStyle(el);
+    if (st.visibility === 'hidden' || st.display === 'none') continue;
+    const d = Math.abs((b.top + b.bottom) / 2 - (r.top + r.bottom) / 2) + Math.abs(b.left - r.left) / 4
+      + (scope.contains(el) ? 0 : 200);
+    if (d < bestD && d < 400) { best = el; bestD = d; }
+  }
+  if (best) best.setAttribute('data-delta-captcha', '1');
+  return !!best;
+}"""
+HINTS_JS = """(el) => ({maxlength: el.getAttribute('maxlength'), minlength: el.getAttribute('minlength'),
+  pattern: el.getAttribute('pattern'), inputmode: el.getAttribute('inputmode'), type: el.getAttribute('type')})"""
 
 
 # ---------------------------------------------------------------- pure rules (unit tested)
@@ -113,9 +139,13 @@ def challenge_kind(markers: list[str]) -> str | None:
     return None
 
 
+def first_line(reply: str) -> str:
+    return re.sub(r"[\s`'\"]", "", reply.strip().splitlines()[0] if reply and reply.strip() else "")
+
+
 def clean_answer(reply: str) -> str | None:
     """The characters a vision model read, or None when its reply does not look like a captcha answer."""
-    token = re.sub(r"[\s`'\"]", "", reply.strip().splitlines()[0] if reply.strip() else "")
+    token = first_line(reply)
     return token if ANSWER.match(token) else None
 
 
@@ -156,7 +186,13 @@ class PlaywrightCaptchaPage:
 
     async def _image(self, image: str) -> Any | None:
         if not image:
-            return await self._first(self.page.locator(AUTO_IMAGE))
+            if found := await self._first(self.page.locator(AUTO_IMAGE)):
+                return found
+            box = await self._field("")
+            with contextlib.suppress(Exception):
+                if box is not None and await box.evaluate(NEAREST_IMAGE_JS):
+                    return await self._first(self.page.locator("[data-delta-captcha]"))
+            return None
         with contextlib.suppress(Exception):
             if found := await self._first(self.page.locator(image)):
                 return found
@@ -171,8 +207,45 @@ class PlaywrightCaptchaPage:
         return await self._first(self.page.get_by_label(field).or_(self.page.get_by_placeholder(field)))
 
     async def screenshot(self, image: str) -> bytes | None:
+        """A JPEG of the captcha picture only (an element shot: right at any display scaling, never the password
+        box). A canvas-drawn captcha is captured the same way."""
         el = await self._image(image)
         return None if el is None else bytes(await el.screenshot(type="jpeg", quality=90, timeout=8000))
+
+    async def region_shot(self) -> bytes | None:
+        """For the USER only (never OCR or a model): the page around the captcha box, password boxes masked, when no
+        picture element can be found next to it."""
+        el = await self._field("")
+        if el is None:
+            return None
+        with contextlib.suppress(Exception):
+            from delta.logins.signin import mask_secret_fields
+
+            await mask_secret_fields(self.page)
+            b = await el.bounding_box()
+            if not b:
+                return None
+            vp = self.page.viewport_size or {"width": 1280, "height": 800}
+            h = max(20.0, b["height"])
+            x = max(0.0, b["x"] - 360)
+            y = max(0.0, b["y"] - 2.5 * h)
+            w = min(float(vp["width"]) - x, b["width"] + 720)
+            hh = min(float(vp["height"]) - y, 5 * h)
+            if w <= 0 or hh <= 0:
+                return None
+            return bytes(await self.page.screenshot(type="jpeg", quality=85, timeout=8000,
+                                                    clip={"x": x, "y": y, "width": w, "height": hh}))
+        return None
+
+    async def field_hints(self, field: str) -> dict[str, Any]:
+        """The captcha box's maxlength, minlength, pattern, inputmode and type (what an answer must fit)."""
+        el = await self._field(field)
+        if el is None:
+            return {}
+        with contextlib.suppress(Exception):
+            got = await el.evaluate(HINTS_JS)
+            return dict(got) if isinstance(got, dict) else {}
+        return {}
 
     async def has_field(self, field: str) -> bool:
         return await self._field(field) is not None
@@ -208,8 +281,9 @@ class PlaywrightCaptchaPage:
 
 # ---------------------------------------------------------------- the decision logic
 
-Vision = Callable[[str], Awaitable[str]]  # base64 jpeg -> model reply
-Reader = Callable[[bytes], Awaitable[str]]  # jpeg bytes -> text read on this PC (Windows OCR)
+Vision = Callable[..., Awaitable[str]]  # (base64 jpeg[, hint=]) -> model reply
+# jpeg bytes -> what was read on this PC (Windows OCR): one text, or one per cleaned-up pass (captcha_ocr.variants)
+Reader = Callable[[bytes], Awaitable["str | list[str]"]]
 AskHuman = Callable[[str, str], Awaitable[bool]]  # (host, saved image name) -> user says they typed it
 
 
@@ -224,9 +298,13 @@ class CaptchaSolver:
     ocr: Reader | None = None  # local OCR, tried first
     # url -> a saved login for exactly that origin lets Delta read its simple captcha (LoginStore.captcha_allowed)
     origin_allowed: Callable[[str], bool] | None = None
+    # Whether a configured model takes pictures right now (asked at each read; None = whenever `vision` is set)
+    vision_ready: Callable[[], bool] | None = None
 
     def __post_init__(self) -> None:
         self._attempts: dict[str, tuple[int, float]] = {}  # host -> (auto attempts, first attempt time)
+        self.vision_calls = 0  # pictures sent to a model (each one small); OCR reads are free
+        self.last_via = ""  # how the last answer was read: ocr | vision | ""
 
     def _used(self, host: str) -> int:
         count, since = self._attempts.get(host, (0, 0.0))
@@ -247,15 +325,48 @@ class CaptchaSolver:
             return bool(self.origin_allowed is not None and self.origin_allowed(url))
         return False
 
-    async def _read(self, shot: bytes) -> str | None:
+    def _can_see(self) -> bool:
+        if self.vision is None:
+            return False
+        if self.vision_ready is None:
+            return True
+        with contextlib.suppress(Exception):
+            return bool(self.vision_ready())
+        return False
+
+    def can_read(self) -> bool:
+        return self.ocr is not None or self._can_see()
+
+    async def _read(self, shot: bytes, hints: Hints | None = None) -> str | None:
+        """OCR on this PC first (every pass votes); one small vision call only when OCR found nothing that fits."""
+        hints = hints or Hints()
         answer: str | None = None
+        self.last_via = ""
         if self.ocr is not None:
             with contextlib.suppress(Exception):  # OCR missing or unreadable: the model may still read it
-                answer = clean_answer(await self.ocr(shot))
-        if not answer and self.vision is not None:
+                got = await self.ocr(shot)
+                answer = pick(got if isinstance(got, list) else [str(got or "")], hints)
+                if answer:
+                    self.last_via = "ocr"
+        if not answer and self._can_see() and self.vision is not None:
+            crop = base64.b64encode(small_crop(shot)).decode()
+            self.vision_calls += 1
             with contextlib.suppress(Exception):  # no model, model error: counts as a failed read
-                answer = clean_answer(await self.vision(base64.b64encode(shot).decode()))
+                reply = (await self.vision(crop, hint=hints.describe()) if getattr(self.vision, "takes_hint", False)
+                         else await self.vision(crop))
+                answer = pick([tok], hints) if (tok := clean_answer(reply)) else None
+                if answer:
+                    self.last_via = "vision"
         return answer
+
+    @staticmethod
+    async def _hints(page: CaptchaPage, field: str = "") -> Hints:
+        get = getattr(page, "field_hints", None)
+        if not callable(get):
+            return Hints()
+        with contextlib.suppress(Exception):
+            return hints_from(await get(field))
+        return Hints()
 
     async def auto_fill(self, page: CaptchaPage) -> tuple[bool, str, bytes | None]:
         """For a saved-login sign-in: (typed an answer, why not, the current captcha picture). Reads only where the
@@ -276,8 +387,10 @@ class CaptchaSolver:
             return False, "no captcha picture was found next to the box", None
         if not self.allowed(page.url):
             return False, f"Delta does not read the captcha on {host} (that switch is off in Settings > Logins)", shot
-        if self.vision is None and self.ocr is None:
-            return False, "there is no way to read it on this PC (Windows OCR is not available)", shot
+        if not self.can_read():
+            return False, ("there is no way to read it on this PC (Windows OCR is not available and no AI model that "
+                           "takes pictures is set up)"), shot
+        hints = await self._hints(page)
         tried = False
         while self._used(host) < MAX_AUTO_ATTEMPTS:
             attempt = self._count(host)
@@ -286,12 +399,13 @@ class CaptchaSolver:
                     if await page.refresh("") and (new := await page.screenshot("")):
                         shot = new
             tried = True
-            answer = await self._read(shot)
+            answer = await self._read(shot, hints)
             if answer:
                 await page.fill("", answer)
-            self._audit(host, "auto", bool(answer), attempt=attempt)
+            self._audit(host, "auto", bool(answer), attempt=attempt, via=self.last_via or "none")
             if answer:
-                return True, f"read on this PC (attempt {attempt} of {MAX_AUTO_ATTEMPTS})", shot
+                how = "on this PC" if self.last_via == "ocr" else "by the AI model (one small picture)"
+                return True, f"read {how} (attempt {attempt} of {MAX_AUTO_ATTEMPTS})", shot
         return False, f"Delta could not read the captcha on {host} after {MAX_AUTO_ATTEMPTS} tries", shot
 
     def _audit(self, host: str, mode: str, ok: bool, **extra: Any) -> None:
@@ -317,20 +431,21 @@ class CaptchaSolver:
 
         if not self.allowed(page.url):
             reason = "site not in captcha.allowed_sites"
-        elif self.vision is None and self.ocr is None:
+        elif not self.can_read():
             reason = "no way to read it on this PC (no Windows OCR, and pictures may not go to a model)"
         else:
             reason = "automatic attempts used up"
+            hints = await self._hints(page, field)
             while self._used(host) < MAX_AUTO_ATTEMPTS:
                 attempt = self._count(host)
                 if attempt > 1:  # the last picture was used: ask the site for a new one before reading again
                     with contextlib.suppress(Exception):
                         if await page.refresh(image) and (new := await page.screenshot(image)):
                             shot, b64 = new, base64.b64encode(new).decode()
-                answer = await self._read(shot)
+                answer = await self._read(shot, hints)
                 if answer:
                     await page.fill(field, answer)
-                self._audit(host, "auto", bool(answer), attempt=attempt)
+                self._audit(host, "auto", bool(answer), attempt=attempt, via=self.last_via or "none")
                 if answer:
                     last = attempt >= MAX_AUTO_ATTEMPTS
                     return ToolResult(True, (
@@ -373,14 +488,30 @@ def approval_handoff(approvals: ApprovalBroker) -> AskHuman:
 
 
 def router_vision(router: Any) -> Vision:
-    async def read(b64: str) -> str:
+    """One small, low-detail picture of the captcha to the configured vision model (only after OCR failed)."""
+
+    async def read(b64: str, hint: str = "") -> str:
+        want = f" It has {hint}." if hint else ""
         resp = await router.complete([{"role": "user", "content": [
-            {"type": "text", "text": "This image is a text captcha. Reply with ONLY its characters, "
+            {"type": "text", "text": "This image is a text captcha." + want + " Reply with ONLY its characters, "
                                      "exactly as shown, no spaces, no other words."},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}], task="vision")
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"}}]}],
+            task="vision")
         return str(resp.content)
 
+    read.takes_hint = True  # type: ignore[attr-defined]
     return read
+
+
+def router_sees(router: Any) -> Callable[[], bool]:
+    """A configured model takes pictures right now (the vision route has a provider that is up)."""
+
+    def ready() -> bool:
+        with contextlib.suppress(Exception):
+            return bool(router.candidates("vision"))
+        return False
+
+    return ready
 
 
 def live_allowlist(data_dir: Path, shipped: list[str]) -> Callable[[], list[str]]:
@@ -428,22 +559,29 @@ class SolveCaptcha(_BrowserTool[CaptchaArgs]):
 
 
 def local_ocr(mode: str = "auto") -> Reader | None:
-    """Windows OCR as a captcha reader (None off Windows or when OCR is switched off)."""
+    """Windows OCR as a captcha reader (None off Windows or when OCR is switched off): the picture cleaned up five
+    ways (delta.tools.captcha_ocr.variants), stacked, read in ONE OCR call, one reading per pass."""
     from delta.perception.ocr import WindowsOcr
 
     reader = WindowsOcr(mode)
     if not reader.platform_ok() or mode == "off":
         return None
+    return stacked_reader(reader)
 
-    async def read(jpeg: bytes) -> str:
+
+def stacked_reader(reader: Any) -> Reader:
+    """A Reader over any OCR engine with WindowsOcr's `read(PIL image) -> [OcrLine]` (tests and evals pass one)."""
+
+    async def read(jpeg: bytes) -> list[str]:
         import io
 
         from PIL import Image
 
-        src = Image.open(io.BytesIO(jpeg))
-        big = src.convert("L").resize((src.width * 3, src.height * 3))  # small captchas read better enlarged
-        lines = await reader.read(big)
-        return "".join(line.text for line in lines)
+        from delta.tools.captcha_ocr import band_readings, stack, variants
+
+        bands = variants(Image.open(io.BytesIO(jpeg)))
+        sheet, spans = stack(bands)
+        return band_readings(await reader.read(sheet), spans)
 
     return read
 
@@ -462,7 +600,8 @@ def make_solver(settings: Any, router: Any, approvals: ApprovalBroker, audit: Au
         vision=router_vision(router) if pictures_allowed(settings) else None,
         ask_human=approval_handoff(approvals), audit=audit,
         save_image=proof.save_image if proof else (lambda b64, label: None),
-        ocr=local_ocr(getattr(getattr(settings, "perception", None), "ocr", "auto")))
+        ocr=local_ocr(getattr(getattr(settings, "perception", None), "ocr", "auto")),
+        vision_ready=router_sees(router))
 
 
 def captcha_tool(mgr: BrowserManager, settings: Any, router: Any, approvals: ApprovalBroker, audit: AuditLog,

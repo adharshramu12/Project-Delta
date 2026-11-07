@@ -13,9 +13,11 @@ remote control is locked nothing remote signs in at all.
 Every use is written to the audit log: the login's name, its site, the task, which browser and the outcome. Never
 the user name, the password, a one-time code or a captcha answer.
 
-A simple text captcha on the sign-in form: read on this PC (Windows OCR) only where the user allowed it, with the
-login's "This site has a simple text captcha, let Delta read it" switch or `delta captcha allow <host>`, at most 3
-tries. Otherwise, or after that, Delta PARKS the sign-in (the filled form stays open in the same tab) and sends the
+A simple text captcha on the sign-in form: read automatically, with no approval, where the user allows it: the
+login's "This site has a simple text captcha, let Delta read it" switch (ON by default for every login with a password;
+the user can turn it off per login) or `delta captcha allow <host>`. Windows OCR on this PC first, one small vision
+call per try only when OCR fails and a configured model takes pictures, at most 3 tries (delta.tools.captcha).
+Otherwise, or after that, Delta PARKS the sign-in (the filled form stays open in the same tab) and sends the
 captcha picture to the chat the request came from (the dashboard, or Telegram as a photo). The user replies with just
 the characters; LoginFlow (delta.logins.flow) hands that reply to answer_captcha(), which checks the tab and the
 origin again, types it, submits once and checks the result. The answer is never logged or audited. A parked sign-in
@@ -63,6 +65,7 @@ class Parked:
     task_id: str
     tries: int = 0
     since: float = 0.0
+    image: bytes | None = None  # the captcha picture sent, shown again when the dashboard reloads the chat
 
 
 def chat_key() -> str:
@@ -209,6 +212,9 @@ class LoginService:
                 image = await cpage.screenshot("")
             return CaptchaStep(False, "the site rejected the characters Delta read 3 times", image)
         entered, note, image = await auto(cpage)
+        if not entered and image is None and callable(region := getattr(cpage, "region_shot", None)):
+            with contextlib.suppress(Exception):
+                image = await region()  # no picture element: the user still gets one (never read by OCR/a model)
         return CaptchaStep(entered, note, image)
 
     # --- a sign-in waiting for the user's captcha answer ------------------------------------------------
@@ -225,11 +231,18 @@ class LoginService:
             f"'{login.name}' in Settings > Logins.")
         if not key or not image:
             where = "in your own browser" if browser.startswith("own") else "in Delta's browser"
+            req = CURRENT_REQUEST.get()
+            if req is not None and is_remote(req.channel):  # away from the PC: never "type it in the browser"
+                return SignInResult("needs_user", (
+                    f"NEEDS HUMAN: {login.site.host} shows a simple captcha: {why}. Delta could not take a picture of "
+                    "it to send you, so nothing was submitted. Ask again in a minute (a new picture often reads), or "
+                    "sign in when you are back at the PC." + hint), result.url)
             return SignInResult("needs_user", (
                 f"NEEDS HUMAN: {login.site.host} shows a simple captcha: {why}. Ask for the sign-in from the chat "
                 f"(dashboard or Telegram) and Delta will send you the picture to read, or type it {where} on the PC."
                 + hint), result.url)
-        self.parked[key] = Parked(login.id, key, browser, page, bound, login.site.host, task_id, tries, self.clock())
+        self.parked[key] = Parked(login.id, key, browser, page, bound, login.site.host, task_id, tries, self.clock(),
+                                  image)
         self.last_image[key] = image
         self._send_captcha(image, login)
         self.audit.record("login.captcha_asked", login=login.id, site=login.origin, browser=browser, tries=tries)
@@ -267,6 +280,15 @@ class LoginService:
             self.parked.pop(key, None)
             p = None
         return p
+
+    def waiting_view(self, key: str) -> dict[str, Any] | None:
+        """What the dashboard shows again after a reload: the captcha picture still waiting for this chat's reply."""
+        p = self.waiting(key)
+        if p is None or not p.image:
+            return None
+        login = self.store.get(p.login_id)
+        return {"login": login.name if login else p.host, "site": p.host, "image": base64.b64encode(p.image).decode(),
+                "expires_in_s": max(0, int(PARK_TTL_S - (self.clock() - p.since)))}
 
     def cancel(self, key: str) -> Parked | None:
         self.last_image.pop(key, None)
@@ -374,7 +396,9 @@ class LoginService:
                                                   f"({how}). Do not try another way.")
         # else: the consent question just answered names this site and browser, so it covers this use too
         self.cancel(chat_key())
-        own = OwnBrowserSignIn(self.handoff, captcha=self._captcha_on)
+        req = CURRENT_REQUEST.get()
+        own = OwnBrowserSignIn(self.handoff, captcha=self._captcha_on,
+                               remote=bool(req is not None and is_remote(req.channel)))
         try:
             result = await own.sign_in(driver, login)
         except Exception as e:

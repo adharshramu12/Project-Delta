@@ -306,7 +306,11 @@ def create_app(c: Container, token: str) -> FastAPI:
             raise HTTPException(404, "unknown chat")
         running = [r["task_id"] for r in results.values()
                    if r.get("status") == "running" and r.get("chat_id") == chat_id]
-        return {"chat": ch.to_dict(), "messages": _chats().messages(chat_id), "running": running}
+        # a sign-in still waiting for this chat's captcha reply: its picture shows again after a reload
+        captcha = None
+        with contextlib.suppress(Exception):
+            captcha = c.logins.waiting_view(chat_id) if getattr(c, "logins", None) is not None else None
+        return {"chat": ch.to_dict(), "messages": _chats().messages(chat_id), "running": running, "captcha": captcha}
 
     @app.patch("/api/chats/{chat_id}", dependencies=[Depends(auth)])
     async def patch_chat(chat_id: str, body: ChatPatch) -> dict[str, Any]:

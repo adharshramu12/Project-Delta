@@ -9,8 +9,12 @@ How the checks map onto UI Automation:
 - a frame's address: the Value of the nearest Document element above the box (frames are Documents of their own);
 - a box: an Edit element; IsPassword marks password boxes; its name (label, placeholder) and its AutomationId (Chrome
   and Edge report the HTML id there) say what else it is ("loginFormCaptcha" is a captcha box);
-- a captcha picture: the Image element of the same document nearest to the captcha box, captured from the screen
-  (only that rectangle, with Delta's window in front) for Windows OCR or for the user to read;
+- a captcha picture: the Image element of the same document nearest to the captcha box (or any element whose id says
+  captcha, so a <canvas> captcha counts), captured from the screen (only that rectangle, with Delta's window in
+  front) for Windows OCR or for the user to read. Rectangles and the capture both run per-monitor DPI aware on the
+  UI Automation thread, so 125 % / 150 % display scaling and a second monitor give the right pixels. When no picture
+  element can be found, the user still gets a picture: a band of the page around the captcha box with every password
+  box painted over (captcha_region_image; never read by OCR or a model);
 - filling: the box's ValuePattern.SetValue (straight into that box, no keyboard, nothing on the clipboard). When a
   page ignores it, Delta types the value into the box instead, a few characters at a time, checking before each
   burst that the box still has the keyboard focus in Delta's window (the user's mouse or keyboard stops it).
@@ -35,6 +39,46 @@ def _wrap(el: Any) -> Any:
     from pywinauto.uia_element_info import UIAElementInfo
 
     return UIAWrapper(UIAElementInfo(el))
+
+
+@contextlib.contextmanager
+def _per_monitor_dpi() -> Any:
+    """Run the enclosed UI Automation reads and the screen capture per-monitor DPI aware (physical pixels), whatever
+    the process was set to, then put the thread back. A no-op where the call does not exist (before Windows 10 1607)."""
+    old = None
+    user32 = None
+    with contextlib.suppress(Exception):
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+        old = user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))  # PER_MONITOR_AWARE_V2
+    try:
+        yield
+    finally:
+        if old and user32 is not None:
+            with contextlib.suppress(Exception):
+                import ctypes
+
+                user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(old))
+
+
+def _grab(left: int, top: int, width: int, height: int) -> Any:
+    """A PIL picture of that screen rectangle (physical pixels)."""
+    import mss
+    from PIL import Image
+
+    with mss.mss() as shot:
+        raw = shot.grab({"left": int(left), "top": int(top), "width": max(1, int(width)),
+                         "height": max(1, int(height))})
+    return Image.frombytes("RGB", raw.size, raw.rgb)
+
+
+def _blank(img: Any) -> bool:
+    """One flat colour: the capture missed the picture (wrong coordinates, covered window)."""
+    lo, hi = img.convert("L").getextrema()
+    return bool(hi - lo < 12)
 
 
 def _same(a: Any, b: Any) -> bool:
@@ -327,31 +371,41 @@ class UIAOwnDriver:
             left, top, _right, _bottom = win32gui.GetWindowRect(hwnd)
             mask.remember(hwnd, (int(r.left), int(r.top), int(r.right), int(r.bottom)), (int(left), int(top)))
 
-    def _captcha_picture(self, f: FieldRef) -> Any | None:
-        """The Image element of the box's document nearest to the box (one whose id says captcha first)."""
+    def _doc_of(self, f: FieldRef) -> Any | None:
         from pywinauto.uia_element_info import UIAElementInfo
 
-        box = _wrap(f.handle).rectangle()
         info: Any = UIAElementInfo(f.handle)
-        doc = None
         for _ in range(80):
             info = info.parent
             if info is None:
-                break
+                return None
             if info.control_type == "Document":
-                doc = _wrap(info.element)
-                break
+                return _wrap(info.element)
+        return None
+
+    def _captcha_picture(self, f: FieldRef) -> Any | None:
+        """The picture of the box's document nearest to the box: an Image element, or any element whose id says
+        captcha (a <canvas> captcha). One whose id says captcha wins."""
+        box = _wrap(f.handle).rectangle()
+        doc = self._doc_of(f)
         if doc is None:
             return None
+        found: list[Any] = []
+        for kind in ("Image", "Custom", "Group", "Pane"):
+            with contextlib.suppress(Exception):
+                items = list(doc.descendants(control_type=kind))
+                found += items if kind == "Image" else [
+                    x for x in items if any(w in str(x.element_info.automation_id or "").lower()
+                                            for w in ("captcha", "verifycode"))]
         best, best_d = None, 1e9
-        for img in doc.descendants(control_type="Image"):
+        for img in found:
             with contextlib.suppress(Exception):
                 r = img.rectangle()
                 w, h = r.right - r.left, r.bottom - r.top
                 if w < 30 or h < 12 or w > 600 or h > 250:
                     continue  # icons and banners are not captchas
                 d = abs((r.top + r.bottom) / 2 - (box.top + box.bottom) / 2) + abs(r.left - box.left) / 4
-                if "captcha" in str(img.element_info.automation_id or "").lower():
+                if any(word in str(img.element_info.automation_id or "").lower() for word in ("captcha", "verifycode")):
                     d -= 10_000
                 if d < best_d and d < 400:
                     best, best_d = img, d
@@ -363,21 +417,64 @@ class UIAOwnDriver:
         def go() -> bytes | None:
             import io
 
-            import mss
-            from PIL import Image
-
-            img = self._captcha_picture(f)
-            if img is None:
+            with _per_monitor_dpi():
+                img = self._captcha_picture(f)
+                if img is None:
+                    return None
+                self._guard()
+                self.ub._front(self._w())
+                time.sleep(0.2)
+                r = img.rectangle()
+                pic = _grab(r.left, r.top, r.right - r.left, r.bottom - r.top)
+            if _blank(pic):
                 return None
-            self._guard()
-            self.ub._front(self._w())
-            time.sleep(0.2)
-            r = img.rectangle()
-            with mss.mss() as shot:
-                raw = shot.grab({"left": int(r.left), "top": int(r.top), "width": int(r.right - r.left),
-                                 "height": int(r.bottom - r.top)})
             out = io.BytesIO()
-            Image.frombytes("RGB", raw.size, raw.rgb).save(out, "JPEG", quality=90)
+            pic.save(out, "JPEG", quality=90)
+            return out.getvalue()
+
+        try:
+            with self.ctl.acting():
+                return await self.ctl.call(go)
+        except TabChangedError:
+            raise
+        except Exception:
+            return None
+
+    async def captcha_region_image(self, f: FieldRef) -> bytes | None:
+        """For the USER only (never OCR or a model): a band of the page around captcha box f, with every password box
+        in it painted over, when no captcha picture element can be found (a picture drawn some other way)."""
+        def go() -> bytes | None:
+            import io
+
+            from PIL import ImageDraw
+
+            with _per_monitor_dpi():
+                doc = self._doc_of(f)
+                b = _wrap(f.handle).rectangle()
+                d = doc.rectangle() if doc is not None else None
+                h = max(20, b.bottom - b.top)
+                left = max(d.left, b.left - 360) if d is not None else b.left - 360
+                right = min(d.right, b.right + 360) if d is not None else b.right + 360
+                top, bottom = b.top - round(2.5 * h), b.bottom + round(1.5 * h)
+                secrets = []
+                if doc is not None:
+                    with contextlib.suppress(Exception):
+                        for e in doc.descendants(control_type="Edit"):
+                            with contextlib.suppress(Exception):
+                                if e.element_info.element.CurrentIsPassword:
+                                    secrets.append(e.rectangle())
+                self._guard()
+                self.ub._front(self._w())
+                time.sleep(0.2)
+                pic = _grab(left, top, right - left, bottom - top)
+            draw = ImageDraw.Draw(pic)
+            for r in secrets:
+                draw.rectangle((r.left - left - 6, r.top - top - 6, r.right - left + 6, r.bottom - top + 6),
+                               fill=(40, 40, 40))
+            if _blank(pic):
+                return None
+            out = io.BytesIO()
+            pic.save(out, "JPEG", quality=85)
             return out.getvalue()
 
         try:

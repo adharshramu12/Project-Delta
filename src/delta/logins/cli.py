@@ -1,7 +1,9 @@
 """`delta logins add|list|remove|test|allow|captcha`: saved site logins from a terminal on the PC.
 
 `delta logins captcha NAME --on|--off` is the same switch as Settings > Logins "This site has a simple text captcha,
-let Delta read it": for that login's exact origin it does what `delta captcha allow <host>` does for a host.
+let Delta read it": for that login's exact origin it does what `delta captcha allow <host>` does for a host. It is ON
+by default for every login with a password (Delta reads the captcha itself: Windows OCR first, then at most one small
+picture to your AI model; after 3 tries it sends you the picture). `--off` makes Delta ask you every time.
 
 The password is typed without being shown (never an argument, so it is not in the shell history or the process
 list) and never printed. Works whether or not Delta is running: the running service reads the same sealed files.
@@ -32,9 +34,14 @@ def add_parser(sub: Any) -> None:
     p.add_argument("--always", action="store_true", help="add / allow: use it without asking, on this site only")
     p.add_argument("--ask", action="store_true", help="allow: ask every time (the default)")
     p.add_argument("--simple-captcha", action="store_true",
-                   help="add: the site has a simple text captcha; let Delta read it (Windows OCR, this site only)")
-    p.add_argument("--on", action="store_true", help="captcha: let Delta read this site's simple captcha")
-    p.add_argument("--off", action="store_true", help="captcha: ask me for this site's captcha (the default)")
+                   help="add: let Delta read this site's simple text captcha (already the default with a password)")
+    p.add_argument("--no-simple-captcha", action="store_true",
+                   help="add: never read this site's captcha automatically; send me the picture instead")
+    p.add_argument("--on", action="store_true",
+                   help="captcha: Delta reads this site's simple text captcha itself, no approval (the default for "
+                        "a login with a password; Windows OCR first, 3 tries, then it sends you the picture)")
+    p.add_argument("--off", action="store_true",
+                   help="captcha: Delta sends me this site's captcha picture to type every time")
 
 
 def store_for(settings: Settings) -> LoginStore:
@@ -55,7 +62,8 @@ def run_cli(settings: Settings, args: argparse.Namespace, ask: Callable[[str], s
             used = f", last used {x.last_used} ({x.last_outcome})" if x.last_used else ""
             own = f", allowed in your own {' and '.join(sorted(x.own_browser))}" if x.own_browser else ""
             pw = "" if x.password else ", NO password saved"
-            cap = ", Delta reads its simple captcha" if x.simple_captcha else ""
+            cap = (", Delta reads its simple captcha" + (" (default)" if x.captcha_choice == "" else "")
+                   if x.simple_captcha else ", Delta sends you its captcha")
             out(f"{x.name}: {x.origin} as {x.username or '(no user name)'}{pw}; {PERMISSION_WORDS[x.permission]}{own}"
                 f"{cap}{used}")
         return 0
@@ -85,9 +93,10 @@ def run_cli(settings: Settings, args: argparse.Namespace, ask: Callable[[str], s
         except LoginError as e:
             out(str(e))
             return 1
-        out(f"{login.name}: Delta now reads the simple text captcha on {login.origin} (Windows OCR, at most 3 tries, "
-            "then it asks you). Use it only for your own account." if login.simple_captcha else
-            f"{login.name}: Delta asks you for the captcha on {login.origin}.")
+        out(f"{login.name}: Delta reads the simple text captcha on {login.origin} itself (Windows OCR on this PC "
+            "first, at most 3 tries, then it sends you the picture). Use it only for your own account."
+            if login.simple_captcha else
+            f"{login.name}: Delta sends you the captcha picture on {login.origin} and waits for your reply.")
         return 0
     if action == "add":
         if not s.available():
@@ -100,7 +109,9 @@ def run_cli(settings: Settings, args: argparse.Namespace, ask: Callable[[str], s
         try:
             login = s.add(args.name, site, username, password, login_url=args.login_url,
                           permission="always" if args.always else "ask", allow_http=args.allow_http,
-                          replace=args.replace, simple_captcha=True if getattr(args, "simple_captcha", False) else None)
+                          replace=args.replace,
+                          simple_captcha=True if getattr(args, "simple_captcha", False) else
+                          False if getattr(args, "no_simple_captcha", False) else None)
         except LoginError as e:
             out(f"Not saved: {e}")
             return 1

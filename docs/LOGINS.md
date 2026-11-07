@@ -80,19 +80,35 @@ while remote control is locked nothing remote signs in. Change the setting in Se
   answer stops the sign-in.
 - **reCAPTCHA, hCaptcha, Cloudflare Turnstile.** Never solved by Delta. The same hand-off: you complete it on the
   PC, or the sign-in stops.
-- **A simple text captcha** (a picture of a few characters, as on many college ERPs). Each login has a switch, off by
-  default: **"This site has a simple text captcha, let Delta read it"** (Settings > Logins, on the add form and on the
-  login's card; or `delta logins captcha NAME --on`). It does what `delta captcha allow <host>` does, for that
-  login's exact origin only. When it is on, Delta reads the picture on this PC with Windows OCR (only if OCR is not
-  available, and you let pictures go to the AI, the AI reads it), at most 3 tries, asking the site for a new picture
-  when one cannot be read and filling the form again when the site says only the captcha was wrong ("The
-  verification code is incorrect"). A rejected *password* is never sent again.
+- **A simple text captcha** (a picture of a few characters, as on many college ERPs). Delta reads it **by itself,
+  with no approval**, on every saved login that has a password: the switch **"This site has a simple text captcha,
+  let Delta read it"** is **on by default** (Settings > Logins, on the add form and on the login's card; or
+  `delta logins captcha NAME --on / --off`). Turn it off for a login and Delta sends you the picture every time
+  instead. It does what `delta captcha allow <host>` does, for that login's exact origin only.
+  How Delta reads it, in order:
+  1. **Windows OCR on this PC.** The picture is cleaned up five ways (grayscale and contrast, Otsu threshold,
+     median denoise, thin lines and dots removed, darkest ink only), enlarged, and read in **one** OCR call. The
+     captcha box itself says what fits (its `maxlength`, `minlength`, `pattern` such as `[0-9]{5}`, `inputmode`):
+     other characters are dropped, the usual mix-ups (0/O, 1/l/I, 5/S, 2/Z) are fixed when the box takes only digits
+     or only letters, and the passes vote per character. A sign-in where OCR reads it makes **zero AI calls**.
+  2. **One small picture to your AI**, only when OCR read nothing usable (or this PC has no Windows OCR), only when a
+     configured model takes pictures and you let pictures go to the AI (`attachments.vision` is not `off`): a tight
+     crop of just the captcha (at most 256 x 72 pixels, low detail), one call per try. Counted in the audit
+     (`via: vision`).
+  3. At most **3 tries** per site in 15 minutes, asking the site for a new picture when one cannot be read and filling
+     the form again when the site says only the captcha was wrong ("The verification code is incorrect"). The
+     sign-in is checked after every submit. A rejected *password* is never sent again.
   When the switch is off, or the 3 tries are used up, Delta keeps the filled form open and **sends you the captcha
-  picture** in the chat you asked from (the dashboard shows it with the answer; Telegram gets it as a photo). Reply
-  with just the characters and Delta types them into that same form (after checking the tab and the exact site
-  again), submits once and checks the result. A wrong reply brings the new picture (3 replies at most); "cancel"
-  stops; it expires after 10 minutes. Your reply is never written to a log or the audit.
+  picture** in the chat you asked from (the dashboard shows it with the answer, and again if you reload the page;
+  Telegram gets it as a photo). Reply with just the characters and Delta types them into that same form (after
+  checking the tab and the exact site again), submits once and checks the result. A wrong reply brings the new
+  picture (3 replies at most); "cancel" stops; it expires after 10 minutes. Your reply is never written to a log or
+  the audit. When you asked from your phone, Delta never tells you to "complete it in the open browser": if no
+  picture could be taken at all, it says so and submits nothing.
   A captcha box is never taken for a one-time-code box, even when it says "Enter verification Code".
+  Logins saved before this change: a one-time migration turns the switch on for each login with a password, unless
+  you had turned it off in Settings > Logins (Delta reads that from its audit log). A switch turned off with
+  `delta logins captcha NAME --off` before this change was not recorded, so check those logins once.
 - **Wrong password.** Delta stops at once and says so. It never retries a rejected password.
 
 ## Which browser: Delta's private browser or your own
@@ -132,10 +148,13 @@ saving without DPAPI. Your own browser is your real browser, so Delta adds these
 - **Checked after filling.** If the box does not hold exactly what Delta filled (a password manager extension or
   the page changed or cleared it), Delta says so plainly, does not submit and does not try again.
 - **One normal submit.** Delta presses Enter in the password box once, as you would. A simple text captcha follows
-  the same rule as in the private browser: read on this PC when the login's captcha switch is on, else the picture
-  is sent to you and your reply is typed into the same tab (the tab binding and origin checks run again first).
-  Delta takes the picture from the screen, only that rectangle, with its window in front. If it cannot take one,
-  you type the characters and press Sign in yourself, as before. A "code" box shown on the same form as the password
+  the same rule as in the private browser: read by Delta when the login's captcha switch is on (the default), else
+  the picture is sent to you and your reply is typed into the same tab (the tab binding and origin checks run again
+  first). Delta takes the picture from the screen, only that rectangle, with its window in front, per-monitor DPI
+  aware (display scaling and a second monitor), including a captcha drawn on a `<canvas>` whose id says captcha. With
+  no picture element at all, you get a band of the page around the captcha box with every password box painted over
+  (that band is never read by OCR or sent to the AI). Only if not even that can be taken, and only while you are at
+  the PC, do you type the characters and press Sign in yourself. A "code" box shown on the same form as the password
   box is treated as the captcha, never submitted empty.
 - **Pictures stay masked.** Your browser already shows dots in a password box. After Delta fills one, it also paints
   that area over in every screenshot Delta takes (one window or the whole screen), in case the page or a "show

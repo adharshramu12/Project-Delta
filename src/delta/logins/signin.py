@@ -10,11 +10,12 @@ The model never sees or handles the password: it calls sign_in(site) and this mo
 3. Typing: the user name and the password go straight from the sealed store into the page (Playwright fill, over
    the local remote-control connection). The password box is then masked with CSS so a picture of the page sent to
    a model never shows it, even if the site has a "show password" button.
-4. A simple image captcha on the form: read on this PC with Windows OCR only where the user allowed it (the login's
-   "let Delta read it" switch, or `delta captcha allow <host>`), at most CAPTCHA_SUBMITS submits when the site says
-   only the captcha was wrong. Otherwise, or after that, the result carries the captcha picture and the caller asks
-   the user to type the characters (LoginService parks the filled form until they answer, from the dashboard or
-   Telegram). reCAPTCHA, hCaptcha and Turnstile are never solved.
+4. A simple image captcha on the form: read automatically where the user allows it (the login's "let Delta read it"
+   switch, ON by default for a login with a password, or `delta captcha allow <host>`): Windows OCR first, one small
+   vision call only when OCR fails (delta.tools.captcha), at most CAPTCHA_SUBMITS submits when the site says only the
+   captcha was wrong, the sign-in checked after each. Otherwise, or after that, the result carries the captcha
+   picture and the caller asks the user to type the characters (LoginService parks the filled form until they
+   answer, from the dashboard or Telegram). reCAPTCHA, hCaptcha and Turnstile are never solved.
 5. After submitting: a one-time code or 2FA step is handed to the user (they finish it on the PC; Delta waits, with
    a time limit); a wrong password is reported and never retried (no lockouts); otherwise the result says where the
    page is now, checked: the sign-in form is gone.
@@ -40,7 +41,8 @@ OUTCOMES = ("signed_in", "already_signed_in", "wrong_password", "refused", "need
 # Fields, found inside one frame. Order matters: the most specific selector first.
 PASSWORD_SEL = "input[type=password]"
 # Never the captcha box: "LoginForm[captcha]" also matches input[name*=login i] (a common ERP form).
-USER_SEL = ", ".join(f"{part}:not([name*=captcha i]):not([id*=captcha i])" for part in (
+USER_SEL = ", ".join(f"{part}:not([name*=captcha i]):not([id*=captcha i]):not([name*=verifycode i])"
+                     for part in (
     "input[autocomplete=username]", "input[type=email]", "input[name*=user i]", "input[id*=user i]",
     "input[name*=login i]", "input[id*=login i]", "input[name*=email i]", "input[name*=roll i]",
     "input[name*=regd i]", "input[name*=reg_no i]", "input[name*=uid i]", "input[name*=userid i]",
@@ -48,7 +50,8 @@ USER_SEL = ", ".join(f"{part}:not([name*=captcha i]):not([id*=captcha i])" for p
     "input[aria-label*=user i]", "input[aria-label*=email i]"))
 # A captcha box is never a one-time-code box, even when its placeholder says "Enter verification Code" (as on many
 # college ERPs): treating it as an OTP step sent the user a "one-time code" hand-off for a captcha.
-_NOT_CAPTCHA = ":not([name*=captcha i]):not([id*=captcha i]):not([placeholder*=captcha i])"
+_NOT_CAPTCHA = (":not([name*=captcha i]):not([id*=captcha i]):not([placeholder*=captcha i])"
+                ":not([name*=verifycode i]):not([id*=verifycode i])")
 OTP_SEL = ", ".join(f"{part}{_NOT_CAPTCHA}" for part in (
     "input[autocomplete=one-time-code]", "input[name*=otp i]", "input[id*=otp i]", "input[name*=totp i]",
     "input[name*=verification i]", "input[name*=passcode i]", "input[placeholder*=otp i]",
@@ -158,14 +161,13 @@ async def _challenge(page: Any) -> str | None:
 
 
 async def _simple_captcha(page: Any) -> bool:
-    from delta.tools.captcha import AUTO_FIELD, AUTO_IMAGE
+    """A visible captcha box on the form. Its picture is found by the solver (by name, or the nearest img / canvas),
+    so a captcha drawn on a bare <canvas> still counts and the form is never submitted with the box empty."""
+    from delta.tools.captcha import AUTO_FIELD
 
     for frame in _frames(page):
         if await _visible(frame, AUTO_FIELD) is not None:
-            loc = frame.locator(AUTO_IMAGE)
-            with contextlib.suppress(Exception):
-                if await loc.count():
-                    return True
+            return True
     return False
 
 
@@ -364,8 +366,9 @@ class SignInEngine:
             from delta.tools.captcha import PlaywrightCaptchaPage
 
             image = None
+            cpage = PlaywrightCaptchaPage(page)
             with contextlib.suppress(Exception):
-                image = await PlaywrightCaptchaPage(page).screenshot("")
+                image = await cpage.screenshot("") or await cpage.region_shot()
             return SignInResult("needs_user", f"CAPTCHA: {saved.host} said the characters were wrong; here is the "
                                               "new picture.", page.url, captcha_image=image)
         return result

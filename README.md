@@ -23,9 +23,10 @@ If something failed, it tells you plainly instead of pretending.
   `/chats` lists them, `/open` continues one and `/find` searches them. You only ever see your own Telegram chats.
 - **Saved logins with captcha handling.** Save a login for a site once (Settings > Logins and watchers, or
   `delta logins add`) and Delta signs in itself. The login is sealed with Windows DPAPI, bound to that exact site,
-  and never shown to the AI or written to a log. For a simple text captcha on your own account you can switch on
-  "let Delta read it" per login (off by default); otherwise Delta sends the captcha picture to your chat and types
-  your reply. More: [docs/LOGINS.md](docs/LOGINS.md).
+  and never shown to the AI or written to a log. A simple text captcha on your own account is read by Delta itself,
+  with no approval ("let Delta read it" is on by default for every login with a password; you can turn it off per
+  login); if it cannot read it in 3 tries, Delta sends the captcha picture to your chat and types your reply. More:
+  [docs/LOGINS.md](docs/LOGINS.md).
 - **Watchers.** "Watch my portal for exams, timetable and notices." Delta signs in on a schedule (every 6 hours by
   default, never more than once an hour), reads the pages with a saved recipe and no AI, and tells you only what is
   new. More: [docs/WATCHERS.md](docs/WATCHERS.md).

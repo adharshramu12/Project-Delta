@@ -8,7 +8,11 @@ portal in the ways that matter to saved logins and watchers, with switches for t
              erp_captcha (built like many real college ERPs: the page stays hidden until a late stylesheet loads,
              floating labels ("Enter Username"), LoginForm[...] field names, a captcha box whose placeholder says
              "Enter verification Code", a hidden "Enter MFA Code" box, and "The verification code is incorrect."
-             when only the captcha was wrong)
+             when only the captcha was wrong) |
+             erp_noisy (erp_captcha with a NOISY captcha: a new random 5-character answer, letters and digits, drawn
+             with Pillow under lines and dots each time the picture loads; the box has maxlength=5) |
+             erp_canvas (the same, digits only, drawn on a bare <canvas id='cv1'> with nothing saying "captcha", into a
+             Yii-style LoginForm[verifyCode] box with pattern [0-9]{5} and inputmode numeric)
   layout     v1 | v2 (v2 changes the exams page, so an old recipe no longer reads it)
   down       every page answers 503
   expire()   signs every session out (the next page shows "Your session has expired")
@@ -19,12 +23,14 @@ Pages: /login (form posts to /login), /otp, /late.css (erp_captcha: served after
 on 127.0.0.1), /evil/login (the same form, for lookalike tests served under another host name).
 
 Credentials: user "student01", password from the constructor (default "Fixture-Pass-01"), OTP "424242",
-captcha answer "K7Q2".
+captcha answer "K7Q2" (erp_noisy / erp_canvas: PortalState.captcha_answer, the picture served last).
 """
 
 from __future__ import annotations
 
 import html
+import io
+import random
 import secrets
 import threading
 from functools import partial
@@ -64,6 +70,8 @@ class PortalState:
         self.failed = 0
         self.captcha_views = 0  # erp_captcha: how many captcha pictures were loaded (refreshes)
         self.captcha_wrong = 0  # posts rejected only for the captcha
+        self.captcha_answer = CAPTCHA  # erp_noisy / erp_canvas: the answer of the picture served last
+        self.rng = random.Random(7)  # noisy captchas: reproducible, never a real secret
         self.posts: list[dict[str, str]] = []  # what was posted to /login (tests check no extra fields leak)
         self.exams = [("CS301 Database Systems", "2026-11-20", "10:00", "Hall B"),
                       ("CS305 Operating Systems", "2026-11-24", "14:00", "Hall A")]
@@ -135,8 +143,28 @@ class _Handler(BaseHTTPRequestHandler):
             "style='visibility:hidden'></div>"
             "<button type='submit' name='login-button'>Login</button></form></div></body></html>").encode()
 
+    def _noisy_form(self, error: str = "") -> bytes:
+        """erp_noisy / erp_canvas: the ERP form with a noisy captcha (see the module docstring)."""
+        page_ = self._erp_form(error).decode()
+        if self.state.mode == "erp_noisy":
+            page_ = page_.replace("name='LoginForm[captcha]' ", "name='LoginForm[captcha]' maxlength='5' ")
+            return page_.encode()
+        canvas = ("<canvas id='cv1' width='150' height='50' title='' "
+                  "onclick=\"drawCv(Date.now())\"></canvas><script>function drawCv(v){const c=document.getElementById("
+                  "'cv1'),i=new Image();i.onload=()=>c.getContext('2d').drawImage(i,0,0);"
+                  "i.src='/index.php?r=site%2Fcaptcha&v='+v}drawCv(1)</script>")
+        start = page_.index("<img id='loginFormCaptcha-image'")
+        end = page_.index(">", start) + 1
+        page_ = page_[:start] + canvas + page_[end:]
+        page_ = page_.replace("id='loginFormCaptcha' name='LoginForm[captcha]' ",
+                              "id='loginform-verifycode' name='LoginForm[verifyCode]' pattern='[0-9]{5}' "
+                              "inputmode='numeric' ")
+        return page_.encode()
+
     def _login_form(self, error: str = "", expired: bool = False) -> bytes:
         s = self.state
+        if s.mode in ("erp_noisy", "erp_canvas"):
+            return self._noisy_form(error)
         if s.mode == "erp_captcha":
             return self._erp_form(error or ("Your session has expired. Please log in again." if expired else ""))
         extra = ""
@@ -192,7 +220,13 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/index.php" and "captcha" in self.path:
             with s.lock:
                 s.captcha_views += 1
-            self._send(200, captcha_png(), "image/png")
+                if s.mode in ("erp_noisy", "erp_canvas"):
+                    alphabet = "0123456789" if s.mode == "erp_canvas" else "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+                    s.captcha_answer = "".join(s.rng.choice(alphabet) for _ in range(5))
+                    pic = noisy_captcha_png(s.captcha_answer, s.rng.randrange(1 << 30))
+                else:
+                    pic = captcha_png()
+            self._send(200, pic, "image/png")
             return
         if path == "/captcha.png":
             self._send(200, captcha_png(), "image/png")
@@ -254,14 +288,17 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/login":
             with s.lock:
                 s.posts.append({k: ("<set>" if k == "password" else v) for k, v in form.items()})
-            if s.mode == "erp_captcha":  # LoginForm[...] names, as real ERPs post them
+            erp = s.mode in ("erp_captcha", "erp_noisy", "erp_canvas")
+            if erp:  # LoginForm[...] names, as real ERPs post them
                 form = {"username": form.get("LoginForm[username]", ""),
-                        "password": form.get("LoginForm[password]", ""), "captcha": form.get("LoginForm[captcha]", "")}
+                        "password": form.get("LoginForm[password]", ""),
+                        "captcha": form.get("LoginForm[captcha]", form.get("LoginForm[verifyCode]", ""))}
                 s.posts[-1] = {k: ("<set>" if k == "password" else v) for k, v in form.items()}
-            if s.mode in ("captcha", "erp_captcha") and form.get("captcha", "").strip().upper() != CAPTCHA:
+            want = s.captcha_answer if s.mode in ("erp_noisy", "erp_canvas") else CAPTCHA
+            if (s.mode == "captcha" or erp) and form.get("captcha", "").strip().upper() != want:
                 with s.lock:
                     s.captcha_wrong += 1
-                self._send(200, self._login_form("The verification code is incorrect." if s.mode == "erp_captcha"
+                self._send(200, self._login_form("The verification code is incorrect." if erp
                                                  else "Invalid captcha. Please enter the characters again."))
                 return
             if form.get("username") != USER or form.get("password") != s.password:
@@ -295,10 +332,37 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(404, page("Not found", "<h1>Not found</h1>"))
 
 
+def noisy_captcha_png(text: str, seed: int = 0, size: tuple[int, int] = (150, 50)) -> bytes:
+    """A captcha like many college ERPs draw: `text` in dark, slightly shifted letters on a pale background, with
+    crossing lines and dots over it. Made with Pillow (already a Delta dependency); deterministic for a seed."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    rng = random.Random(seed)
+    w, h = size
+    img = Image.new("RGB", size, (235 + rng.randrange(20), 235 + rng.randrange(20), 225 + rng.randrange(30)))
+    draw = ImageDraw.Draw(img)
+    try:
+        font: Any = ImageFont.load_default(size=30)
+    except TypeError:  # Pillow without FreeType sizes: the small bitmap font
+        font = ImageFont.load_default()
+    x = 10
+    for ch in text:
+        y = 6 + rng.randrange(-3, 5)
+        draw.text((x, y), ch, fill=(rng.randrange(10, 70), rng.randrange(10, 70), rng.randrange(40, 110)), font=font)
+        x += (w - 20) // max(1, len(text))
+    for _ in range(5):  # thin crossing lines
+        draw.line((rng.randrange(w), rng.randrange(h), rng.randrange(w), rng.randrange(h)),
+                  fill=(rng.randrange(60, 160), rng.randrange(60, 160), rng.randrange(60, 160)), width=1)
+    for _ in range(140):  # dots
+        draw.point((rng.randrange(w), rng.randrange(h)),
+                   fill=(rng.randrange(40, 200), rng.randrange(40, 200), rng.randrange(40, 200)))
+    out = io.BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
+
+
 def captcha_png() -> bytes:
     """A small picture of the captcha text (made with Pillow, already a Delta dependency)."""
-    import io
-
     from PIL import Image, ImageDraw
 
     img = Image.new("RGB", (120, 40), "white")
@@ -334,12 +398,16 @@ class PortalSite:
 # --- the eval harness (delta.evals.runner, tasks with `portal:`) ---------------------------------------------------
 # A task with `portal:` gets this site, one saved login for it and, when asked, a watcher, all wired through Delta's
 # real LoginService, WatchService and their tools. Spec keys (all optional):
-#   mode: normal | otp | captcha | recaptcha | erp_captcha   the site's sign-in switch (PortalState.mode)
+#   mode: normal | otp | captcha | recaptcha | erp_captcha | erp_noisy | erp_canvas   the site's sign-in switch
 #   login: {name, origin, permission, simple_captcha}  origin: portal (default) | other (the same server on another
 #                                                 host name) | a URL; permission: always (default) | ask;
-#                                                 simple_captcha: the login's "let Delta read it" switch (off)
+#                                                 simple_captcha: the login's "let Delta read it" switch: true / false
+#                                                 is the user's choice; left out = the default (on with a password)
 #   ocr: [text, ...]                              what the stand-in for Windows OCR reads from each captcha picture
 #                                                 (in order; the last repeats). Without it no captcha is read.
+#                                                 "{captcha}" is the answer of the picture on screen (erp_noisy /
+#                                                 erp_canvas), "{captcha_ocr}" the same as OCR often misreads it
+#                                                 (0->O, 1->l, 5->S, 2->Z, spaces and a stray dash)
 #   watcher: {name, what, sections}               a watcher with this recipe (delta.watchers.recipe.Section fields)
 #   prime: true                                   one scheduled check before the task: the watcher's baseline
 #   then: [add_exam | expire]                     changes to the site after priming, before the task runs
@@ -347,6 +415,12 @@ class PortalSite:
 #                                                 browser (delta.evals.own_browser_standin): one-time consent,
 #                                                 tab binding and the own-browser checks; default private
 # Placeholders: {portal} (the site's URL), {portal_other} (the same site under another origin).
+
+def misread(answer: str) -> str:
+    """`answer` as OCR often reads a noisy captcha: 0->O, 1->l, 5->S, 2->Z, a space and a stray dash."""
+    out = answer.translate(str.maketrans("0152", "OlSZ"))
+    return f"{out[:2]} {out[2:]}-" if len(out) > 2 else out
+
 
 EVAL_PASSWORD = "Eval-Portal-Pass-5180"  # made up; checks assert it never leaves the sign-in form
 NEW_EXAM = ("CS399 Compiler Design", "2026-12-02", "10:00", "Hall C")
@@ -398,16 +472,22 @@ class PortalHarness:
         store = LoginStore(data / "logins", **sealers())
         name = str(raw.get("name", "College ERP"))
         login_url = str(raw.get("login_url", origin + "/login")).replace("{portal}", self.site.url)
+        choice = raw.get("simple_captcha")
         store.add(name, origin, USER, self.password, login_url=login_url,
-                  permission=str(raw.get("permission", "always")), simple_captcha=bool(raw.get("simple_captcha")))
+                  permission=str(raw.get("permission", "always")),
+                  simple_captcha=None if choice is None else bool(choice))
         solver = None
         if spec.get("ocr") is not None:
             from delta.tools.captcha import CaptchaSolver
 
             reads = [str(x) for x in spec.get("ocr") or []] or [""]
 
+            state = self.site.state
+
             async def ocr(jpeg: bytes) -> str:  # the stand-in for Windows OCR on this captcha picture
-                return reads.pop(0) if len(reads) > 1 else reads[0]
+                text = reads.pop(0) if len(reads) > 1 else reads[0]
+                return text.replace("{captcha}", state.captcha_answer).replace(
+                    "{captcha_ocr}", misread(state.captcha_answer))
 
             async def nobody(host: str, saved: str) -> bool:
                 return False
@@ -454,7 +534,8 @@ class PortalHarness:
 
     def snapshot(self) -> dict[str, int]:
         s = self.site.state
-        return {"logins": s.logins, "failed": s.failed, "posts": len(s.posts), "captcha_wrong": s.captcha_wrong}
+        return {"logins": s.logins, "failed": s.failed, "posts": len(s.posts), "captcha_wrong": s.captcha_wrong,
+                "captcha_views": s.captcha_views}
 
     def close(self) -> None:
         self.site.__exit__(None, None, None)

@@ -25,7 +25,7 @@
       const cap = h("input", {type: "checkbox", checked: !!l.simple_captcha, "aria-label": "Let Delta read the simple captcha on " + l.name});
       cap.onchange = async () => {
         const t = await send(`/api/logins/${l.id}/captcha`, "PUT", {on: cap.checked}).catch(err);
-        D.toast({title: l.name, body: t.ok ? (cap.checked ? "Delta reads this captcha (OCR, 3 tries)." : "Delta asks you for the captcha.") : det(t), kind: t.ok ? "ok" : "warn"});
+        D.toast({title: l.name, body: t.ok ? (cap.checked ? "Delta reads this captcha itself (OCR, 3 tries)." : "Delta sends you the captcha picture.") : det(t), kind: t.ok ? "ok" : "warn"});
         load(); };
       const note = (l.username || "no user name") + (l.has_password ? "" : ", NO password saved: save it again with Replace") +
         (l.last_used ? ", last used " + l.last_used + " (" + (l.last_outcome_words || l.last_outcome) + ")" : "");
@@ -58,7 +58,7 @@
       r = await send("/api/logins", "POST", {...body, replace: true}).catch(err);
     $("lg_pass").value = "";
     say("lg_msg", r.ok, r.ok ? r.message : det(r));
-    if (r.ok) { for (const id of ["lg_name", "lg_site", "lg_user", "lg_url"]) $(id).value = ""; $("lg_captcha").checked = false; load(); }
+    if (r.ok) { for (const id of ["lg_name", "lg_site", "lg_user", "lg_url"]) $(id).value = ""; $("lg_captcha").checked = true; load(); }
   };
   $("wt_add").onclick = async () => {
     const body = {login: $("wt_login").value, what: $("wt_what").value.split(",").map(s => s.trim()).filter(Boolean),

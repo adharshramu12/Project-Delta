@@ -190,15 +190,15 @@
     - portal_asked: {tool: sign_in_handoff, count: 0}
     - password_nowhere: true
 
-# The same ERP with the switch off (the default): nothing is read automatically. The form is filled, kept open, and
-# the captcha picture goes back to the user with the answer, who replies with the characters (tests/e2e covers the
+# The same ERP with the switch turned OFF by the user: nothing is read automatically. The form is filled, kept open,
+# and the captcha picture goes back to the user with the answer, who replies with the characters (tests/e2e covers the
 # reply). Nothing is submitted, no "complete it in the open browser", no AI call.
 - id: portal-erp-captcha-asks-user
-  description: captcha switch off; the user gets the captcha picture to read, nothing is submitted
+  description: captcha switch turned off by the user; the user gets the captcha picture to read, nothing is submitted
   needs: [browser]
   request: Sign in to my college ERP
   timeout_s: 180
-  portal: {mode: erp_captcha, login: {login_url: "{portal}/"}}
+  portal: {mode: erp_captcha, login: {simple_captcha: false, login_url: "{portal}/"}}
   script:
     plan: [{needs_tools: true, goal: sign in, tools: [sign_in], success_criteria: ["signed in"]}]
   check:
@@ -207,4 +207,58 @@
     - answer_not_contains: open browser
     - meter: {key: calls, equals: 0}
     - portal_state: {logins: 0, posts: 0}
+    - password_nowhere: true
+
+# Owner decision 2026-11-07: a saved login with a password lets Delta read a simple captcha by itself, no switch to
+# turn on and no approval. A NOISY captcha (lines and dots, a new random answer per picture, maxlength=5): the first
+# picture reads as nothing usable, Delta refreshes it, OCR (a stand-in) reads the new one with a stray dash,
+# the answer is fitted to the box and the sign-in is checked. Zero AI calls, one submit, never an approval.
+- id: portal-erp-noisy-captcha-default-on
+  description: default-on captcha switch; a noisy captcha is refreshed, read on this PC and signed in, 0 AI calls
+  needs: [browser]
+  request: Sign in to my college ERP
+  timeout_s: 180
+  portal: {mode: erp_noisy, login: {login_url: "{portal}/"}, ocr: ["", "{captcha} -"]}
+  script:
+    plan: [{needs_tools: true, goal: sign in, tools: [sign_in], success_criteria: ["signed in"]}]
+  check:
+    - status: done
+    - meter: {key: calls, equals: 0}
+    - portal_state: {logins: 1, failed: 0, posts: 1, captcha_wrong: 0, captcha_views: 2}
+    - portal_asked: {tool: sign_in_handoff, count: 0}
+    - password_nowhere: true
+
+# A digits-only captcha drawn on a bare <canvas> (nothing on the page says "captcha"; a Yii-style verifyCode box with
+# pattern [0-9]{5}): Delta finds the picture next to the box, and OCR's usual mix-ups (O for 0, l for 1, S for 5, Z for
+# 2) are fixed because the box only takes digits. Zero AI calls.
+- id: portal-erp-canvas-digits-captcha
+  description: canvas-drawn digits captcha; the box's pattern fixes OCR confusions; signed in with 0 AI calls
+  needs: [browser]
+  request: Sign in to my college ERP
+  timeout_s: 180
+  portal: {mode: erp_canvas, login: {login_url: "{portal}/"}, ocr: ["{captcha_ocr}"]}
+  script:
+    plan: [{needs_tools: true, goal: sign in, tools: [sign_in], success_criteria: ["signed in"]}]
+  check:
+    - status: done
+    - meter: {key: calls, equals: 0}
+    - portal_state: {logins: 1, failed: 0, posts: 1, captcha_wrong: 0}
+    - password_nowhere: true
+
+# When every automatic try fails (here OCR never reads anything usable and no model may see pictures), Delta stops
+# after 3 tries, keeps the filled form and sends the captcha picture to the chat. Nothing submitted, 0 AI calls.
+- id: portal-erp-captcha-fallback-after-three
+  description: three unreadable captchas, then the picture goes to the user; nothing submitted
+  needs: [browser]
+  request: Sign in to my college ERP
+  timeout_s: 180
+  portal: {mode: erp_noisy, login: {login_url: "{portal}/"}, ocr: [""]}
+  script:
+    plan: [{needs_tools: true, goal: sign in, tools: [sign_in], success_criteria: ["signed in"]}]
+  check:
+    - status: needs_user
+    - answer_contains: Reply with just the characters
+    - answer_not_contains: open browser
+    - meter: {key: calls, equals: 0}
+    - portal_state: {logins: 0, posts: 0, captcha_views: 3}
     - password_nowhere: true

@@ -205,8 +205,8 @@
     <div class="inline-form"><input id="lg_user" placeholder="User name" autocomplete="off" aria-label="User name"><input id="lg_pass" type="password" placeholder="Password" autocomplete="new-password" aria-label="Password"></div>
     <div class="inline-form"><input id="lg_url" placeholder="Sign-in page, if not the home page (optional)" aria-label="Sign-in page"><select id="lg_perm" aria-label="Permission"><option value="ask">Ask every time</option><option value="always">Always allow for this site</option></select></div>
     <label class="check"><input type="checkbox" id="lg_http"> The site only has plain http (not safe)</label>
-    <label class="check"><input type="checkbox" id="lg_captcha"> This site has a simple text captcha, let Delta read it</label>
-    <small class="muted" id="lg_captcha_note">Off by default. Read on this PC (Windows OCR), this exact site only, 3 tries, then Delta sends you the picture. Never for reCAPTCHA or "I'm not a robot" checks. Your own account only.</small>
+    <label class="check"><input type="checkbox" id="lg_captcha" checked> This site has a simple text captcha, let Delta read it</label>
+    <small class="muted" id="lg_captcha_note">On by default. Delta reads it itself (Windows OCR on this PC first), this exact site only, 3 tries, then it sends you the picture. Never reCAPTCHA or "I'm not a robot" checks. Your own account only.</small>
     <button class="btn" id="lg_add">Save login</button><div class="msg" id="lg_msg" role="status"></div></div>
     <div id="wt_list"></div>
     <div class="card"><b>Watch a site</b><small class="muted">Delta signs in every few hours and tells you only what is new.</small>

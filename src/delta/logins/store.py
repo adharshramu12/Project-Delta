@@ -27,6 +27,11 @@ OWN_BROWSERS = ("chrome", "edge")  # the user's own browsers Delta can fill a lo
 PERMISSIONS = ("ask", "always")  # "allow for this task" is chosen at the prompt and kept in memory only
 PERMISSION_WORDS = {"ask": "Ask every time", "always": "Always allow for this site"}
 MAX_LOGINS = 50
+CAPTCHA_CHOICES = ("on", "off")  # the user's own captcha choice for a login; anything else = never chosen (default)
+# Logins saved before the captcha default changed carry only "simple_captcha" (off by default then). Read once, they
+# become: on -> "on" (the user turned it on), off -> "off" only when the audit log shows the user turning it off
+# (Settings > Logins records login.captcha_setting), otherwise "" so the new default (on with a password) applies.
+CAPTCHA_SCHEMA = 2
 # What the dashboard and the CLI show for a login's last outcome (delta.logins.signin.OUTCOMES), in plain words.
 OUTCOME_WORDS = {"signed_in": "signed in", "already_signed_in": "already signed in",
                  "wrong_password": "the site said the password is wrong", "refused": "refused (not the saved site)",
@@ -72,10 +77,19 @@ class Login:
     # The one-time consent to fill this login in the user's OWN browser (not Delta's private one): browser key
     # (chrome | edge) -> when the user gave it. Asked once per site and browser, even with "always" (service.py).
     own_browser: dict[str, str] = field(default_factory=dict)
-    # "This site has a simple text captcha, let Delta read it" (Settings > Logins). Off by default; set only by the
-    # user. When on, a simple image captcha on THIS exact origin is read with Windows OCR, like a host the user
-    # allowed with `delta captcha allow`. reCAPTCHA, hCaptcha and Turnstile are still handed over, never solved.
-    simple_captcha: bool = False
+    # "This site has a simple text captcha, let Delta read it" (Settings > Logins). The user's own choice for this
+    # login: "on", "off", or "" (never chosen: the default applies, ON when a password is saved, owner decision
+    # 2026-11-07). When on, a simple image captcha on THIS exact origin is read automatically (Windows OCR first,
+    # delta.tools.captcha), like a host allowed with `delta captcha allow`. reCAPTCHA, hCaptcha, Turnstile and other
+    # managed challenges are still handed over, never solved.
+    captcha_choice: str = ""
+
+    @property
+    def simple_captcha(self) -> bool:
+        """Delta reads this login's simple captcha: the user said so, or they never chose and a password is saved."""
+        if self.captcha_choice in CAPTCHA_CHOICES:
+            return self.captcha_choice == "on"
+        return bool(self.password)
 
     @property
     def site(self) -> Origin:
@@ -89,7 +103,8 @@ class Login:
                                "last_outcome": self.last_outcome,
                                "last_outcome_words": OUTCOME_WORDS.get(self.last_outcome, self.last_outcome),
                                "insecure": not self.site.secure, "own_browser": sorted(self.own_browser),
-                               "simple_captcha": self.simple_captcha}
+                               "simple_captcha": self.simple_captcha,
+                               "captcha_default": self.captcha_choice not in CAPTCHA_CHOICES}
         if with_username:
             out["username"] = self.username
         else:
@@ -105,6 +120,8 @@ class LoginStore:
                  unseal: Callable[[str], str] | None = None) -> None:
         self.box = SecretBox(folder, seal, unseal)
         self.folder = folder
+        self.audit_path: Path | None = None  # where the user's past captcha choices are (default: next to logins/)
+        self._turned_off: set[str] | None = None
 
     def available(self) -> bool:
         return self.box.available()
@@ -118,12 +135,41 @@ class LoginStore:
         raw_own = data.get("own_browser")
         own = ({str(k): str(v) for k, v in raw_own.items() if k in OWN_BROWSERS} if isinstance(raw_own, dict)
                else {})
-        return Login(id=lid, name=str(data.get("name") or lid), origin=str(data["origin"]),
-                     username=str(data.get("username") or ""), password=str(data.get("password") or ""),
-                     login_url=str(data.get("login_url") or ""), permission=perm if perm in PERMISSIONS else "ask",
-                     created=str(data.get("created") or ""), last_used=str(data.get("last_used") or ""),
-                     last_outcome=str(data.get("last_outcome") or ""), own_browser=own,
-                     simple_captcha=data.get("simple_captcha") is True)
+        login = Login(id=lid, name=str(data.get("name") or lid), origin=str(data["origin"]),
+                      username=str(data.get("username") or ""), password=str(data.get("password") or ""),
+                      login_url=str(data.get("login_url") or ""), permission=perm if perm in PERMISSIONS else "ask",
+                      created=str(data.get("created") or ""), last_used=str(data.get("last_used") or ""),
+                      last_outcome=str(data.get("last_outcome") or ""), own_browser=own)
+        if int(data.get("captcha_schema") or 0) >= CAPTCHA_SCHEMA:
+            choice = str(data.get("captcha_choice") or "")
+            login.captcha_choice = choice if choice in CAPTCHA_CHOICES else ""
+        else:  # saved before the default changed: migrated once, then written back with the new schema
+            login.captcha_choice = ("on" if data.get("simple_captcha") is True else
+                                    "off" if lid in self._explicit_off() else "")
+            with contextlib.suppress(Exception):
+                self._save(login)
+        return login
+
+    def _explicit_off(self) -> set[str]:
+        """Logins the user turned the captcha switch off for in Settings > Logins (the audit log's
+        login.captcha_setting with on=false as the last word for that login). Read once, only for a migration."""
+        if self._turned_off is not None:
+            return self._turned_off
+        import json
+
+        last: dict[str, bool] = {}
+        path = self.audit_path or self.folder.parent / "audit.jsonl"
+        with contextlib.suppress(Exception), path.open(encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if "login.captcha_setting" not in line:
+                    continue
+                with contextlib.suppress(ValueError):
+                    rec = json.loads(line)
+                    data = rec.get("data") or {}
+                    if rec.get("event") == "login.captcha_setting" and data.get("login"):
+                        last[str(data["login"])] = bool(data.get("on"))
+        self._turned_off = {lid for lid, on in last.items() if not on}
+        return self._turned_off
 
     def list(self) -> list[Login]:
         if not self.folder.exists():
@@ -202,7 +248,8 @@ class LoginStore:
         data = {"name": login.name, "origin": login.origin, "username": login.username, "password": login.password,
                 "login_url": login.login_url, "permission": login.permission, "created": login.created,
                 "last_used": login.last_used, "last_outcome": login.last_outcome, "own_browser": login.own_browser,
-                "simple_captcha": login.simple_captcha}
+                "simple_captcha": login.simple_captcha, "captcha_choice": login.captcha_choice,
+                "captcha_schema": CAPTCHA_SCHEMA}
         try:
             self.box.save(login.id, data)
         except SecretsUnavailableError as e:
@@ -213,7 +260,8 @@ class LoginStore:
             simple_captcha: bool | None = None) -> Login:
         """Save a login bound to the exact origin of `url`. LoginError with a plain reason when it cannot be.
         replace=True updates the login with the same name in place (never a second copy). simple_captcha None keeps
-        a replaced login's captcha setting (a new login starts with it off)."""
+        a replaced login's own captcha choice (same site only) or, for a new login, leaves it to the default: ON when
+        a password is saved. True / False is the user's explicit choice."""
         if not self.box.available():
             raise VaultMissingError(NOT_SAVED)
         name = (name or "").strip()
@@ -241,11 +289,11 @@ class LoginStore:
         if existing is None and len(self.list()) >= MAX_LOGINS:
             raise LoginError(f"at most {MAX_LOGINS} logins can be saved")
         keep = existing is not None and existing.origin == str(site)
+        choice = ("on" if simple_captcha else "off") if simple_captcha is not None else (
+            existing.captcha_choice if keep and existing else "")
         login = Login(id=lid, name=name[:60], origin=str(site), username=username.strip(), password=password,
                       login_url=login_url.strip(), permission=permission,
-                      created=existing.created if existing else _now(),
-                      simple_captcha=(existing.simple_captcha if keep and existing else False)
-                      if simple_captcha is None else bool(simple_captcha))
+                      created=existing.created if existing else _now(), captcha_choice=choice)
         self._save(login)
         return login
 
@@ -270,11 +318,11 @@ class LoginStore:
 
     def set_simple_captcha(self, ref: str, on: bool) -> Login:
         """The user's switch "This site has a simple text captcha, let Delta read it" for one login (its exact
-        origin only). Only the dashboard and the CLI call this; no tool can."""
+        origin only), kept as their explicit choice. Only the dashboard and the CLI call this; no tool can."""
         login = self.get(ref)
         if login is None:
             raise LoginError(f"no saved login called '{ref}'")
-        login.simple_captcha = bool(on)
+        login.captcha_choice = "on" if on else "off"
         self._save(login)
         return login
 

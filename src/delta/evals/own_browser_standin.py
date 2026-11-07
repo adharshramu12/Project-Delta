@@ -122,6 +122,13 @@ class PlaywrightOwnDriver:
             return await PlaywrightCaptchaPage(await self._page()).screenshot("")
         return None
 
+    async def captcha_region_image(self, f: FieldRef) -> bytes | None:
+        from delta.tools.captcha import PlaywrightCaptchaPage
+
+        with contextlib.suppress(Exception):
+            return await PlaywrightCaptchaPage(await self._page()).region_shot()
+        return None
+
     async def refresh_captcha(self, f: FieldRef) -> bool:
         from delta.tools.captcha import PlaywrightCaptchaPage
 
