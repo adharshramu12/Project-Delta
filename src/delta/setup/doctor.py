@@ -138,6 +138,27 @@ def _fix_command(root: Path) -> str:
             "-Action Install")
 
 
+def _captcha_model() -> str:
+    """'ok' when the captcha model loads and reads a generated test picture, 'missing' when it is not installed, else
+    why it could not run (Delta then reads captchas with Windows OCR)."""
+    from delta.tools.captcha_model import CaptchaModel, installed
+
+    if not installed():
+        return "missing"
+    try:
+        from delta.evals.captcha_bench import sample
+        from delta.tools.captcha_ocr import hints_from
+
+        model = CaptchaModel()
+        test = sample("coloured", 0)
+        got = model.read_sync(test.png, hints_from(test.attrs))
+        if any(got):
+            return "ok"
+        return model.status.why or "it read nothing on a test picture"
+    except Exception as e:
+        return f"it could not run here ({type(e).__name__})"
+
+
 def run_checks(settings: Any, *, root: Path = ROOT, which: Callable[[str], str | None] = shutil.which,
                python: str = sys.executable, version: tuple[int, int] = sys.version_info[:2],
                machine: str = "", port_in_use: Callable[[str, int], bool] = _port_in_use,
@@ -146,6 +167,7 @@ def run_checks(settings: Any, *, root: Path = ROOT, which: Callable[[str], str |
                secret: Callable[[str], str | None] = _secret, sac: Callable[[], int | None] = _smart_app_control,
                signed: Callable[[str], bool | None] = _signed,
                cli_found: Callable[[str, Any], str | None] = _cli_found,
+               captcha: Callable[[], str] = _captcha_model,
                free_gb: Callable[[Path], float] | None = None) -> list[Check]:
     out: list[Check] = []
     machine = machine or platform.machine()
@@ -240,6 +262,16 @@ def run_checks(settings: Any, *, root: Path = ROOT, which: Callable[[str], str |
         out.append(Check("Screen text (OCR)", "warn", "Windows OCR did not answer",
                          "Add an OCR language: Settings > Time & language > Language & region > your language > "
                          "Language options > Optical character recognition. Delta still works without it."))
+    model = captcha()
+    if model == "ok":
+        out.append(Check("Captcha reader", "ok", "the offline captcha model works (simple captchas on saved logins)"))
+    elif model == "missing":
+        out.append(Check("Captcha reader", "info", "the offline captcha model is not installed; Delta reads "
+                         "simple captchas with Windows OCR instead (fewer are read by themselves)",
+                         f"To add it, {reinstall}."))
+    else:
+        out.append(Check("Captcha reader", "warn", f"the offline captcha model is installed but {model}; Delta reads "
+                         "simple captchas with Windows OCR instead", f"To repair it, {reinstall}."))
 
     # Phone (Telegram) --------------------------------------------------------------------------------------
     tg = settings.channels.get("telegram")

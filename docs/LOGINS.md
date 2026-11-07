@@ -128,6 +128,30 @@ while remote control is locked nothing remote signs in. Change the setting in Se
   this fix, that version had already rewritten those files, so check the switch on each login once.
 - **Wrong password.** Delta stops at once and says so. It never retries a rejected password.
 
+### How well Delta reads simple captchas
+
+Measured on 120 generated captchas in three styles like common Indian college and government ERP portals draw
+(`python -m delta.evals.captcha_bench`, run by CI's `full` job on Windows; pictures and answers are made up):
+`lines_dots` (5 capitals and digits under thin lines and dots), `distorted` (4 to 6 letters of both cases and
+digits, each rotated up to 25 degrees, touching, bent by a wave, with an arc through them) and `coloured` (5 or 6
+digits in strong colours on a speckled background). Exact match, case-blind in brackets, first try with no vision
+call; "within 3 tries" reads a new picture after each miss, as Delta does on a site. CI run of 2026-11-07, Windows
+Server 2025:
+
+| engine | lines_dots | distorted | coloured | all |
+|---|---|---|---|---|
+| Windows OCR alone (before this change) | 45% (48%) | 0% (0%) | 70% (70%) | 38% (39%) |
+| captcha model alone | 95% (98%) | 52% (82%) | 98% (98%) | 82% (92%) |
+| model + Windows OCR (Delta's order), first try | 98% (100%) | 52% (82%) | 100% (100%) | 83% (94%) |
+| the same, within 3 tries | 100% | 88% | 100% | 96% |
+
+Where it still falls short: mixed-case captchas, where the model often cannot tell a small letter from its capital
+(82% of the distorted ones are read with the right characters, 52% with the right case too). Those are the readings
+Delta is unsure of: on this set it would have made 46 small vision calls in 120 captchas, and 16 of its 20 wrong first
+answers were among them, so with a configured model that takes pictures most of them get a second opinion instead of
+a wrong submit. Captchas whose box says capitals only, small letters only or digits only, and sites that check the
+captcha case-blind, read at the bracketed rate. `delta doctor` shows whether the captcha model works on your PC.
+
 ## Which browser: Delta's private browser or your own
 
 Logins work in both browser choices (Settings > Browser, `/browser` on Telegram, or "use my default browser"):
