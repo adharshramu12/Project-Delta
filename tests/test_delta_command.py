@@ -133,7 +133,10 @@ def test_docs_give_the_fallbacks_for_when_delta_is_not_recognized():
 def test_update_command_is_unchanged_for_the_shim():
     # `delta` through bin\delta.cmd is the same `python -m delta update`: the installer still runs in its own
     # window and waits for this command's own Delta processes (cmd.exe is not one of them and locks nothing).
-    src = (ROOT / "src" / "delta" / "__main__.py").read_text(encoding="utf-8")
+    # The command line itself is built in delta/updates/install.py since 0.3.0 (shared with the dashboard's Update now).
+    main = (ROOT / "src" / "delta" / "__main__.py").read_text(encoding="utf-8")
+    src = (ROOT / "src" / "delta" / "updates" / "install.py").read_text(encoding="utf-8")
+    assert "_own_processes(root)" in main and "run_installer(installer_command(" in main
     assert "CREATE_NEW_CONSOLE" in src and '"-WaitForPid"' in src
 
 

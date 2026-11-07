@@ -6,7 +6,60 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.3.0 - not tagged yet
+
+The first version under AGPL-3.0-or-later, and the first that tells you when a newer one is out. In short:
+
+- **First-run tour and update notifications** (this release's last pull request): a short, skippable tour of the
+  dashboard after setup, and a banner when a newer Delta is out, with Update now that installs exactly the checked
+  release and opens Delta again. Details below and in [docs/UPDATES.md](docs/UPDATES.md).
+- **Fresh-user fixes** (#46, #47): a CI journey that installs, uses, updates and uninstalls Delta as a new Windows
+  user would; start with Windows; clearer no-model hints; uninstall and update clean-ups.
+- **Captchas read by Delta itself** (#43, #45): an offline captcha model first, Windows OCR second, one small vision
+  call only when they disagree; on by default for saved logins, with a picture fallback that works away from the PC.
+- **Saved logins** (#40): sign-ins with no AI call, exact error messages, a per-login simple-captcha switch, and the
+  captcha answer from the chat.
+- **Windows install** (#42): the real one-line install tested on five Windows set-ups, Unicode-safe shortcuts, and
+  setup checks with fixes in `delta doctor`.
+- **Crash guard and fewer tokens** (#44): an unexpected error is logged and shown and Delta carries on; apps open
+  at once; smaller, cache-friendly prompts.
+- **Relicensed to AGPL-3.0-or-later** with a trademark policy and a new README (#41). Versions up to and including
+  0.2.0 were Apache-2.0.
+- **Writing, email and apps** (#39): a human writing style, email with approval for each email, MCP settings in Apps.
+- **Telegram** (#37): the full menu, grouped, old chats from the phone, long chats without guessing.
+- **In control and stop anytime** (#38): the orange "Delta is in control" ring and border, Esc twice to stop, faster
+  app opening, bounded self-heal.
+- **Dashboard** (#36): the window is always filled; Telegram chat ids are hidden.
+- Also since the 0.2.0 version number (merged before #36): fresh-laptop audit fixes (#28), the dashboard redesign
+  (#29), attachments in chat and Telegram (#30), the delta command and Update Delta in the Start menu (#31), site
+  logins, safer browser actions and portal watchers (#32), saved logins in your own browser (#34), the installer
+  under the Restricted policy (#35), and dependency updates (#26, #27).
+
 ### Added
+- **First-run tour.** After setup, a short tour (nine steps, about a minute) points at the real dashboard: what Delta
+  is, the chat box (try "open notepad"), Tasks (Stop, or Esc twice), Apps, Schedules, Documents and Memory, Settings >
+  Keys (a free Groq key), Settings > Logins (saved sign-ins and simple captchas), and Telegram and start with Windows.
+  It shows once per PC (saved in your settings file, not the browser), Esc skips it, the arrow keys move through it,
+  Tab stays inside it, screen readers read each step, and it follows light and dark mode, reduced motion, high
+  contrast and the window size; a step whose part of the page is hidden (a narrow window) is skipped. Take it again
+  from Settings > Updates and help, or type `/tour` in the chat box. No library and nothing fetched.
+- **Update notifications.** Delta asks GitHub for a newer version soon after it starts and every 12 hours (with
+  jitter): the latest GitHub release (drafts and pre-releases only on the beta channel), or, while there is no
+  release, the version in pyproject.toml on main. Only a plain GET with a `Delta/<version>` User-Agent is sent;
+  proxies are used; answers are cached with their ETag, and a rate limit or an offline PC backs off quietly. A newer
+  version shows a banner with its highlights (cleaned to plain text) and Update now, What's new, Later and Skip this
+  version, plus one Telegram message per version when Telegram is connected. Settings > Updates and help turns
+  checks off, picks the beta channel, turns off the Telegram message, and checks now. `delta doctor` shows this
+  version and the newest one.
+- **Update now** runs the safe `delta update` path, never by itself: it asks first, waits for a running task (or stops
+  it if you say so), then installs exactly the commit the release tag points to. Before anything changes, the
+  installer checks that the downloaded pyproject.toml and uv.lock are byte for byte the files Delta read from that
+  commit (SHA-256) and that the version matches; uv.lock then pins every package by its hash. Your data folder is
+  never touched. Delta closes, updates in a window that shows each step, opens again, and shows What's new once.
+  `delta update` in a terminal is pinned and checked the same way (and falls back to main, as before, when GitHub
+  cannot be asked).
 - **Start Delta when I sign in to Windows** (Settings > Setup and shutdown, off unless you turn it on; setup offers it
   when you connect Telegram). Without it Delta, and your Telegram bot, stayed off after a restart until you opened
   Delta again. It is one entry for your account only (`HKCU\...\Run`, named `DeltaAgent`, no administrator rights)

@@ -275,6 +275,13 @@ addons:
       #     token_secret: github_mcp_token   # delta secrets set github_mcp_token
       #     risk: write                      # tools ask before running unless marked read-only
 
+# Newer-version check (docs/UPDATES.md): on start and every 12 hours, a plain GET to GitHub with a Delta/<version>
+# User-Agent. Shows a banner; nothing is installed until you press Update now. Settings > Updates and help.
+updates:
+  check: true        # false: never ask GitHub
+  channel: stable    # beta: test releases (GitHub pre-releases) count too
+  telegram: true     # one Telegram message per new version, when Telegram is connected
+
 api:
   host: 127.0.0.1   # dashboard + desktop app; local only
   port: 7878

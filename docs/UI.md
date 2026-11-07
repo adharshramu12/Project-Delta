@@ -27,6 +27,8 @@ offline on a fresh Windows PC. This page says how it is put together so changes 
 | `chat.js` | Chats, messages, the step trail, the Task progress panel, approvals, questions, proof, documents in chat. |
 | `tasks.js`, `schedules.js`, `apps.js`, `documents.js`, `memory.js`, `settings.js` | One view each. |
 | `setup.js` | First-run setup. |
+| `updates.js` | The new-version banner, Update now, What's new, Settings > Updates and help ([UPDATES.md](UPDATES.md)). |
+| `tour.js` | The first-run tour: spotlight steps over the real page, shown once after setup (saved on the PC by `/api/tour`), Esc to skip, arrows to move, Tab kept in the card, replay from Settings > Updates and help or `/tour` in the chat box. A step whose element is hidden is skipped. |
 | `main.js` | Start-up, top bar status, sidebar, keyboard shortcuts, shutdown. Loaded last. |
 
 `/ui/<name>` serves the `.js` and `.css` files in that folder by exact name (a list made at start-up).

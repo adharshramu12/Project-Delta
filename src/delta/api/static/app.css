@@ -521,3 +521,24 @@ dialog::backdrop{background:var(--overlay)}
 .me-col{display:grid;justify-items:end;max-width:80%}
 .me-col .bubble{max-width:100%}
 .me-col .bubble:empty{display:none}
+/* ---- update banner (updates.js) and the first-run tour (tour.js) */
+.banner.upd{flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s3);background:var(--accent-soft);color:var(--text)}
+.upd-main{display:flex;gap:var(--s2);align-items:flex-start;min-width:0}
+.upd-main .ic{color:var(--accent-text);margin-top:2px}
+.upd-list{margin:var(--s1) 0 0;padding-left:var(--s5);color:var(--text-2)}
+.notes{white-space:pre-wrap;overflow-wrap:anywhere}
+.tour{position:fixed;inset:0;z-index:60}
+.tour-block{position:absolute;inset:0}
+.tour.centered .tour-block{background:var(--overlay)}
+.tour-spot{position:fixed;border-radius:var(--r-md);box-shadow:0 0 0 200vmax var(--overlay);outline:2px solid var(--accent);outline-offset:2px;pointer-events:none;transition:left var(--t) var(--ease),top var(--t) var(--ease),width var(--t) var(--ease),height var(--t) var(--ease)}
+.tour-card{position:fixed;width:min(340px, calc(100vw - 24px));display:flex;flex-direction:column;gap:var(--s2);padding:var(--s4);background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-3);animation:rise var(--t) var(--ease)}
+.tour-card.mid{left:50%;top:50%;transform:translate(-50%, -50%)}
+.tour-card h2{font-size:var(--fs-lg);outline:none}
+.tour-card p{color:var(--text-2)}
+.tour-foot{display:flex;align-items:center;gap:var(--s2);margin-top:var(--s1)}
+.tour-foot .grow{flex:1}
+.tour-keys{font-size:var(--fs-xs)}
+@media (forced-colors: active){
+  .tour-card{border:2px solid CanvasText}
+  .tour-spot{outline:3px solid Highlight}
+}

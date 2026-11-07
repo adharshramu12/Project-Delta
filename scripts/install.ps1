@@ -41,6 +41,8 @@ param(
     [switch]$FromGitHub,     # always download the newest version (delta update)
     [switch]$StopRunning,    # close a running Delta without asking (delta update --stop)
     [string]$WaitForPid = "", # comma-separated process ids to wait for first (the `delta update` that started us)
+    [string]$ExpectSha256 = "", # pyproject.toml=<sha256>;uv.lock=<sha256>: `delta update` read them from this commit
+    [string]$ExpectVersion = "", # the version that commit's pyproject.toml must have (with -ExpectSha256)
     [switch]$DefineOnly      # only define the functions below and stop (the tests use this)
 )
 $ErrorActionPreference = "Stop"   # this script block's own scope: the user's window keeps its own setting
@@ -75,6 +77,40 @@ function Get-SourceZipUrl([string]$repo, [string]$ref) {
     $ref = $ref.Trim()
     if ($ref -match "^[0-9a-fA-F]{40}$" -or $ref.StartsWith("refs/")) { return "https://github.com/$repo/archive/$ref.zip" }
     return "https://github.com/$repo/archive/refs/heads/$ref.zip"
+}
+
+function Get-Sha256Hex([string]$path) {
+    # .NET itself: Get-FileHash is a script-module function in Windows PowerShell 5.1, and the Restricted policy of a
+    # new PC refuses to load script modules.
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($path)
+        try { $bytes = $sha.ComputeHash($stream) } finally { $stream.Dispose() }
+    } finally { $sha.Dispose() }
+    return (($bytes | ForEach-Object { $_.ToString("x2") }) -join "")
+}
+
+function Test-DeltaFiles([string]$folder, [string]$expect, [string]$version) {
+    # `delta update` read pyproject.toml and uv.lock from the exact commit it pinned, over HTTPS from the official
+    # repository; the downloaded copy must be byte for byte the same (uv.lock then pins every package by its hash).
+    # Returns "" when everything matches, else what differs.
+    $pairs = @($expect -split ";" | Where-Object { $_ })
+    if ($pairs.Count -ne 2) { return "the expected file hashes are not valid" }
+    $problems = @()
+    foreach ($pair in $pairs) {
+        $name, $hash = $pair -split "=", 2
+        if (($name -notin @("pyproject.toml", "uv.lock")) -or ("$hash" -notmatch "^[0-9a-fA-F]{64}$")) {
+            return "the expected file hashes are not valid"
+        }
+        $file = Join-Path $folder $name
+        if (-not (Test-Path -LiteralPath $file)) { $problems += "$name is missing"; continue }
+        if ((Get-Sha256Hex $file) -ne $hash.ToLower()) { $problems += "$name is not the file Delta checked" }
+    }
+    if ($version) {
+        $m = [regex]::Match([IO.File]::ReadAllText((Join-Path $folder "pyproject.toml")), '(?m)^version\s*=\s*"([^"]+)"')
+        if (-not $m.Success -or $m.Groups[1].Value -ne $version) { $problems += "its version is not $version" }
+    }
+    return ($problems -join "; ")
 }
 
 function Test-SignatureValid([string]$path) {
@@ -351,6 +387,13 @@ try {
         $Source = if ($inner) { $inner.FullName } else { $staging }
     }
     if (-not (Test-Path (Join-Path $Source "pyproject.toml"))) { Fail "$Source is not a Delta folder" }
+    if ($ExpectSha256) {
+        # Update now / delta update: only the exact commit that was checked, and only if its files are the ones read
+        if ($Branch -notmatch "^[0-9a-fA-F]{40}$") { Fail "a checked update must name one commit, not '$Branch'" }
+        $bad = Test-DeltaFiles $Source $ExpectSha256 $ExpectVersion
+        if ($bad) { Fail "the downloaded files are not the version Delta checked ($bad). Nothing was changed." }
+        Done ("verified pyproject.toml and uv.lock of $Repo at commit " + $Branch.Substring(0, 12))
+    }
     $same = (Resolve-Path $Source).Path.TrimEnd("\") -ieq $InstallDir.TrimEnd("\")
     # Files in use cannot be replaced: a running Delta is closed first (asked, unless -StopRunning).
     $running = @(Get-RunningDelta)

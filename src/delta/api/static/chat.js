@@ -507,6 +507,7 @@
   const failed = text => put(h("div", {class: "msg delta failed"}, h("span", {class: "avatar"}, icon("logo")), h("div", {class: "answer"}, h("div", {class: "answer-text", text}))));
   $("send").onsubmit = async e => {
     e.preventDefault(); const text = $("text").value.trim();
+    if (/^\/tour$/i.test(text)) { $("text").value = ""; grow(); D.tour.start(); return; }  // replay the first-run tour
     if (files.some(f => f.state === "loading")) { D.toast({title: "Still reading your files", kind: "warn"}); return; }
     const ready = files.filter(f => f.state === "ready");
     if (!text && !ready.length) return;

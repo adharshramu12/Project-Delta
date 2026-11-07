@@ -266,6 +266,21 @@ class QuietHours(BaseModel):
     end: str = "07:00"
 
 
+class UpdatesConfig(BaseModel):
+    """Update notifications (delta.updates). Delta asks GitHub for a newer version on start and every 12 hours (a
+    plain GET with a Delta/<version> User-Agent, nothing else is sent) and shows a banner. It never installs anything
+    until you press Update now."""
+    check: bool = True  # false: never ask GitHub (Settings > Updates and help)
+    channel: Literal["stable", "beta"] = "stable"  # beta: test releases (GitHub pre-releases) count too
+    telegram: bool = True  # one Telegram message per new version, when Telegram is connected
+    interval_hours: float = Field(default=12, ge=1, le=24 * 7)
+
+
+class TourConfig(BaseModel):
+    """The dashboard's first-run tour (tour.js). Saved here, not in the browser, so it shows once per PC."""
+    done: bool = False
+
+
 class SchedulerConfig(BaseModel):
     """Scheduled tasks and reminders (delta.scheduler). Runs only while the background service is on."""
     enabled: bool = True
@@ -449,6 +464,8 @@ class Settings(BaseModel):
     writer: WriterConfig = Field(default_factory=WriterConfig)
     academy: AcademyConfig = Field(default_factory=AcademyConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    updates: UpdatesConfig = Field(default_factory=UpdatesConfig)
+    tour: TourConfig = Field(default_factory=TourConfig)
     engine: EngineConfig = Field(default_factory=EngineConfig)
     selfheal: SelfHealConfig = Field(default_factory=SelfHealConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
