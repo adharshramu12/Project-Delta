@@ -1,7 +1,7 @@
 """Delta command line.
 
   delta              interactive terminal (same as `delta cli`)
-  delta doctor       check models, keys, GPU, audit log
+  delta doctor       check this PC's setup (with fixes), models, keys, GPU, audit log
   delta secrets set|delete|list [name]
   delta audit verify
   delta captcha allow|remove|list [host]
@@ -125,7 +125,13 @@ def _doctor() -> int:
     s = load_settings()
     ok = True
     print(f"Delta {__version__}\nconfig: {s.config_dir}\ndata:   {s.data_dir}\n")
-    print("Model providers:")
+    from delta.setup.doctor import render, run_checks
+
+    checks = run_checks(s)  # quick and offline: Python, the delta command, folders, port, browser, OCR, phone, AI
+    print("Setup checks:")
+    print(render(checks))
+    ok &= not any(c.status == "fail" for c in checks)
+    print("\nModel providers:")
     for name, p in s.llm.providers.items():
         if p.kind != "openai":
             from delta.llm.cli_providers import CLI_KINDS
@@ -139,21 +145,24 @@ def _doctor() -> int:
                 from delta.llm.providers import lmstudio_base_url
 
                 p = p.model_copy(update={"base_url": lmstudio_base_url(p.base_url)})
-            try:
-                ids = [m["id"] for m in httpx.get(f"{p.base_url.rstrip('/')}/models", timeout=3).json().get("data", [])]
+            try:  # trust_env=False: a company proxy (HTTPS_PROXY) must not answer for a server on this PC
+                ids = [m["id"] for m in httpx.get(f"{p.base_url.rstrip('/')}/models", timeout=3,
+                                                  trust_env=False).json().get("data", [])]
                 print(f"  {name:<8} running, models: {', '.join(ids) or 'none loaded'}")
-            except (httpx.HTTPError, ValueError):
+            except (httpx.HTTPError, ValueError, KeyError, AttributeError, TypeError):
                 print(f"  {name:<8} not running at {p.base_url} (optional)")
         elif p.local:
             root = p.base_url.removesuffix("/v1")
             try:
-                tags = {m["name"] for m in httpx.get(f"{root}/api/tags", timeout=3).json().get("models", [])}
+                tags = {m["name"] for m in httpx.get(f"{root}/api/tags", timeout=3,
+                                                     trust_env=False).json().get("models", [])}
                 for task, model in p.models.items():
                     have = model in tags or f"{model}:latest" in tags
                     ok &= have or task != "chat"
                     state = "ready" if have else f"NOT PULLED -> ollama pull {model}"
                     print(f"  {name:<8} {task:<7} {model:<28} {state}")
-            except httpx.HTTPError:
+            except (httpx.HTTPError, ValueError, KeyError, AttributeError, TypeError):
+                # not running, or something else answers on that port (not JSON): never a traceback here
                 print(f"  {name:<8} not reachable at {root} (install/start Ollama; cloud fallback still works)")
         else:
             key = get_secret(p.secret) if p.secret else None

@@ -146,11 +146,13 @@ def test_delta_update_starts_the_installer_with_bypass(tmp_path, monkeypatch):
 
 def test_shortcuts_start_python_not_a_script():
     ps = _code((SCRIPTS / "create_shortcut.ps1").read_text(encoding="utf-8"))
-    targets = re.findall(r"\$lnk\.TargetPath\s*=\s*([^\n]+)", ps)
-    assert targets == ["$pythonw", 'Join-Path $root ".venv\\Scripts\\python.exe"']  # Delta, Update Delta
+    # Written with Set-DeltaShortcut (scripts/shell_link.ps1: Unicode paths), one call per kind of shortcut
+    targets = re.findall(r"-Target\s+(\$pythonw|\(Join-Path [^)]+\))", ps)
+    assert targets == ["$pythonw", '(Join-Path $root ".venv\\Scripts\\python.exe")']  # Delta, Update Delta
     assert '$pythonw = Join-Path $root ".venv\\Scripts\\pythonw.exe"' in ps
-    args = re.findall(r"\$lnk\.Arguments\s*=\s*([^\n]+)", ps)
+    args = re.findall(r"-Arguments\s+(\"[^\"]*\")", ps)
     assert args == ['"-m delta app"', '"-m delta update --stop"']
+    assert "CreateShortcut" not in ps  # only shell_link.ps1's fallback uses WScript.Shell
     assert not re.search(r"\.ps1|powershell", "".join(targets + args), re.I)
 
 

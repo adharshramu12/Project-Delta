@@ -20,6 +20,10 @@
 # Delta's other scripts are read as text and run here (Invoke-DeltaScript), and nothing changes the PC's or the
 # account's execution policy. The installed files are unblocked (Unblock-File removes the "downloaded from the
 # internet" mark), so Delta's own scripts are not treated as downloaded files later.
+#
+# `irm ... | iex` cannot pass parameters, so three of them can also come from the environment (a parameter given
+# on the command line wins): DELTA_REF (a branch, tag or commit to download instead of main), DELTA_REPO (a fork,
+# owner/name), DELTA_INSTALL_DIR, DELTA_NO_LAUNCH=1. Example: $env:DELTA_REF = "v0.3.0"; irm .../scripts/install.ps1 | iex   (docs/INSTALL.md)
 param(
     [string]$Source = "",   # a Delta folder or .zip; empty = this script's own folder if it is one, else GitHub
     [string]$Repo = "adharshramu12/Project-Delta",
@@ -35,19 +39,41 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is 10x slower with the progress bar
+if (-not $PSBoundParameters.ContainsKey("Branch") -and "$env:DELTA_REF".Trim()) { $Branch = "$env:DELTA_REF".Trim() }
+if (-not $PSBoundParameters.ContainsKey("Repo") -and "$env:DELTA_REPO".Trim()) { $Repo = "$env:DELTA_REPO".Trim() }
+if (-not $PSBoundParameters.ContainsKey("InstallDir") -and "$env:DELTA_INSTALL_DIR".Trim()) {
+    $InstallDir = "$env:DELTA_INSTALL_DIR".Trim()
+}
+if ("$env:DELTA_NO_LAUNCH".Trim() -match "^(1|true|yes)$") { $NoLaunch = [switch]$true }
 # Windows PowerShell 5.1 can default to TLS 1.0, which GitHub and python.org refuse ("Could not create SSL/TLS
 # secure channel"). Allow TLS 1.2 as well (3072); nothing older is added.
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch { }
 $log = Join-Path $env:TEMP "delta-install.log"
 if (-not $DefineOnly) { Start-Transcript -Path $log -Force | Out-Null }
 
+function Test-Interactive {
+    # A person at a console window, who can answer a question. Not a CI runner, a scheduled task or input piped in
+    # (Read-Host would wait forever there, or fail).
+    if ($env:CI -or $env:GITHUB_ACTIONS -or $env:TF_BUILD) { return $false }
+    if ($Host.Name -ne "ConsoleHost" -or -not [Environment]::UserInteractive) { return $false }
+    try { return -not [Console]::IsInputRedirected } catch { return $true }
+}
+
+function Get-SourceZipUrl([string]$repo, [string]$ref) {
+    # GitHub's zip of one branch, tag or commit. A full commit id and a refs/... name are used as they are; any other
+    # name is a branch (refs/heads/<name>, which also works for names with a slash such as fix/x).
+    $ref = $ref.Trim()
+    if ($ref -match "^[0-9a-fA-F]{40}$" -or $ref.StartsWith("refs/")) { return "https://github.com/$repo/archive/$ref.zip" }
+    return "https://github.com/$repo/archive/refs/heads/$ref.zip"
+}
+
 function Step($n, $text) { Write-Host "`n[$n/6] $text" -ForegroundColor Cyan }
 function Done($text) { Write-Host "      OK  $text" -ForegroundColor Green }
 function Fail($text) {
     Write-Host "`nDelta could not be installed: $text" -ForegroundColor Red
     Write-Host "Details: $log"
-    Stop-Transcript | Out-Null
-    if ($Host.Name -eq "ConsoleHost") { Read-Host "Press Enter to close" }
+    try { Stop-Transcript | Out-Null } catch { }
+    if (Test-Interactive) { Read-Host "Press Enter to close" }
     exit 1
 }
 
@@ -196,7 +222,7 @@ try {
         }
         if (-not (Test-Python312x64 $py)) {   # no winget (or it failed): python.org's own signed x64 installer
             $exe = Join-Path $env:TEMP "python-3.12.10-amd64.exe"
-            Invoke-WebRequest "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe" -OutFile $exe
+            Invoke-WebRequest "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe" -OutFile $exe -UseBasicParsing
             if ((Get-AuthenticodeSignature $exe).Status -ne "Valid") { Fail "the Python installer's signature is not valid" }
             Start-Process $exe -ArgumentList "/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=0 Include_test=0" -Wait
         }
@@ -215,7 +241,9 @@ try {
     if (-not $Source) {
         $zip = "$staging.zip"
         Write-Host "      downloading $Repo ($Branch)"
-        Invoke-WebRequest "https://github.com/$Repo/archive/refs/heads/$Branch.zip" -OutFile $zip
+        # -UseBasicParsing: Windows PowerShell 5.1 otherwise needs Internet Explorer's engine, which a PC without
+        # it (Windows Server, IE removed) does not have ("The response content cannot be parsed").
+        Invoke-WebRequest (Get-SourceZipUrl $Repo $Branch) -OutFile $zip -UseBasicParsing
         $Source = $zip
     }
     if ($Source -like "*.zip") {
@@ -230,7 +258,7 @@ try {
     if ($running.Count -gt 0) {
         $ids = ($running | ForEach-Object { $_.ProcessId }) -join ", "
         $stop = [bool]$StopRunning
-        if (-not $stop -and $Host.Name -eq "ConsoleHost") {
+        if (-not $stop -and (Test-Interactive)) {
             $answer = Read-Host "      Delta is running (process $ids). Close it now so it can be updated? [Y/n]"
             $stop = ($answer -eq "" -or $answer -match "^[Yy]")
         }
@@ -272,6 +300,9 @@ try {
     Push-Location $InstallDir
     try {
         $env:UV_PROJECT_ENVIRONMENT = Join-Path $InstallDir ".venv"
+        # Windows' own certificate store, as pip already uses: behind a company proxy that inspects HTTPS its
+        # certificate is in that store (put there by the company), not in uv's built-in list.
+        if (-not "$env:UV_NATIVE_TLS".Trim()) { $env:UV_NATIVE_TLS = "1" }
         & $venvPy -m uv sync --frozen --extra all --no-dev --python $venvPy
         if ($LASTEXITCODE -ne 0) {
             Fail ("installing Delta's packages failed (see the log). Usual causes: no internet, a company proxy " +

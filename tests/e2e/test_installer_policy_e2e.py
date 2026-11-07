@@ -166,11 +166,15 @@ def _install_folder(base: Path) -> Path:
 
 
 def _lnk(path: Path) -> tuple[str, str]:
+    """A shortcut's target and arguments as stored, read through the Unicode shortcut interface (WScript.Shell
+    would turn non-ANSI letters into plain ones on the way out, hiding the bug this checks for)."""
     out = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
                           "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; "
-                          "$l = (New-Object -ComObject WScript.Shell).CreateShortcut($env:DELTA_T_LNK); "
-                          "$l.TargetPath; $l.Arguments"], capture_output=True, text=True, encoding="utf-8",
-                         timeout=60, env=_env(DELTA_T_LNK=str(path)), check=False)
+                          ". ([scriptblock]::Create([System.IO.File]::ReadAllText($env:DELTA_T_LINKPS))); "
+                          "$l = Get-DeltaShortcut $env:DELTA_T_LNK; $l.Target; $l.Arguments"],
+                         capture_output=True, text=True, encoding="utf-8", timeout=120,
+                         env=_env(DELTA_T_LNK=str(path), DELTA_T_LINKPS=str(SCRIPTS / "shell_link.ps1")),
+                         check=False)
     assert out.returncode == 0, out.stderr
     target, args = [*out.stdout.lstrip("\ufeff").splitlines(), "", ""][:2]
     return target.strip(), args.strip()
@@ -209,17 +213,16 @@ def test_step5_works_under_restricted_policy(shell, tmp_path, user_path, shortcu
             assert Path(lines[0]).resolve() == (install / "bin" / "delta.cmd").resolve(), new.stdout
             assert delta.__version__ in new.stdout
 
-        # The shortcuts start Python directly: nothing a Restricted policy or a script check could refuse.
-        # On the CI runner the target read back through WScript.Shell has the folder's non-ASCII letter as a plain
-        # one, so the folder is compared by its tail, and the .lnk file is checked (reported only) for the folder's
-        # full Unicode name.
+        # The shortcuts start Python directly: nothing a Restricted policy or a script check could refuse. And
+        # they point at the real folder, its non-ANSI letter included: WScript.Shell used to store "Raj D'Souza"
+        # (a folder that does not exist), so the icons opened nothing for such a user. Fixed by shell_link.ps1.
         for name, exe, args in (("desktop", "pythonw.exe", "-m delta app"), ("start", "pythonw.exe", "-m delta app"),
                                 ("update", "python.exe", "-m delta update --stop")):
             target, got_args = _lnk(shortcuts[name])
-            assert target.lower().endswith(f"\\programs\\delta\\.venv\\scripts\\{exe}"), (name, target)
+            assert Path(target) == install / ".venv" / "Scripts" / exe, (name, target)
+            assert Path(target).exists(), (name, target)
             assert got_args == args, (name, got_args)
-            if "R\u0101j D'Souza & Co".encode("utf-16-le") not in shortcuts[name].read_bytes():
-                warnings.warn(f"{name} shortcut: no Unicode copy of the folder name in the .lnk", stacklevel=1)
+            assert "R\u0101j D'Souza & Co".encode("utf-16-le") in shortcuts[name].read_bytes(), name
     finally:
         os.rmdir(install / ".venv")  # the junction only, never this checkout's .venv
 
