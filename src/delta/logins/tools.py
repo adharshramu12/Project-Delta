@@ -57,11 +57,11 @@ class SignIn(Tool[SignInArgs]):
         return callable(kind) and kind() == "user" and self._own_driver_factory() is not None
 
     def domains(self, args: SignInArgs) -> list[str]:
-        login = self.service.store.get(args.site)
+        login = self.service.store.resolve(args.site)[0]
         return [login.origin] if login else []
 
     def summary(self, args: SignInArgs) -> str:
-        login = self.service.store.get(args.site)
+        login = self.service.store.resolve(args.site)[0]
         return f"sign in to {login.name} ({login.origin}) with the saved login" if login else f"sign in to {args.site}"
 
     async def run(self, args: SignInArgs) -> ToolResult:
@@ -134,8 +134,8 @@ class ListLoginsArgs(BaseModel):
 
 class ListLogins(Tool[ListLoginsArgs]):
     name = "list_logins"
-    description = ("List the user's saved site logins (name, site, permission). Never shows user names or "
-                   "passwords. Use sign_in with one of them.")
+    description = ("List the user's saved site logins (name, site, permission, whether a password is saved). Never "
+                   "shows user names or passwords. Use sign_in with one of them.")
     risk = Risk.READ
     Args = ListLoginsArgs
 
@@ -150,7 +150,9 @@ class ListLogins(Tool[ListLoginsArgs]):
         if not items:
             return ToolResult(True, "No saved logins. The user adds them on the PC: Settings > Logins, or "
                                     "`delta logins add`. Passwords are never given in chat.", {"count": 0})
-        rows = [f"- {x.name}: {x.origin} ({x.public()['permission_words'].lower()})" for x in items]
+        rows = [f"- {x.name}: {x.origin} ({x.public()['permission_words'].lower()}; "
+                f"{'password saved' if x.password else 'NO password saved: the user must add it in Settings > Logins'}"
+                f"{'; Delta reads its simple captcha' if x.simple_captcha else ''})" for x in items]
         return ToolResult(True, "\n".join(rows), {"count": len(items)})
 
 

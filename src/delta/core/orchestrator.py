@@ -303,8 +303,9 @@ CONTINUE_NUDGE = ("Not finished yet: that reply had no tool call and did not sta
 # A model judging by its own sandbox may stop with "this environment doesn't provide desktop tools"
 # while Delta's tools are right there. That is never a real blocker: say which tools it has.
 _NO_TOOLS = re.compile(r"(environment|sandbox|don['’]?t|doesn['’]?t|do not|does not|no|not|unable|cannot|can['’]?t)\b"
-                       r"[^.]{0,60}\b(tools?|desktop[- ]control|access to (the |your )?(pc|computer|screen|browser))",
-                       re.I)
+                       r"[^.]{0,60}\b(tools?|desktop[- ](control|actions?)|access to (the |your )?(pc|computer|screen|"
+                       r"browser)|actions? on (the |your )?(pc|computer|laptop|desktop)|in this (interface|chat|"
+                       r"environment))", re.I)
 
 
 def claims_no_tools(text: str) -> bool:
@@ -409,6 +410,7 @@ class Orchestrator:
     lessons: Any = None  # LessonBook (delta.learning.lessons): self-heal recoveries -> lesson candidates. None = off
     connectors: Any = None  # AppTools (delta.connectors.tools): connected apps' one-line index for the planner
     attachments: Any = None  # AttachmentService (delta.attachments): files sent with a request. None = off
+    login_flow: Any = None  # LoginFlow (delta.logins.flow): saved-login requests with no AI calls. None = off
 
     def __init__(self, settings: Settings, router: ModelRouter, executor: ToolExecutor,
                  memory: MemoryStore | None, governor: Governor | None, events: EventBus,
@@ -457,7 +459,10 @@ class Orchestrator:
         """Always ends with a result, never with a task left "running": any failure (a bug, a full disk, a
         broken tool) becomes a failed task with a safe message, the run record is closed and the UI told.
         A cancel (the user pressed Stop) is cleaned up the same way and then re-raised."""
-        self.audit.record("task.start", task=req.id, channel=req.channel, text=req.text)
+        flow = self.login_flow
+        quiet = flow is not None and flow.is_captcha_answer(req)  # a captcha answer is never written to the audit
+        self.audit.record("task.start", task=req.id, channel=req.channel,
+                          text="(captcha answer)" if quiet else req.text)
         started = time.monotonic()
         current = CURRENT_REQUEST.set(req)
         # The browser this task uses is fixed now: a switch saved while it runs applies to the next task.
@@ -540,6 +545,9 @@ class Orchestrator:
         # Files sent with the request: read on this PC, a compact extract goes with it (delta.attachments). A
         # message with files is never small talk, an instant command or a learned recipe: it is about the files.
         files = await self._attach(req)
+        # A saved-login request, "try again" after one, or a captcha answer: a fixed tool flow, 0 tokens.
+        if not files and self.login_flow is not None and (signed := await self.login_flow.handle(req)) is not None:
+            return signed
         if not files and (reply := small_talk(req.text, self.s.agent.owner_name)):  # "hi", "thanks": 0 tokens
             return TaskResult(req.id, "done", reply, fast=True)
         if not files and is_identity_question(req.text):  # "who made you?": 0 tokens, always the same answer

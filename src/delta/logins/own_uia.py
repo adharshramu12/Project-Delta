@@ -7,7 +7,10 @@ How the checks map onto UI Automation:
 - the page's address: the Value of the tab's top Document element (the full URL, scheme included; the address bar
   is NOT used, because it hides "http://" and "https://");
 - a frame's address: the Value of the nearest Document element above the box (frames are Documents of their own);
-- a box: an Edit element; IsPassword marks password boxes; its name (label, placeholder) says what else it is;
+- a box: an Edit element; IsPassword marks password boxes; its name (label, placeholder) and its AutomationId (Chrome
+  and Edge report the HTML id there) say what else it is ("loginFormCaptcha" is a captcha box);
+- a captcha picture: the Image element of the same document nearest to the captcha box, captured from the screen
+  (only that rectangle, with Delta's window in front) for Windows OCR or for the user to read;
 - filling: the box's ValuePattern.SetValue (straight into that box, no keyboard, nothing on the clipboard). When a
   page ignores it, Delta types the value into the box instead, a few characters at a time, checking before each
   burst that the box still has the keyboard focus in Delta's window (the user's mouse or keyboard stops it).
@@ -137,7 +140,8 @@ class UIAOwnDriver:
             dll = u.UIA_dll
             cr = u.iuia.CreateCacheRequest()
             for prop in (dll.UIA_NamePropertyId, dll.UIA_ControlTypePropertyId, dll.UIA_IsOffscreenPropertyId,
-                         dll.UIA_IsPasswordPropertyId, dll.UIA_IsEnabledPropertyId, dll.UIA_ValueValuePropertyId):
+                         dll.UIA_IsPasswordPropertyId, dll.UIA_IsEnabledPropertyId, dll.UIA_ValueValuePropertyId,
+                         dll.UIA_AutomationIdPropertyId):
                 cr.AddProperty(prop)
             cr.TreeScope = dll.TreeScope_Subtree
             cr.TreeFilter = u.iuia.ControlViewCondition
@@ -161,7 +165,10 @@ class UIAOwnDriver:
                     url = value(el)
                 if el.CachedControlType == edit and not el.CachedIsOffscreen and el.CachedIsEnabled:
                     name = str(el.CachedName or "")
-                    kind = classify(name, bool(el.CachedIsPassword))
+                    auto_id = ""
+                    with contextlib.suppress(Exception):
+                        auto_id = str(el.CachedAutomationId or "")
+                    kind = classify(name, bool(el.CachedIsPassword), auto_id)
                     ref = FieldRef(kind or "text", url, el, name[:80])
                     (out if kind else plain).append(ref)
                     if kind == "password" and not any(f.kind == "user" and f.frame_url == url for f in out):
@@ -319,6 +326,86 @@ class UIAOwnDriver:
             r = _wrap(f.handle).rectangle()
             left, top, _right, _bottom = win32gui.GetWindowRect(hwnd)
             mask.remember(hwnd, (int(r.left), int(r.top), int(r.right), int(r.bottom)), (int(left), int(top)))
+
+    def _captcha_picture(self, f: FieldRef) -> Any | None:
+        """The Image element of the box's document nearest to the box (one whose id says captcha first)."""
+        from pywinauto.uia_element_info import UIAElementInfo
+
+        box = _wrap(f.handle).rectangle()
+        info: Any = UIAElementInfo(f.handle)
+        doc = None
+        for _ in range(80):
+            info = info.parent
+            if info is None:
+                break
+            if info.control_type == "Document":
+                doc = _wrap(info.element)
+                break
+        if doc is None:
+            return None
+        best, best_d = None, 1e9
+        for img in doc.descendants(control_type="Image"):
+            with contextlib.suppress(Exception):
+                r = img.rectangle()
+                w, h = r.right - r.left, r.bottom - r.top
+                if w < 30 or h < 12 or w > 600 or h > 250:
+                    continue  # icons and banners are not captchas
+                d = abs((r.top + r.bottom) / 2 - (box.top + box.bottom) / 2) + abs(r.left - box.left) / 4
+                if "captcha" in str(img.element_info.automation_id or "").lower():
+                    d -= 10_000
+                if d < best_d and d < 400:
+                    best, best_d = img, d
+        return best
+
+    async def captcha_image(self, f: FieldRef) -> bytes | None:
+        """A JPEG of the captcha picture next to box f, taken from the screen with Delta's window in front; None when
+        there is no such picture. Only that rectangle is captured (never a password box)."""
+        def go() -> bytes | None:
+            import io
+
+            import mss
+            from PIL import Image
+
+            img = self._captcha_picture(f)
+            if img is None:
+                return None
+            self._guard()
+            self.ub._front(self._w())
+            time.sleep(0.2)
+            r = img.rectangle()
+            with mss.mss() as shot:
+                raw = shot.grab({"left": int(r.left), "top": int(r.top), "width": int(r.right - r.left),
+                                 "height": int(r.bottom - r.top)})
+            out = io.BytesIO()
+            Image.frombytes("RGB", raw.size, raw.rgb).save(out, "JPEG", quality=90)
+            return out.getvalue()
+
+        try:
+            with self.ctl.acting():
+                return await self.ctl.call(go)
+        except TabChangedError:
+            raise
+        except Exception:
+            return None
+
+    async def refresh_captcha(self, f: FieldRef) -> bool:
+        """A new captcha picture: invoke the picture (many simple captchas reload when clicked). False if it can't."""
+        def go() -> bool:
+            img = self._captcha_picture(f)
+            if img is None:
+                return False
+            self._guard()
+            with contextlib.suppress(Exception):
+                img.invoke()
+                time.sleep(0.7)
+                return True
+            return False
+
+        try:
+            with self.ctl.acting():
+                return bool(await self.ctl.call(go))
+        except Exception:
+            return False
 
     async def observe(self) -> str:
         """The page after signing in, as browser_read shows it (outside content)."""

@@ -121,6 +121,17 @@ saying what you found (it worked, or how it failed) is very welcome.
   fake browser and with the attached stand-in, not with a person using a real browser.
 - **Masked pictures of your own browser**: the painted-over password area follows the box's position when it was
   filled; a page that scrolls or moves the box afterwards was not checked on a real screen.
+- **The captcha picture from your own browser**: Delta finds the Image next to the captcha box through UI Automation
+  and captures that rectangle from the screen (`UIAOwnDriver.captcha_image`). Not tried on a real PC: display scaling
+  above 100%, a captcha drawn on a canvas or as a CSS background (no Image element), and whether "clicking" the
+  picture through UI Automation gives a new one on real portals.
+- **The captcha reply from a phone**: the picture is sent to Telegram as a photo and the reply goes through the same
+  chat; tested with the dashboard path and fakes, not with a real phone. The dashboard shows the picture with the
+  answer only in the live chat (not after a reload).
+- **The real college ERP from the report**: the fix was reproduced and tested against a fake portal built like it
+  (hidden page until a late stylesheet, "Enter verification Code", hidden MFA box, Yii-style field names), not
+  against the real site or its real captcha pictures.
+
 - **The extra browser actions in your own browser** (`browser_select`, `browser_check`, `browser_upload`,
   `browser_hover`, `browser_wait`, `browser_tabs`, `browser_dialog` through UI Automation): only their argument
   handling and routing are tested; the UI Automation parts were not run against a real browser.

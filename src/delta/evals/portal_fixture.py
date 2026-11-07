@@ -4,12 +4,17 @@ Made-up people and data; nothing reaches the internet; the port is picked free e
 portal in the ways that matter to saved logins and watchers, with switches for the hard cases:
 
   mode       normal | otp (a one-time code step) | captcha (a simple image captcha on the form) |
-             recaptcha (a reCAPTCHA-like widget: must be handed to the user)
+             recaptcha (a reCAPTCHA-like widget: must be handed to the user) |
+             erp_captcha (built like many real college ERPs: the page stays hidden until a late stylesheet loads,
+             floating labels ("Enter Username"), LoginForm[...] field names, a captcha box whose placeholder says
+             "Enter verification Code", a hidden "Enter MFA Code" box, and "The verification code is incorrect."
+             when only the captcha was wrong)
   layout     v1 | v2 (v2 changes the exams page, so an old recipe no longer reads it)
   down       every page answers 503
   expire()   signs every session out (the next page shows "Your session has expired")
 
-Pages: /login (form posts to /login), /otp, /dashboard, /timetable, /exams, /notifications, /events, /captcha.png,
+Pages: /login (form posts to /login), /otp, /late.css (erp_captcha: served after LATE_CSS_S), /dashboard,
+/timetable, /exams, /notifications, /events, /captcha.png (and /index.php?r=site/captcha for erp_captcha),
 /frame (a page whose sign-in form is an iframe from another origin: http://localhost:<port>/login while the page is
 on 127.0.0.1), /evil/login (the same form, for lookalike tests served under another host name).
 
@@ -30,6 +35,7 @@ from urllib.parse import parse_qsl, urlsplit
 USER = "student01"
 OTP = "424242"
 CAPTCHA = "K7Q2"
+LATE_CSS_S = 0.6  # erp_captcha: the stylesheet that makes the page visible comes this late
 
 STYLE = ("<style>body{font-family:sans-serif;margin:2em}table{border-collapse:collapse}td,th{border:1px solid #999;"
          "padding:4px 8px}.card{border:1px solid #ccc;margin:6px;padding:6px}</style>")
@@ -56,6 +62,8 @@ class PortalState:
         self.half: set[str] = set()  # passed the password, waiting for the OTP
         self.logins = 0  # successful sign-ins
         self.failed = 0
+        self.captcha_views = 0  # erp_captcha: how many captcha pictures were loaded (refreshes)
+        self.captcha_wrong = 0  # posts rejected only for the captcha
         self.posts: list[dict[str, str]] = []  # what was posted to /login (tests check no extra fields leak)
         self.exams = [("CS301 Database Systems", "2026-11-20", "10:00", "Hall B"),
                       ("CS305 Operating Systems", "2026-11-24", "14:00", "Hall A")]
@@ -104,8 +112,33 @@ class _Handler(BaseHTTPRequestHandler):
     def _signed_in(self) -> bool:
         return self._session() in self.state.sessions
 
+    def _erp_form(self, error: str = "") -> bytes:
+        """A sign-in page shaped like a real college ERP (made-up names): see the module docstring."""
+        msg = f"<div class='help-block' role='alert'>{html.escape(error)}</div>" if error else ""
+        return (
+            "<!doctype html><html><head><meta charset='utf-8'><title>Fixture University ERP</title>"
+            "<style>html{visibility:hidden}.floating-label{position:relative}</style></head><body>"
+            "<link href='/late.css' rel='stylesheet'>"
+            "<h4>Login</h4><div id='login-jax'><form id='login-form' action='/login' method='post'>"
+            "<input type='hidden' name='_csrf' value='fixture-csrf'>" + msg +
+            "<div class='floating-label'><input type='text' id='loginFormUserNameID' name='LoginForm[username]' "
+            "autofocus placeholder=' '><label for='loginFormUserNameID'>Enter Username *</label></div>"
+            "<div class='floating-label'><input type='password' id='loginFormPasswordID' name='LoginForm[password]' "
+            "placeholder=' '><label for='loginFormPasswordID'>Enter Password *</label></div>"
+            "<div><label for='loginform-captcha'></label><img id='loginFormCaptcha-image' "
+            "src='/index.php?r=site%2Fcaptcha&amp;v=1' alt='' width='120' height='40' "
+            "onclick=\"this.src='/index.php?r=site%2Fcaptcha&amp;v='+Date.now()\">"
+            "<input type='text' id='loginFormCaptcha' name='LoginForm[captcha]' "
+            "placeholder='Enter verification Code'></div>"
+            "<div><label style='visibility:hidden' for='loginFormQRCodeID'>MFA Code</label>"
+            "<input type='text' id='loginFormQRCodeID' name='LoginForm[qr_code]' placeholder='Enter MFA Code' "
+            "style='visibility:hidden'></div>"
+            "<button type='submit' name='login-button'>Login</button></form></div></body></html>").encode()
+
     def _login_form(self, error: str = "", expired: bool = False) -> bytes:
         s = self.state
+        if s.mode == "erp_captcha":
+            return self._erp_form(error or ("Your session has expired. Please log in again." if expired else ""))
         extra = ""
         if s.mode == "captcha":
             extra = ("<p><img id='captcha_img' alt='captcha' src='/captcha.png' width='120' height='40'> "
@@ -149,6 +182,17 @@ class _Handler(BaseHTTPRequestHandler):
             port = int(self.server.server_address[1])  # type: ignore[index]
             self._send(200, page("Portal", f"<h1>Portal</h1><iframe src='http://localhost:{port}/login' width='600' "
                                            "height='400' title='Sign in'></iframe>"))
+            return
+        if path == "/late.css":
+            import time
+
+            time.sleep(LATE_CSS_S)
+            self._send(200, b"html{visibility:visible}", "text/css")
+            return
+        if path == "/index.php" and "captcha" in self.path:
+            with s.lock:
+                s.captcha_views += 1
+            self._send(200, captcha_png(), "image/png")
             return
         if path == "/captcha.png":
             self._send(200, captcha_png(), "image/png")
@@ -210,8 +254,15 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/login":
             with s.lock:
                 s.posts.append({k: ("<set>" if k == "password" else v) for k, v in form.items()})
-            if s.mode == "captcha" and form.get("captcha", "").strip().upper() != CAPTCHA:
-                self._send(200, self._login_form("Invalid captcha. Please enter the characters again."))
+            if s.mode == "erp_captcha":  # LoginForm[...] names, as real ERPs post them
+                form = {"username": form.get("LoginForm[username]", ""),
+                        "password": form.get("LoginForm[password]", ""), "captcha": form.get("LoginForm[captcha]", "")}
+                s.posts[-1] = {k: ("<set>" if k == "password" else v) for k, v in form.items()}
+            if s.mode in ("captcha", "erp_captcha") and form.get("captcha", "").strip().upper() != CAPTCHA:
+                with s.lock:
+                    s.captcha_wrong += 1
+                self._send(200, self._login_form("The verification code is incorrect." if s.mode == "erp_captcha"
+                                                 else "Invalid captcha. Please enter the characters again."))
                 return
             if form.get("username") != USER or form.get("password") != s.password:
                 with s.lock:
@@ -283,9 +334,12 @@ class PortalSite:
 # --- the eval harness (delta.evals.runner, tasks with `portal:`) ---------------------------------------------------
 # A task with `portal:` gets this site, one saved login for it and, when asked, a watcher, all wired through Delta's
 # real LoginService, WatchService and their tools. Spec keys (all optional):
-#   mode: normal | otp | captcha | recaptcha      the site's sign-in switch (PortalState.mode)
-#   login: {name, origin, permission}             origin: portal (default) | other (the same server on another
-#                                                 host name) | a URL; permission: always (default) | ask
+#   mode: normal | otp | captcha | recaptcha | erp_captcha   the site's sign-in switch (PortalState.mode)
+#   login: {name, origin, permission, simple_captcha}  origin: portal (default) | other (the same server on another
+#                                                 host name) | a URL; permission: always (default) | ask;
+#                                                 simple_captcha: the login's "let Delta read it" switch (off)
+#   ocr: [text, ...]                              what the stand-in for Windows OCR reads from each captcha picture
+#                                                 (in order; the last repeats). Without it no captcha is read.
 #   watcher: {name, what, sections}               a watcher with this recipe (delta.watchers.recipe.Section fields)
 #   prime: true                                   one scheduled check before the task: the watcher's baseline
 #   then: [add_exam | expire]                     changes to the site after priming, before the task runs
@@ -343,9 +397,23 @@ class PortalHarness:
         origin = {"portal": self.site.url, "other": self.site.other}.get(origin, origin)
         store = LoginStore(data / "logins", **sealers())
         name = str(raw.get("name", "College ERP"))
-        store.add(name, origin, USER, self.password, login_url=origin + "/login",
-                  permission=str(raw.get("permission", "always")))
-        self.logins = LoginService(store, audit, approvals, settle=settle)
+        login_url = str(raw.get("login_url", origin + "/login")).replace("{portal}", self.site.url)
+        store.add(name, origin, USER, self.password, login_url=login_url,
+                  permission=str(raw.get("permission", "always")), simple_captcha=bool(raw.get("simple_captcha")))
+        solver = None
+        if spec.get("ocr") is not None:
+            from delta.tools.captcha import CaptchaSolver
+
+            reads = [str(x) for x in spec.get("ocr") or []] or [""]
+
+            async def ocr(jpeg: bytes) -> str:  # the stand-in for Windows OCR on this captcha picture
+                return reads.pop(0) if len(reads) > 1 else reads[0]
+
+            async def nobody(host: str, saved: str) -> bool:
+                return False
+
+            solver = CaptchaSolver(allowed_sites=lambda: [], vision=None, ask_human=nobody, audit=audit, ocr=ocr)
+        self.logins = LoginService(store, audit, approvals, captcha_solver=solver, settle=settle)
         hub = SimpleNamespace(mgr=mgr, settings=settings)
         if str(spec.get("browser", "private")) == "own":
             from delta.evals.own_browser_standin import PlaywrightOwnDriver
@@ -378,9 +446,15 @@ class PortalHarness:
             else:
                 raise ValueError(f"unknown portal change {change!r}")
 
+    def attach_flow(self, orchestrator: Any, executor: Any, events: Any) -> None:
+        """Saved-login requests as the fixed flow, as bootstrap wires it (delta.logins.setup.attach_flow)."""
+        from delta.logins.setup import attach_flow
+
+        attach_flow(orchestrator, self.logins, executor, events)
+
     def snapshot(self) -> dict[str, int]:
         s = self.site.state
-        return {"logins": s.logins, "failed": s.failed, "posts": len(s.posts)}
+        return {"logins": s.logins, "failed": s.failed, "posts": len(s.posts), "captcha_wrong": s.captcha_wrong}
 
     def close(self) -> None:
         self.site.__exit__(None, None, None)

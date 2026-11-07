@@ -552,6 +552,9 @@ def build(settings: Settings) -> Container:
     orchestrator = Orchestrator(settings, router, executor, memory if settings.memory.enabled else None,
                                 governor, events, audit, skills, learning, proof)
     orchestrator.browsers = browsers  # pins each task to its browser (switches apply at the next task)
+    from delta.logins.setup import attach_flow
+
+    attach_flow(orchestrator, logins, executor, events)  # "log in to my ERP": no AI calls (delta.logins.flow)
     orchestrator.connectors = connectors
 
     async def on_health(a: Assessment) -> None:

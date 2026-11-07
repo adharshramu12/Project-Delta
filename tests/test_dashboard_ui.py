@@ -161,9 +161,12 @@ def test_the_payload_stays_small():
     deduplication), then to 222 KB for Stop / Stop all on running tasks in the Tasks view (about 0.9 KB), then to
     224 KB for email approvals (Approve / Edit / Cancel with the full draft) and Apps > Advanced: custom MCP servers
     (the "mcp" add-on moved out of Settings), about 1.6 KB together. With both changes the dashboard ships about
-    223.1 KB (223,111 bytes). Lazy loading would not lower this total: it counts every file the dashboard ships."""
+    223.1 KB (223,111 bytes). Then to 226 KB for saved logins: the per-login "simple text captcha" switch on the add
+    form and each card, Replace for a name saved before, the no-password warning, and the captcha picture shown with
+    a sign-in's answer in Chat (about 2.2 KB; the dashboard then ships about 225.3 KB). Lazy loading would not lower
+    this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 224_000, total
+    assert total < 226_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 

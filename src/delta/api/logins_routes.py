@@ -3,8 +3,10 @@ other route; the dashboard is this PC (a local channel). A password arrives once
 is sealed with DPAPI and is never sent back: no route returns it, and the server keeps no access log.
 
   GET    /api/logins                       saved logins (no passwords) and whether DPAPI works here
-  POST   /api/logins                       {name, site, username, password, login_url?, permission?, allow_http?}
+  POST   /api/logins                       {name, site, username, password, login_url?, permission?, allow_http?,
+                                            replace?, simple_captcha?}
   PUT    /api/logins/{id}/permission       {permission: ask | always}
+  PUT    /api/logins/{id}/captcha          {on: bool}: "This site has a simple text captcha, let Delta read it"
   POST   /api/logins/{id}/test             sign in once in Delta's private browser (this click is the permission)
   DELETE /api/logins/{id}
   GET    /api/watchers                     watchers, and items offered as reminders
@@ -22,7 +24,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from delta.logins.store import LoginError
+from delta.logins.store import LoginError, slug
 
 
 class LoginIn(BaseModel):
@@ -34,10 +36,15 @@ class LoginIn(BaseModel):
     permission: str = "ask"
     allow_http: bool = False
     replace: bool = False
+    simple_captcha: bool | None = None  # None: a replaced login keeps its setting; a new one starts off
 
 
 class PermissionIn(BaseModel):
     permission: str
+
+
+class CaptchaIn(BaseModel):
+    on: bool
 
 
 class WatchIn(BaseModel):
@@ -75,13 +82,30 @@ def register(app: FastAPI, c: Any, auth: Callable[..., None]) -> None:
     async def add_login(body: LoginIn) -> dict[str, Any]:
         svc = logins()
         try:
+            before = svc.store.get(body.name)
+            exists = before is not None and before.id == slug(body.name)
             login = svc.store.add(body.name, body.site, body.username, body.password, login_url=body.login_url,
-                                  permission=body.permission, allow_http=body.allow_http, replace=body.replace)
+                                  permission=body.permission, allow_http=body.allow_http, replace=body.replace,
+                                  simple_captcha=body.simple_captcha)
         except LoginError as e:
             raise HTTPException(400, str(e)) from None
-        c.audit.record("login.saved", login=login.id, site=login.origin, by="dashboard")
+        c.audit.record("login.saved", login=login.id, site=login.origin, by="dashboard", replaced=exists,
+                       simple_captcha=login.simple_captcha)
+        what = "Updated" if exists else "Saved"
+        warn = "" if login.password else (" No password was saved (only a user name): Delta cannot sign in to a site "
+                                          "that asks for one. Save it again with the password and Replace.")
         return {"ok": True, "login": login.public(),
-                "message": f"Saved {login.name} for {login.origin}, encrypted with Windows DPAPI."}
+                "message": f"{what} {login.name} for {login.origin}, encrypted with Windows DPAPI.{warn}"}
+
+    @app.put("/api/logins/{lid}/captcha", dependencies=[Depends(auth)])
+    async def set_captcha(lid: str, body: CaptchaIn) -> dict[str, Any]:
+        try:
+            login = logins().store.set_simple_captcha(lid, body.on)
+        except LoginError as e:
+            raise HTTPException(400, str(e)) from None
+        c.audit.record("login.captcha_setting", login=login.id, site=login.origin, on=login.simple_captcha,
+                       by="dashboard")
+        return {"ok": True, "login": login.public()}
 
     @app.put("/api/logins/{lid}/permission", dependencies=[Depends(auth)])
     async def set_permission(lid: str, body: PermissionIn) -> dict[str, Any]:

@@ -169,19 +169,28 @@ async def test_simple_captcha_on_an_allowed_site(mgr: BrowserManager, portal: Po
 
 
 async def test_simple_captcha_elsewhere_goes_to_the_user(mgr: BrowserManager, portal: PortalSite, tmp_path):
+    """Not allowed here: never read automatically. The filled form is kept and the captcha picture goes to the chat
+    the request came from; the user's reply finishes the sign-in (no "complete it in the open browser")."""
+    from delta.core.state import CURRENT_REQUEST, TaskRequest
+
     portal.state.mode = "captcha"
     page = await mgr.page()
     asked: list[str] = []
 
     async def human(host: str, saved: str) -> bool:
         asked.append(host)
-        await page.fill("#captcha", CAPTCHA)  # the person types it on the PC
-        return True
+        return False
 
     svc = make_service(tmp_path, portal, solver=solver(tmp_path, [], human, reads=[CAPTCHA]))
-    result = await svc.sign_in("Fixture ERP", page)
+    token = CURRENT_REQUEST.set(TaskRequest("sign in", channel="api", chat_id="e2e"))
+    try:
+        waiting = await svc.sign_in("Fixture ERP", page)
+        assert waiting.outcome == "needs_user" and waiting.captcha_image and portal.state.posts == []
+        result = await svc.answer_captcha("e2e", CAPTCHA)
+    finally:
+        CURRENT_REQUEST.reset(token)
     assert result.ok, result.message
-    assert asked == ["127.0.0.1"]  # never read automatically: the site is not allowed
+    assert asked == [] and portal.state.logins == 1  # never read automatically, never the on-PC hand-off
 
 
 async def test_recaptcha_is_handed_over_never_solved(mgr: BrowserManager, portal: PortalSite, tmp_path):

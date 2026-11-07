@@ -10,9 +10,14 @@ The model never sees or handles the password: it calls sign_in(site) and this mo
 3. Typing: the user name and the password go straight from the sealed store into the page (Playwright fill, over
    the local remote-control connection). The password box is then masked with CSS so a picture of the page sent to
    a model never shows it, even if the site has a "show password" button.
-4. After submitting: a one-time code or 2FA step is handed to the user (they finish it on the PC; Delta waits, with
-   a time limit); a simple image captcha goes to delta.tools.captcha (allowed sites only, else the user); a wrong
-   password is reported and never retried (no lockouts); otherwise the result says where the page is now.
+4. A simple image captcha on the form: read on this PC with Windows OCR only where the user allowed it (the login's
+   "let Delta read it" switch, or `delta captcha allow <host>`), at most CAPTCHA_SUBMITS submits when the site says
+   only the captcha was wrong. Otherwise, or after that, the result carries the captcha picture and the caller asks
+   the user to type the characters (LoginService parks the filled form until they answer, from the dashboard or
+   Telegram). reCAPTCHA, hCaptcha and Turnstile are never solved.
+5. After submitting: a one-time code or 2FA step is handed to the user (they finish it on the PC; Delta waits, with
+   a time limit); a wrong password is reported and never retried (no lockouts); otherwise the result says where the
+   page is now, checked: the sign-in form is gone.
 
 Every outcome is one of OUTCOMES. Nothing here logs, audits or returns the password or the user name.
 """
@@ -34,18 +39,26 @@ OUTCOMES = ("signed_in", "already_signed_in", "wrong_password", "refused", "need
 
 # Fields, found inside one frame. Order matters: the most specific selector first.
 PASSWORD_SEL = "input[type=password]"
-USER_SEL = ("input[autocomplete=username], input[type=email], input[name*=user i], input[id*=user i], "
-            "input[name*=login i], input[id*=login i], input[name*=email i], input[name*=roll i], "
-            "input[name*=regd i], input[name*=reg_no i], input[name*=uid i], input[name*=userid i], "
-            "input[placeholder*=user i], input[placeholder*=email i], input[placeholder*=roll i], "
-            "input[aria-label*=user i], input[aria-label*=email i]")
-OTP_SEL = ("input[autocomplete=one-time-code], input[name*=otp i], input[id*=otp i], input[name*=totp i], "
-           "input[name*=verification i], input[name*=passcode i], input[placeholder*=otp i], "
-           "input[placeholder*=code i], input[aria-label*=code i]")
+# Never the captcha box: "LoginForm[captcha]" also matches input[name*=login i] (a common ERP form).
+USER_SEL = ", ".join(f"{part}:not([name*=captcha i]):not([id*=captcha i])" for part in (
+    "input[autocomplete=username]", "input[type=email]", "input[name*=user i]", "input[id*=user i]",
+    "input[name*=login i]", "input[id*=login i]", "input[name*=email i]", "input[name*=roll i]",
+    "input[name*=regd i]", "input[name*=reg_no i]", "input[name*=uid i]", "input[name*=userid i]",
+    "input[placeholder*=user i]", "input[placeholder*=email i]", "input[placeholder*=roll i]",
+    "input[aria-label*=user i]", "input[aria-label*=email i]"))
+# A captcha box is never a one-time-code box, even when its placeholder says "Enter verification Code" (as on many
+# college ERPs): treating it as an OTP step sent the user a "one-time code" hand-off for a captcha.
+_NOT_CAPTCHA = ":not([name*=captcha i]):not([id*=captcha i]):not([placeholder*=captcha i])"
+OTP_SEL = ", ".join(f"{part}{_NOT_CAPTCHA}" for part in (
+    "input[autocomplete=one-time-code]", "input[name*=otp i]", "input[id*=otp i]", "input[name*=totp i]",
+    "input[name*=verification i]", "input[name*=passcode i]", "input[placeholder*=otp i]",
+    "input[placeholder*=code i]", "input[aria-label*=code i]"))
 ERROR_WORDS = re.compile(r"\b(invalid|incorrect|wrong|failed|does not match|not match|unsuccessful|try again|"
                          r"not recogni[sz]ed|bad credentials)\b", re.I)
 CAPTCHA_ERROR = re.compile(r"captcha|security code|image code|verification code|characters", re.I)
 CAPTCHA_SUBMITS = 3  # sign-in submits at most, when only the captcha was wrong (matches the captcha retry cap)
+WRONG_DETAILS = re.compile(r"password|user ?name|user ?id|credential|account", re.I)
+FORM_WAIT_S = 8.0  # a sign-in form that is on the page but not shown yet (a late stylesheet) gets this long
 EXPIRED_WORDS = re.compile(r"\b(session (has )?expired|please (log|sign) ?in again|timed out)\b", re.I)
 # Hides what is typed in a box Delta filled, whatever the site does to it (a "show password" toggle).
 MASK_CSS = ("input[type=password], [data-delta-secret] { -webkit-text-security: disc !important; "
@@ -59,11 +72,26 @@ MASK_JS = """(css) => {
   for (const el of document.querySelectorAll(sel)) el.setAttribute('data-delta-secret', '1');
   return true;
 }"""
+HIDDEN_SIGNIN_JS = """() => [...document.querySelectorAll('input[type=password]')].some(e => {
+  const f = e.form;
+  const s = (f ? `${f.id} ${f.getAttribute('action') || ''} ${f.getAttribute('name') || ''}` : '')
+    + ` ${e.name} ${e.id} ${location.pathname} ${location.search}`;
+  return /log.?in|sign.?in|auth/i.test(s);
+})"""
 # The frame's own idea of where it is: checked right before typing, so a page that navigated a moment ago is caught.
 LOCATION_JS = "() => location.href"
 
+@dataclass
+class CaptchaStep:
+    """What happened with a simple captcha on the sign-in form."""
+
+    entered: bool  # Delta typed an answer into the captcha box (read on this PC)
+    note: str = ""  # why not, in plain words
+    image: bytes | None = None  # the captcha picture (JPEG) when a person has to read it
+
+
 Handoff = Callable[[str, str, str], Awaitable[bool]]  # (kind: otp|captcha|challenge, host, what to do) -> done
-CaptchaHook = Callable[[Any], Awaitable[tuple[bool, str]]]  # (page) -> (entered, message)
+CaptchaHook = Callable[[Any, int], Awaitable[CaptchaStep]]  # (page, attempt 1..) -> what happened
 
 
 @dataclass
@@ -71,10 +99,18 @@ class SignInResult:
     outcome: str
     message: str
     url: str = ""
+    captcha_image: bytes | None = None  # needs_user for a simple captcha: the picture the user is asked to read
 
     @property
     def ok(self) -> bool:
         return self.outcome in ("signed_in", "already_signed_in")
+
+
+def captcha_rejected(text: str) -> bool:
+    """The page says the CAPTCHA was wrong, and says nothing about the password or user name being wrong. Only then is
+    the saved password submitted again (a rejected password is never retried: no account lockouts)."""
+    lines = [ln for ln in re.split(r"[\n.!]", text or "") if ERROR_WORDS.search(ln) or "required" in ln.lower()]
+    return any(CAPTCHA_ERROR.search(ln) for ln in lines) and not any(WRONG_DETAILS.search(ln) for ln in lines)
 
 
 async def mask_secret_fields(page: Any) -> None:
@@ -212,7 +248,7 @@ class SignInEngine:
                 return SignInResult("needs_user", f"NEEDS HUMAN: {saved.host} shows {kind}, which Delta never "
                                                   "solves. The user did not complete it.", page.url)
             await self._settle(page)
-        frame, user, pw, refusal = await self._form(page, saved)
+        frame, user, pw, refusal = await self._form_soon(page, saved)
         if refusal:
             return SignInResult("refused", "REFUSED: " + refusal, page.url)
         if frame is None:
@@ -220,46 +256,55 @@ class SignInEngine:
                 with contextlib.suppress(Exception):
                     await page.goto(login.login_url, wait_until="domcontentloaded", timeout=self.nav_timeout_ms)
                     await self._settle(page)
-                frame, user, pw, refusal = await self._form(page, saved)
+                frame, user, pw, refusal = await self._form_soon(page, saved)
                 if refusal:
                     return SignInResult("refused", "REFUSED: " + refusal, page.url)
+            if frame is None and await self._hidden_password(page):
+                return SignInResult("no_form", f"the sign-in form on {saved} is on the page but stayed hidden for "
+                                               f"{FORM_WAIT_S:.0f} s (the site may still be loading). Nothing was "
+                                               "typed; try again in a moment.", page.url)
             if frame is None:
                 return SignInResult("already_signed_in", f"no sign-in form on {saved}: already signed in (the site "
                                                          "kept the session)", page.url)
         # 3. a user-name-only first step (the password comes on the next page)
         if pw is None and user is not None:
             if not login.username:
-                return SignInResult("no_form", "the page asks for a user name, but this login has none saved",
-                                    page.url)
+                return SignInResult("no_form", f"{saved.host} asks for a user name, but the saved login "
+                                               f"'{login.name}' has no user name. Nothing was typed. Save it again "
+                                               "with the user name in Settings > Logins (Replace).", page.url)
             if why := await self._type(page, frame, user, login.username, saved, secret=False):
                 return SignInResult("refused", "REFUSED: " + why, page.url)
             await user.press("Enter")
             await self._settle(page)
-            frame, user, pw, refusal = await self._form(page, saved)
+            frame, user, pw, refusal = await self._form_soon(page, saved)
             if refusal:
                 return SignInResult("refused", "REFUSED: " + refusal, page.url)
             if pw is None:
-                return SignInResult("no_form", f"entered the user name on {saved.host} but no password box came",
-                                    page.url)
+                return SignInResult("no_form", f"entered the user name on {saved.host} but no password box came "
+                                               f"(now at {page.url}). Nothing else was typed.", page.url)
             user = None  # already entered
         assert pw is not None and frame is not None
         if not login.password:
-            return SignInResult("no_form", "the page asks for a password, but this login has none saved", page.url)
+            return SignInResult("no_form", f"{saved.host} asks for a password, but the saved login '{login.name}' has "
+                                           "no password saved (only a user name). Nothing was typed. Save it again "
+                                           "with the password in Settings > Logins (Replace).", page.url)
         result = SignInResult("failed", "not submitted", page.url)
-        for _attempt in range(CAPTCHA_SUBMITS):
+        for attempt in range(1, CAPTCHA_SUBMITS + 2):  # the last round only fetches the picture for the user
             if user is not None and login.username and (
                     why := await self._type(page, frame, user, login.username, saved, secret=False)):
                 return SignInResult("refused", "REFUSED: " + why, page.url)
             if why := await self._type(page, frame, pw, login.password, saved, secret=True):
                 return SignInResult("refused", "REFUSED: " + why, page.url)
             had_captcha = await _simple_captcha(page)
-            if had_captcha:  # a simple captcha on the form itself (delta.tools.captcha decides how)
+            if had_captcha:  # a simple captcha on the form itself: read on this PC where allowed, else the user
                 if self.captcha is None:
-                    return SignInResult("needs_user", "NEEDS HUMAN: the form has a captcha and captcha help is off",
-                                        page.url)
-                entered, note = await self.captcha(page)
-                if not entered:
-                    return SignInResult("needs_user", f"NEEDS HUMAN: {note}", page.url)
+                    return SignInResult("needs_user", f"NEEDS HUMAN: the sign-in form on {saved.host} has a captcha "
+                                                      "and captcha help is not set up.", page.url)
+                step = await self.captcha(page, attempt)
+                if not step.entered:
+                    return SignInResult("needs_user", f"CAPTCHA: {step.note}", page.url, captcha_image=step.image)
+            elif attempt > 1:
+                return result  # the captcha went away; the last answer stands
             before = page.url
             try:
                 await pw.press("Enter")
@@ -267,14 +312,87 @@ class SignInEngine:
                 return SignInResult("failed", f"could not submit the form ({type(e).__name__})", page.url)
             await self._settle(page)
             result = await self._after(page, login, saved, before)
-            if not (result.outcome == "wrong_password" and had_captcha and CAPTCHA_ERROR.search(await _text(page))):
+            if not (had_captcha and result.outcome in ("wrong_password", "failed")
+                    and captcha_rejected(await _text(page))):
                 return result
             # the site rejected the captcha, not the password: the form comes back, fill it again (bounded)
-            frame, user, pw, refusal = await self._form(page, saved)
+            frame, user, pw, refusal = await self._form_soon(page, saved)
             if refusal or frame is None or pw is None:
                 return SignInResult("refused", "REFUSED: " + refusal, page.url) if refusal else result
         return SignInResult("needs_user", f"NEEDS HUMAN: {saved.host} kept rejecting the captcha; Delta stopped "
                                           f"after {CAPTCHA_SUBMITS} tries.", page.url)
+
+    async def answer_captcha(self, page: Any, login: Login, answer: str) -> SignInResult:
+        """Finish a sign-in that waited for the user to read the captcha: the same checks as sign_in (the tab and
+        the form's frame on the exact saved origin), the user name and password filled again (sites often clear the
+        password when the page reloads), the user's answer in the captcha box, one submit, then the same check that
+        the sign-in worked. A captcha the site rejects comes back with the new picture for the user."""
+        saved = login.site
+        if why := mismatch(saved, page.url):
+            return SignInResult("refused", f"REFUSED: the sign-in tab is no longer on the saved site: {why}. Nothing "
+                                           "was typed.", page.url)
+        frame, user, pw, refusal = await self._form_soon(page, saved)
+        if refusal:
+            return SignInResult("refused", "REFUSED: " + refusal, page.url)
+        if frame is None or pw is None:
+            if not await self._has_password(page):
+                return SignInResult("already_signed_in", f"no sign-in form on {saved} any more: already signed in",
+                                    page.url)
+            return SignInResult("no_form", f"the sign-in form on {saved.host} is gone; ask again to start over.",
+                                page.url)
+        from delta.tools.captcha import AUTO_FIELD
+
+        box = await _visible(frame, AUTO_FIELD)
+        if box is None:
+            return SignInResult("no_form", f"the captcha box on {saved.host} is gone; ask again to start over.",
+                                page.url)
+        if user is not None and login.username and (
+                why := await self._type(page, frame, user, login.username, saved, secret=False)):
+            return SignInResult("refused", "REFUSED: " + why, page.url)
+        if why := await self._type(page, frame, pw, login.password, saved, secret=True):
+            return SignInResult("refused", "REFUSED: " + why, page.url)
+        if why := await self._type(page, frame, box, answer, saved, secret=False):
+            return SignInResult("refused", "REFUSED: " + why, page.url)
+        before = page.url
+        try:
+            await pw.press("Enter")
+        except Exception as e:
+            return SignInResult("failed", f"could not submit the form ({type(e).__name__})", page.url)
+        await self._settle(page)
+        result = await self._after(page, login, saved, before)
+        if result.outcome in ("wrong_password", "failed") and captcha_rejected(await _text(page)):
+            from delta.tools.captcha import PlaywrightCaptchaPage
+
+            image = None
+            with contextlib.suppress(Exception):
+                image = await PlaywrightCaptchaPage(page).screenshot("")
+            return SignInResult("needs_user", f"CAPTCHA: {saved.host} said the characters were wrong; here is the "
+                                              "new picture.", page.url, captcha_image=image)
+        return result
+
+    async def _form_soon(self, page: Any, saved: Origin) -> tuple[Any, Any | None, Any | None, str]:
+        """_form, but a sign-in form that is already on the page and not shown yet (many ERPs hide the whole page
+        until a stylesheet arrives) gets up to FORM_WAIT_S to appear, instead of being taken for 'signed in'."""
+        found = await self._form(page, saved)
+        if found[0] is not None or found[3]:
+            return found
+        loop = asyncio.get_running_loop()
+        end = loop.time() + FORM_WAIT_S
+        while loop.time() < end and await self._hidden_password(page):
+            await asyncio.sleep(0.4)
+            found = await self._form(page, saved)
+            if found[0] is not None or found[3]:
+                return found
+        return found
+
+    async def _hidden_password(self, page: Any) -> bool:
+        """A SIGN-IN password box is in the page (any frame) even though none is visible yet: its form, the box itself
+        or the address says log in / sign in (a hidden "change password" box on a signed-in page does not count)."""
+        for frame in _frames(page):
+            with contextlib.suppress(Exception):
+                if await asyncio.wait_for(frame.evaluate(HIDDEN_SIGNIN_JS), 3.0):
+                    return True
+        return False
 
     async def _after(self, page: Any, login: Login, saved: Origin, before: str) -> SignInResult:
         for _ in range(2):  # an OTP step, then whatever comes after it

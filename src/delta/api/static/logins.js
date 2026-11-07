@@ -21,9 +21,17 @@
       const sel = h("select", {"aria-label": "Permission for " + l.name}, ...["ask", "always"].map(v =>
         h("option", {value: v, selected: l.permission === v, text: v === "ask" ? "Ask every time" : "Always allow"})));
       sel.onchange = () => send(`/api/logins/${l.id}/permission`, "PUT", {permission: sel.value});
-      return card(l.name, l.origin, l.insecure,
-        (l.username || "no user name") + (l.last_used ? ", last used " + l.last_used + " (" + l.last_outcome + ")" : ""),
-        sel, act("Test", `/api/logins/${l.id}/test`, l.name), rm(`/api/logins/${l.id}`, "Remove " + l.name + "?"));
+      // "This site has a simple text captcha, let Delta read it": the user's switch, this exact site only
+      const cap = h("input", {type: "checkbox", checked: !!l.simple_captcha, "aria-label": "Let Delta read the simple captcha on " + l.name});
+      cap.onchange = async () => {
+        const t = await send(`/api/logins/${l.id}/captcha`, "PUT", {on: cap.checked}).catch(err);
+        D.toast({title: l.name, body: t.ok ? (cap.checked ? "Delta reads this captcha (OCR, 3 tries)." : "Delta asks you for the captcha.") : det(t), kind: t.ok ? "ok" : "warn"});
+        load(); };
+      const note = (l.username || "no user name") + (l.has_password ? "" : ", NO password saved: save it again with Replace") +
+        (l.last_used ? ", last used " + l.last_used + " (" + (l.last_outcome_words || l.last_outcome) + ")" : "");
+      return card(l.name, l.origin, l.insecure || !l.has_password, note,
+        sel, h("label", {class: "check"}, cap, " Simple text captcha: let Delta read it"),
+        act("Test", `/api/logins/${l.id}/test`, l.name), rm(`/api/logins/${l.id}`, "Remove " + l.name + "?"));
     }));
     if (!r.vault) say("lg_msg", false, "Windows DPAPI is not available, so logins cannot be saved. Repair Delta with the installer.");
     $("wt_login").replaceChildren(...r.logins.map(l => h("option", {value: l.id, text: l.name})));
@@ -41,11 +49,16 @@
   $("lg_add").onclick = async () => {
     const v = id => $(id).value.trim();
     const body = {name: v("lg_name"), site: v("lg_site"), username: v("lg_user"), password: $("lg_pass").value,
-      login_url: v("lg_url"), permission: $("lg_perm").value, allow_http: $("lg_http").checked};
-    const r = await send("/api/logins", "POST", body).catch(err);
+      login_url: v("lg_url"), permission: $("lg_perm").value, allow_http: $("lg_http").checked,
+      simple_captcha: $("lg_captcha").checked};
+    if (!body.password && !confirm("No password typed. Save " + (body.name || "this login") + " with only a user name? Delta cannot sign in to a site that asks for a password.")) return;
+    let r = await send("/api/logins", "POST", body).catch(err);
+    // Same name again: update that login in place (never a second copy), once the user says so
+    if (!r.ok && /already exists/.test(det(r)) && confirm("A login called " + body.name + " already exists. Replace its site, user name and password with these?"))
+      r = await send("/api/logins", "POST", {...body, replace: true}).catch(err);
     $("lg_pass").value = "";
     say("lg_msg", r.ok, r.ok ? r.message : det(r));
-    if (r.ok) { for (const id of ["lg_name", "lg_site", "lg_user", "lg_url"]) $(id).value = ""; load(); }
+    if (r.ok) { for (const id of ["lg_name", "lg_site", "lg_user", "lg_url"]) $(id).value = ""; $("lg_captcha").checked = false; load(); }
   };
   $("wt_add").onclick = async () => {
     const body = {login: $("wt_login").value, what: $("wt_what").value.split(",").map(s => s.trim()).filter(Boolean),

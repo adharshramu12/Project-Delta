@@ -299,6 +299,7 @@ body.panel-closed .panel{display:none}
 .avatar .ic{width:26px;height:26px}
 .answer{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--s2);padding-top:2px}
 .answer-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
+.captcha-pic{display:block;margin:8px 0 2px;max-width:240px;min-height:32px;border:1px solid var(--border);border-radius:var(--r-md);background:#fff}
 .answer-meta{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2);font-size:var(--fs-xs);color:var(--text-3)}
 .msg.delta.failed .answer-text{color:var(--danger)}
 .note-line{display:flex;gap:var(--s2);align-items:flex-start;font-size:var(--fs-sm);color:var(--text-2);padding-left:38px;overflow-wrap:anywhere}

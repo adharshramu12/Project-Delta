@@ -307,6 +307,8 @@ async def run_task(task: EvalTask, root: Path, site: FixtureSite, router_factory
         executor.faults = FaultInjector(fill(task.inject, values))
     orch = Orchestrator(settings, router, executor, memory, None, events, audit, skill_store, learning_store, proof)
     orch.engine = engine
+    if portal is not None:  # "log in to my ERP" as the fixed flow, as in the real app
+        portal.attach_flow(orch, executor, events)
     gate = None
     if learning_store is not None and settings.learning.enabled:  # the promotion gate, lessons, recipe repair
         from delta.learning.gate import PromotionGate

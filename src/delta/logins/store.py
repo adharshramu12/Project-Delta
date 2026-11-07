@@ -27,6 +27,15 @@ OWN_BROWSERS = ("chrome", "edge")  # the user's own browsers Delta can fill a lo
 PERMISSIONS = ("ask", "always")  # "allow for this task" is chosen at the prompt and kept in memory only
 PERMISSION_WORDS = {"ask": "Ask every time", "always": "Always allow for this site"}
 MAX_LOGINS = 50
+# What the dashboard and the CLI show for a login's last outcome (delta.logins.signin.OUTCOMES), in plain words.
+OUTCOME_WORDS = {"signed_in": "signed in", "already_signed_in": "already signed in",
+                 "wrong_password": "the site said the password is wrong", "refused": "refused (not the saved site)",
+                 "needs_user": "waited for you (captcha, code or permission)", "no_form": "no sign-in form found",
+                 "failed": "did not finish", "aborted": "stopped (you took over)", "not_allowed": "not allowed"}
+# Words that say nothing about which login is meant ("my example university erp portal" -> example, university, erp).
+_FILLER = {"my", "the", "a", "an", "to", "into", "in", "on", "of", "for", "portal", "site", "website", "page",
+           "account", "login", "log", "sign", "signin", "web", "online", "please", "college", "student"}
+_HOST_NOISE = {"www", "com", "in", "org", "net", "edu", "ac", "co", "io", "uk", "gov", "new", "app"}
 NOT_SAVED = ("Delta could not encrypt this login with Windows DPAPI, so it was not saved. Delta never stores "
              "passwords unencrypted. Repair Delta by running the installer again or `delta update`.")
 
@@ -63,6 +72,10 @@ class Login:
     # The one-time consent to fill this login in the user's OWN browser (not Delta's private one): browser key
     # (chrome | edge) -> when the user gave it. Asked once per site and browser, even with "always" (service.py).
     own_browser: dict[str, str] = field(default_factory=dict)
+    # "This site has a simple text captcha, let Delta read it" (Settings > Logins). Off by default; set only by the
+    # user. When on, a simple image captcha on THIS exact origin is read with Windows OCR, like a host the user
+    # allowed with `delta captcha allow`. reCAPTCHA, hCaptcha and Turnstile are still handed over, never solved.
+    simple_captcha: bool = False
 
     @property
     def site(self) -> Origin:
@@ -73,8 +86,10 @@ class Login:
         out: dict[str, Any] = {"id": self.id, "name": self.name, "origin": self.origin, "login_url": self.login_url,
                                "permission": self.permission, "permission_words": PERMISSION_WORDS[self.permission],
                                "has_password": bool(self.password), "last_used": self.last_used,
-                               "last_outcome": self.last_outcome, "insecure": not self.site.secure,
-                               "own_browser": sorted(self.own_browser)}
+                               "last_outcome": self.last_outcome,
+                               "last_outcome_words": OUTCOME_WORDS.get(self.last_outcome, self.last_outcome),
+                               "insecure": not self.site.secure, "own_browser": sorted(self.own_browser),
+                               "simple_captcha": self.simple_captcha}
         if with_username:
             out["username"] = self.username
         else:
@@ -107,7 +122,8 @@ class LoginStore:
                      username=str(data.get("username") or ""), password=str(data.get("password") or ""),
                      login_url=str(data.get("login_url") or ""), permission=perm if perm in PERMISSIONS else "ask",
                      created=str(data.get("created") or ""), last_used=str(data.get("last_used") or ""),
-                     last_outcome=str(data.get("last_outcome") or ""), own_browser=own)
+                     last_outcome=str(data.get("last_outcome") or ""), own_browser=own,
+                     simple_captcha=data.get("simple_captcha") is True)
 
     def list(self) -> list[Login]:
         if not self.folder.exists():
@@ -120,7 +136,8 @@ class LoginStore:
         return len(list(self.folder.glob("*.bin"))) if self.folder.exists() else 0
 
     def get(self, ref: str) -> Login | None:
-        """By id, by name (any case) or by site (host or address)."""
+        """By id, by name (any case) or by site (host or address). Exact only: remove, permission and the captcha
+        switch use it, so a vague name never changes the wrong login (sign-ins use resolve())."""
         ref = (ref or "").strip()
         if not ref:
             return None
@@ -136,6 +153,46 @@ class LoginStore:
                 return same[0]
         return None
 
+    def resolve(self, ref: str) -> tuple[Login | None, str]:
+        """(the one login `ref` means, '') or (None, why not in plain words that name the saved logins).
+
+        Tried in order, the first that finds exactly one wins: the id or the exact name; the site, from a host or
+        any address on it (path, query, trailing slash, the default port and a leading "www." do not matter for
+        FINDING the login; typing still needs the exact saved origin, delta.logins.origin); then the words, so
+        "Example University ERP" finds a login named "euerp" for https://newerp.example-university.edu. Two or more
+        matches are never guessed between."""
+        ref = (ref or "").strip()
+        items = self.list()
+        if not ref:
+            return None, "say which saved login to use" + _saved(items)
+        low = ref.lower()
+        for x in items:
+            if x.id == slug(ref) or x.name.lower() == low:
+                return x, ""
+        page = origin_of(ref if "://" in ref else "https://" + ref) if " " not in ref else None
+        if page is not None:
+            bare = _bare(page.host)
+            same = [x for x in items if _bare(x.site.host) == bare]
+            if len(same) == 1:
+                return same[0], ""
+            if len(same) > 1:
+                return None, (f"{len(same)} saved logins are for {page.host}: "
+                              + "; ".join(_describe(x) for x in same) + ". Say which one by its name.")
+        words = [w for w in re.findall(r"[a-z0-9]+", low) if w not in _FILLER]
+        if words:
+            hits = [x for x in items if _words_match(words, x)]
+            if len(hits) == 1:
+                return hits[0], ""
+            if len(hits) > 1:
+                return None, (f"'{ref}' fits {len(hits)} saved logins: " + "; ".join(_describe(x) for x in hits)
+                              + ". Say which one by its name.")
+        return None, f"no saved login matches '{ref}'" + _saved(items)
+
+    def captcha_allowed(self, url: str) -> bool:
+        """A saved login for exactly this page's origin has "let Delta read the simple captcha" switched on."""
+        page = origin_of(url)
+        return page is not None and any(x.simple_captcha and x.site == page for x in self.list())
+
     def for_origin(self, url: str) -> builtins.list[Login]:
         page = origin_of(url)
         return [x for x in self.list() if page is not None and x.site == page]
@@ -144,15 +201,19 @@ class LoginStore:
     def _save(self, login: Login) -> None:
         data = {"name": login.name, "origin": login.origin, "username": login.username, "password": login.password,
                 "login_url": login.login_url, "permission": login.permission, "created": login.created,
-                "last_used": login.last_used, "last_outcome": login.last_outcome, "own_browser": login.own_browser}
+                "last_used": login.last_used, "last_outcome": login.last_outcome, "own_browser": login.own_browser,
+                "simple_captcha": login.simple_captcha}
         try:
             self.box.save(login.id, data)
         except SecretsUnavailableError as e:
             raise VaultMissingError(NOT_SAVED) from e
 
     def add(self, name: str, url: str, username: str, password: str, *, login_url: str = "",
-            permission: str = "ask", allow_http: bool = False, replace: bool = False) -> Login:
-        """Save a login bound to the exact origin of `url`. LoginError with a plain reason when it cannot be."""
+            permission: str = "ask", allow_http: bool = False, replace: bool = False,
+            simple_captcha: bool | None = None) -> Login:
+        """Save a login bound to the exact origin of `url`. LoginError with a plain reason when it cannot be.
+        replace=True updates the login with the same name in place (never a second copy). simple_captcha None keeps
+        a replaced login's captcha setting (a new login starts with it off)."""
         if not self.box.available():
             raise VaultMissingError(NOT_SAVED)
         name = (name or "").strip()
@@ -175,12 +236,16 @@ class LoginStore:
             raise LoginError("permission must be 'ask' or 'always'")
         existing = self._load(lid)
         if existing is not None and not replace:
-            raise LoginError(f"a login called '{existing.name}' already exists; remove it first or pick another name")
+            raise LoginError(f"a login called '{existing.name}' already exists. Save it again with Replace to update "
+                             "its password, or pick another name")
         if existing is None and len(self.list()) >= MAX_LOGINS:
             raise LoginError(f"at most {MAX_LOGINS} logins can be saved")
+        keep = existing is not None and existing.origin == str(site)
         login = Login(id=lid, name=name[:60], origin=str(site), username=username.strip(), password=password,
                       login_url=login_url.strip(), permission=permission,
-                      created=existing.created if existing else _now())
+                      created=existing.created if existing else _now(),
+                      simple_captcha=(existing.simple_captcha if keep and existing else False)
+                      if simple_captcha is None else bool(simple_captcha))
         self._save(login)
         return login
 
@@ -203,6 +268,16 @@ class LoginStore:
         self._save(login)
         return login
 
+    def set_simple_captcha(self, ref: str, on: bool) -> Login:
+        """The user's switch "This site has a simple text captcha, let Delta read it" for one login (its exact
+        origin only). Only the dashboard and the CLI call this; no tool can."""
+        login = self.get(ref)
+        if login is None:
+            raise LoginError(f"no saved login called '{ref}'")
+        login.simple_captcha = bool(on)
+        self._save(login)
+        return login
+
     def allow_own_browser(self, lid: str, browser: str) -> Login | None:
         """Record the user's one-time consent to fill this login in their own `browser` (chrome | edge)."""
         if browser not in OWN_BROWSERS:
@@ -221,3 +296,27 @@ class LoginStore:
         login.last_used, login.last_outcome = _now(), outcome[:40]
         with contextlib.suppress(LoginError):
             self._save(login)
+
+
+def _bare(host: str) -> str:
+    return host[4:] if host.startswith("www.") else host
+
+
+def _describe(x: Login) -> str:
+    return f"'{x.name}' ({x.origin}, {'password saved' if x.password else 'NO password saved'})"
+
+
+def _saved(items: builtins.list[Login]) -> str:
+    return (". Saved logins: " + "; ".join(_describe(x) for x in items)) if items else (
+        ". No logins are saved yet: the user adds one on the PC in Settings > Logins (or `delta logins add`)")
+
+
+def _words_match(words: builtins.list[str], x: Login) -> bool:
+    """Every telling word of the request is part of the login's name or its host ("example", "university" and "erp" are
+    all inside "euerp newerp.example-university.edu"), and at least one word is more than a host's noise."""
+    hay = f"{x.name.lower()} {x.site.host}"
+    host_words = set(re.findall(r"[a-z0-9]+", x.site.host)) - _HOST_NOISE
+    telling = [w for w in words if len(w) >= 2]
+    if not telling or not all(w in hay for w in telling):
+        return False
+    return any(w in x.name.lower() or any(w in h for h in host_words) for w in telling)

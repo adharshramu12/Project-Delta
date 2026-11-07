@@ -5,7 +5,9 @@ Off by default. How it decides, for the site open in Delta's browser:
 1. reCAPTCHA, hCaptcha and Cloudflare Turnstile are refused outright: they exist to tell people
    from programs, so Delta never tries to get past them and hands the page back to the user.
 2. The site's host is in `captcha.allowed_sites` (set by the user with `delta captcha allow <host>`,
-   never by Delta itself: its settings file is a protected path): the captcha image is read on this PC
+   never by Delta itself: its settings file is a protected path), or a saved login for exactly this origin has the
+   user's switch "This site has a simple text captcha, let Delta read it" on (Settings > Logins; delta.logins.store,
+   whose sealed files sit in the same protected folder): the captcha image is read on this PC
    with Windows OCR first and, only when the user lets pictures go to a model (attachments.vision is not
    "off"), by the vision model, then typed into the field. At most MAX_AUTO_ATTEMPTS (3) times per site in
    ATTEMPT_WINDOW_S; from the second attempt on the captcha is refreshed first (a new picture), never more.
@@ -220,6 +222,8 @@ class CaptchaSolver:
     save_image: Callable[[str, str], str | None] = lambda b64, label: None
     clock: Callable[[], float] = time.monotonic
     ocr: Reader | None = None  # local OCR, tried first
+    # url -> a saved login for exactly that origin lets Delta read its simple captcha (LoginStore.captcha_allowed)
+    origin_allowed: Callable[[str], bool] | None = None
 
     def __post_init__(self) -> None:
         self._attempts: dict[str, tuple[int, float]] = {}  # host -> (auto attempts, first attempt time)
@@ -233,6 +237,62 @@ class CaptchaSolver:
         since = self._attempts[host][1] if used else self.clock()
         self._attempts[host] = (used + 1, since)
         return used + 1
+
+    def allowed(self, url: str) -> bool:
+        """The user lets Delta read simple captchas on this page: its host is on the allowlist, or a saved login for
+        exactly its origin has the captcha switch on."""
+        if site_allowed(host_of(url), self.allowed_sites()):
+            return True
+        with contextlib.suppress(Exception):
+            return bool(self.origin_allowed is not None and self.origin_allowed(url))
+        return False
+
+    async def _read(self, shot: bytes) -> str | None:
+        answer: str | None = None
+        if self.ocr is not None:
+            with contextlib.suppress(Exception):  # OCR missing or unreadable: the model may still read it
+                answer = clean_answer(await self.ocr(shot))
+        if not answer and self.vision is not None:
+            with contextlib.suppress(Exception):  # no model, model error: counts as a failed read
+                answer = clean_answer(await self.vision(base64.b64encode(shot).decode()))
+        return answer
+
+    async def auto_fill(self, page: CaptchaPage) -> tuple[bool, str, bytes | None]:
+        """For a saved-login sign-in: (typed an answer, why not, the current captcha picture). Reads only where the
+        user allowed it, at most MAX_AUTO_ATTEMPTS per site in ATTEMPT_WINDOW_S, asking the site for a new picture
+        when one could not be read. Never asks a person itself and never submits: the sign-in does both."""
+        host = host_of(page.url)
+        if not host:
+            return False, "no web page is open", None
+        if kind := challenge_kind(await page.challenge_markers()):
+            self._audit(host, "refused", False, challenge=kind)
+            return False, f"this page uses {kind}, which Delta never tries to solve or get around", None
+        if not await page.has_field(""):
+            return False, "no captcha box was found on the form", None
+        if await page.is_secret_field(""):
+            return False, "REFUSED: the box that looked like a captcha is a password or payment box", None
+        shot = await page.screenshot("")
+        if shot is None:
+            return False, "no captcha picture was found next to the box", None
+        if not self.allowed(page.url):
+            return False, f"Delta does not read the captcha on {host} (that switch is off in Settings > Logins)", shot
+        if self.vision is None and self.ocr is None:
+            return False, "there is no way to read it on this PC (Windows OCR is not available)", shot
+        tried = False
+        while self._used(host) < MAX_AUTO_ATTEMPTS:
+            attempt = self._count(host)
+            if tried:  # this picture could not be read: ask the site for a new one first
+                with contextlib.suppress(Exception):
+                    if await page.refresh("") and (new := await page.screenshot("")):
+                        shot = new
+            tried = True
+            answer = await self._read(shot)
+            if answer:
+                await page.fill("", answer)
+            self._audit(host, "auto", bool(answer), attempt=attempt)
+            if answer:
+                return True, f"read on this PC (attempt {attempt} of {MAX_AUTO_ATTEMPTS})", shot
+        return False, f"Delta could not read the captcha on {host} after {MAX_AUTO_ATTEMPTS} tries", shot
 
     def _audit(self, host: str, mode: str, ok: bool, **extra: Any) -> None:
         self.audit.record("captcha", site=host, mode=mode, ok=ok, **extra)  # never the answer
@@ -255,7 +315,7 @@ class CaptchaSolver:
             return ToolResult(False, "no captcha image found; pass image= (a CSS selector or its alt text)")
         b64 = base64.b64encode(shot).decode()
 
-        if not site_allowed(host, self.allowed_sites()):
+        if not self.allowed(page.url):
             reason = "site not in captcha.allowed_sites"
         elif self.vision is None and self.ocr is None:
             reason = "no way to read it on this PC (no Windows OCR, and pictures may not go to a model)"
@@ -267,13 +327,7 @@ class CaptchaSolver:
                     with contextlib.suppress(Exception):
                         if await page.refresh(image) and (new := await page.screenshot(image)):
                             shot, b64 = new, base64.b64encode(new).decode()
-                answer: str | None = None
-                if self.ocr is not None:
-                    with contextlib.suppress(Exception):  # OCR missing or unreadable: the model may still read it
-                        answer = clean_answer(await self.ocr(shot))
-                if not answer and self.vision is not None:
-                    with contextlib.suppress(Exception):  # no model, model error: counts as a failed read
-                        answer = clean_answer(await self.vision(b64))
+                answer = await self._read(shot)
                 if answer:
                     await page.fill(field, answer)
                 self._audit(host, "auto", bool(answer), attempt=attempt)

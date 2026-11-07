@@ -3,6 +3,8 @@ of tools the task needs (so each model call carries only those tool descriptions
 
 from __future__ import annotations
 
+import re
+
 from delta import CREDIT
 from delta.core.state import Plan
 from delta.core.style import STYLE_BLOCK, WARMTH_BLOCK
@@ -19,6 +21,9 @@ Tools the agent can use: {tools}.
 Decide whether the request needs tools (touching files, apps, the system, the web, memory, or
 facts you are not certain about) or can be answered directly (greetings, general knowledge you
 are sure of, opinions).
+You only plan; the agent ACTS on the user's PC with the tools above (browser, apps, files, saved logins). So a
+request to do something on the PC or a website always has needs_tools true: never answer that you cannot
+perform actions, use the desktop or reach the browser.
 
 Reply with JSON only:
 {{"needs_tools": true|false,
@@ -110,6 +115,16 @@ PARALLEL LOOKUPS (optional): when the request needs 2 or more INDEPENDENT facts 
 at the same time before the agent starts. Leave it out for anything else, and always for one simple lookup."""
 
 
+_CANNOT_ACT = re.compile(r"\bI(?:['’]m|\s+am)?\s+(?:not able to|unable to|can['’]?t|cannot|can not|don['’]?t have|"
+                         r"do not have|have no)\b[^.]{0,80}\b(?:desktop|interface|environment|sandbox|computer|pc|"
+                         r"browser|actions?|tools?|access|websites?|portals?|log ?in|sign ?in)\b", re.I)
+
+
+def cannot_act(answer: str) -> bool:
+    """The planner's direct answer says it cannot act on the PC (wrong: the agent can)."""
+    return bool(_CANNOT_ACT.search(answer or ""))
+
+
 async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memory: str, name: str,
                     skills: list[Skill] | None = None, environment: str = "", helpers: int = 0) -> Plan:
     skills = skills or []
@@ -149,6 +164,11 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
         plan.tools = list(dict.fromkeys([*plan.tools, *next(s.tools for s in skills if s.id == sid)]))
     if not plan.needs_tools and not plan.answer:
         plan.needs_tools = True
+    if not plan.needs_tools and cannot_act(plan.answer):
+        # A CLI model (Codex, Claude Code) judging by its own sandbox answered "I can't perform desktop actions in
+        # this interface". Delta's tools can: plan it as a tool task instead of sending that reply.
+        plan.needs_tools, plan.answer = True, ""
+        plan.goal = plan.goal or text
     if plan.needs_tools and not plan.success_criteria:
         plan.success_criteria = [f"The request is fulfilled: {text}"]
     research = data.get("research")
