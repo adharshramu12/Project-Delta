@@ -215,3 +215,57 @@ def test_overlay_windows_have_no_title_so_they_are_never_taken_for_an_app():
               encoding="utf-8") as f:
         src = f.read()
     assert 'CreateWindowExW(OVERLAY_EX_STYLE, self._class, "",' in src
+
+
+# --- blocked apps: checked against what a loose match would really open ----------------------------------------
+# Bug it fixes: the policy compared the blocked list with the name the agent asked for. "open registry" is not a
+# blocked name, but the loose Start-menu match then opened "Registry Editor", which the user had blocked.
+REGEDIT = AppRecord("Registry Editor", "lnk",
+                    r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Registry Editor.lnk")
+
+
+async def test_a_loose_match_never_opens_a_blocked_app(tmp_path, monkeypatch):
+    opened: list[str] = []
+    monkeypatch.setattr(apps, "_shell_open", lambda target, argument=None: opened.append(target))
+    monkeypatch.setattr(apps.shutil, "which", lambda exe: None)
+    t = tool_with(tmp_path, store=[], shortcuts=[REGEDIT])
+    t.denied_apps = lambda: ["registry editor"]
+    r = await t.run(OpenAppArgs(name="registry"))
+    assert not r.ok and r.evidence["denied"] and "Registry Editor" in r.output and opened == []
+    t.denied_apps = lambda: ["regedit.exe"]  # an exe name in the list matches a launch way's exe too
+    t2 = tool_with(tmp_path, store=[])
+    monkeypatch.setattr(OpenApp, "plan", lambda self, args: ("regedit", ["regedit"],
+                                                             [Launch("exe", lambda: opened.append("x"), "regedit.exe")],
+                                                             ""))
+    t2.denied_apps = lambda: ["RegEdit"]
+    r = await t2.run(OpenAppArgs(name="registry tool"))
+    assert not r.ok and r.evidence["denied"] and opened == []
+
+
+async def test_blocked_list_through_delta_itself(tmp_path, monkeypatch):
+    """The real wiring: bootstrap hands open_app the policy's live list, so the user's setting is what counts."""
+    from delta.bootstrap import build
+    from delta.config import Boundaries, Settings
+
+    opened: list[str] = []
+    monkeypatch.setattr(apps, "_shell_open", lambda target, argument=None: opened.append(target))
+    monkeypatch.setattr(apps.shutil, "which", lambda exe: None)
+    monkeypatch.setattr(apps, "scan_shortcuts", lambda dirs=None: ([REGEDIT], 1.0))
+    monkeypatch.setattr(apps, "scan_app_paths", lambda: ([], [1, 1]))
+    monkeypatch.setattr(apps, "scan_store_apps", lambda: [])
+    c = build(Settings(data_dir=tmp_path, boundaries=Boundaries(denied_apps=["Registry Editor"])))
+    tool = c.registry.get("open_app")
+    tool.index = AppIndex(tmp_path / "idx", store_scan=lambda: [])  # type: ignore[attr-defined]
+    r = await c.orchestrator.executor.execute("open_app", {"name": "registry"}, task_id="t1")
+    assert not r.ok and opened == [] and "blocked" in r.output.lower()
+    assert tool.blocked(["notepad"]) is None  # type: ignore[attr-defined]
+
+
+async def test_an_opened_window_is_proof_enough(tmp_path, monkeypatch):
+    t = tool_with(tmp_path)
+    run_with(monkeypatch, t, [Launch("exe", lambda: None, "notepad.exe")], window="Untitled - Notepad")
+    r = await t.run(OpenAppArgs(name="notepad"))
+    assert r.ok and r.evidence["verified"]  # the instant "open X" path needs no checker call
+    run_with(monkeypatch, t, [Launch("exe", lambda: None, "notepad.exe")], window=None, running=True)
+    r = await t.run(OpenAppArgs(name="notepad"))
+    assert r.ok and not r.evidence.get("verified")  # started, but no window seen: the agent checks

@@ -14,8 +14,8 @@ import secrets
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -156,6 +156,14 @@ def _result_json(r: TaskResult) -> dict[str, Any]:
 
 def create_app(c: Container, token: str) -> FastAPI:
     app = FastAPI(title="Delta", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.exception_handler(Exception)
+    async def unexpected(request: Request, exc: Exception) -> JSONResponse:
+        # A bug in a route: a plain JSON answer the dashboard can show, the traceback in the logs (crashguard)
+        from delta.system.crashguard import guard_of
+
+        msg = guard_of(c).report(f"the dashboard ({request.method} {request.url.path})", exc)
+        return JSONResponse({"detail": msg}, status_code=500)
     hub = Hub()
     results: dict[str, dict[str, Any]] = {}
     by_id: dict[str, asyncio.Task[None]] = {}  # running tasks, so the dashboard can stop one

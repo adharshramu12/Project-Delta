@@ -52,10 +52,13 @@ from delta.system.governor import Governor
 from delta.system.hardware_guard import Health
 from delta.system.logging import log
 from delta.tools import snapshot
+from delta.tools.base import Risk
 from delta.tools.registry import ToolExecutor
 
+# The clock ("Today is") sits near the end with the goal and memory, not on line 2: everything above it is the same
+# for every task, so a provider's automatic prompt cache can reuse it across tasks, not only within one.
 ACTOR_PROMPT = """You are {name}, {owner}'s personal AI agent with access to their Windows PC
-({os}). Today is {now}. Home folder: {home}.
+({os}). Home folder: {home}.
 {credit}
 Desktop: {desktop}   Documents: {documents}
 SAVE FOLDER: {save_dir}  (the user opens it from the "Delta files" item on their Desktop)
@@ -131,6 +134,7 @@ Rules:
   with the full draft. It shows the user the draft and recipients and sends ONLY after they press Approve.
 {style}
 
+Today is {now}.
 GOAL: {goal}
 PLAN:
 {steps}
@@ -653,6 +657,20 @@ class Orchestrator:
                     f"Grounding check FAILED: {wrong}. Check the real state with a read-only tool, fix what is "
                     "missing, and in your summary state only what the tools in this task showed.")})
                 continue
+            if (proved := self._proved_by_tools(steps, plan)) is not None:
+                # Every action in the task proved its own result (Windows showed the app's window, the schedule
+                # was saved and read back, the message was confirmed in the chat): the checker would only read
+                # the same evidence again, so its call (and screenshot) is skipped.
+                await self.events.publish("task.verify", task_id=req.id, attempt=attempt, passed=True,
+                                          reason=proved.reason, checks=proved.checks, screenshot=False)
+                self.audit.record("verify", task=req.id, attempt=attempt, passed=True, reason=proved.reason,
+                                  checks=proved.checks, raw="")
+                if report is not None and (note := report.footnote()):
+                    final = f"{final}\n\n{note}"
+                done = TaskResult(req.id, "done", final, attempt, steps, proved, self.router.last_provider or "",
+                                  plan.skill_id)
+                done.grounding = report.to_dict() if report is not None else {}
+                return done
             await self._fresh_media_status(req.id, steps)
             shot, target = await self._final_screenshot(steps)  # saved as proof either way
             if self.engine is not None:
@@ -788,6 +806,27 @@ class Orchestrator:
                                   reason=verification.reason, checks=checks, screenshot=False)
         return TaskResult(req.id, "done", result.output, 1, steps, verification,
                           self.router.last_provider or "", fast=True)
+
+    def _proved_by_tools(self, steps: list[StepRecord], plan: Plan) -> Verification | None:
+        """A passed verification when every step worked and every step that changed something proved its own
+        result (evidence["verified"], the same proof the one-call fast path trusts); else None (the checker runs).
+        Read-only steps need no proof. A task with a failed step, or with no action at all, always goes to the
+        checker."""
+        if not steps or not all(s.ok for s in steps):
+            return None
+        acted = []
+        for s in steps:
+            tool = self.executor.registry.get(s.tool)
+            if tool is None:
+                return None
+            if getattr(tool, "risk", None) != Risk.READ:
+                acted.append(s)
+        if not acted or not all(s.evidence.get("verified") for s in acted):
+            return None
+        seen = acted[-1].output[:300]
+        checks = [{"checkpoint": c, "met": True, "seen": seen} for c in plan.success_criteria]
+        return Verification(True, f"{', '.join(dict.fromkeys(s.tool for s in acted))} proved it: {seen[:200]}",
+                            [], checks, False)
 
     def _initial_messages(self, req: TaskRequest, plan: Plan, memory_ctx: str,
                           skill: Skill | None = None) -> list[Message]:

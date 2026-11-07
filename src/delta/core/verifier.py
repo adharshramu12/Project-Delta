@@ -39,9 +39,11 @@ state: judge each checkpoint against what is visible in it first."""
 
 
 def _log(steps: list[StepRecord]) -> str:
+    # One compact JSON object per step and line: the same fields, without the indentation that made up about a
+    # fifth of the checker's input on long tasks.
     rows = [{"tool": s.tool, "args": s.args, "ok": s.ok, "evidence": s.evidence, "output": s.output[:800]}
             for s in steps[-25:]]
-    return json.dumps(rows, default=str, indent=1)
+    return "\n".join(json.dumps(r, default=str, ensure_ascii=False, separators=(",", ":")) for r in rows)
 
 
 async def verify(router: ModelRouter, request: str, plan: Plan, steps: list[StepRecord],

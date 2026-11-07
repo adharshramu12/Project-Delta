@@ -49,6 +49,31 @@ _RULES: list[tuple[re.Pattern[str], Any]] = [
 ]
 
 
+# "open notepad", "launch calculator", "open the WhatsApp app": one open_app call, 0 tokens, no planner. Strict:
+# one short app name and nothing else. Folders, files, websites, a second step ("and type hi"), or a target
+# ("in Chrome", "for Ravi") go to the planner as before. open_app proves the result itself (the app's window is
+# in front); when it cannot (not found, no window yet), the normal agent takes over.
+_OPEN_APP = re.compile(POLITE + r"(?:open|launch)\s+(?:up\s+)?(?:the\s+|my\s+)?(?P<app>[^\W\d][\w+&' -]{0,38}?)"
+                       r"(?:\s+app(?:lication)?)?(?:\s+(?:please|pls|now))?\s*[.!]*$", re.I)
+_NOT_AN_APP = re.compile(
+    r"\b(?:folder|folders|file|files|document|documents|downloads?|desktop|pictures?|photos?|music|videos?|"
+    r"recycle\s+bin|this\s+pc|drive|tab|tabs|window|windows|website|site|page|link|url|web|browser|chat|chats|"
+    r"conversation|email|emails|mail|message|messages|meeting|meet|call|notebook|account|settings\s+for|"
+    r"and|then|with|in|on|for|to|from|at|of|it|that|this|them|again|new|last|recent|youtube|gmail|google|chatgpt|"
+    r"gemini|claude|instagram|facebook|linkedin|twitter|reddit|amazon|flipkart|netflix|wikipedia|github|"
+    r"notebooklm|perplexity)\b", re.I)
+
+
+def open_app_intent(text: str) -> Intent | None:
+    m = _OPEN_APP.match(text)
+    if not m:
+        return None
+    app = m["app"].strip(" '")
+    if not app or len(app.split()) > 3 or _NOT_AN_APP.search(app):
+        return None
+    return Intent("open_app", {"name": app}, f"{app}'s window is open and in front")
+
+
 def _clean(q: str) -> str:
     return re.sub(r"^(?:the|a|an)\s+", "", q.strip(), flags=re.I).strip(" .!\"'")
 
@@ -67,6 +92,8 @@ def match_intent(text: str, available: set[str]) -> Intent | None:
         if m:
             intent = build(m)
             return intent if intent.tool in available else None
+    if (opened := open_app_intent(t)) is not None:
+        return opened if opened.tool in available else None
     if (browser := browser_intent(t)) is not None:
         return browser if browser.tool in available else None
     if (sched := schedule_intent(t)) is not None:

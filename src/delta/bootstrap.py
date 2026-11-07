@@ -537,6 +537,8 @@ def build(settings: Settings) -> Container:
         closers.append(("connectors", connectors.manager.close))
     send_email.connectors = connectors  # send through the Gmail app when it is connected and can send
     executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
+    if (opener := registry.get("open_app")) is not None:  # blocked apps: also what a loose match would open
+        opener.denied_apps = lambda: list(executor.policy.b.denied_apps)  # type: ignore[attr-defined]
     # `remember` labels what a task that read outside content saves as untrusted (delta.memory.provenance)
     wire_memory_tools([found for n in registry.names() if (found := registry.get(n)) is not None], executor)
     sched_ctx.executor = executor

@@ -458,9 +458,21 @@ class OpenApp(Tool[OpenAppArgs]):
     risk = Risk.ACT
     Args = OpenAppArgs
 
-    def __init__(self, apps: dict[str, AppEntry], cache_dir: Path | None = None) -> None:
+    def __init__(self, apps: dict[str, AppEntry], cache_dir: Path | None = None,
+                 denied_apps: Callable[[], list[str]] | None = None) -> None:
         self.apps = apps
         self.index = AppIndex(cache_dir) if cache_dir is not None else _default_index
+        # The user's blocked apps (boundaries.denied_apps), read at each call so a settings change applies at once.
+        # The policy checks the name the agent ASKED for; a loose Start-menu match can open another app (asked
+        # "registry", opened "Registry Editor"), so run() checks what it is about to open as well.
+        self.denied_apps = denied_apps or (lambda: [])
+
+    def blocked(self, names: list[str]) -> str | None:
+        """The first of `names` (app names, shortcut names, exe names) that the user blocked, else None."""
+        denied = {_app_key(d) for d in self.denied_apps() if d and d.strip()}
+        if not denied:
+            return None
+        return next((n for n in names if n and _app_key(n) in denied), None)
 
     def spec(self) -> dict[str, Any]:
         spec = super().spec()
@@ -526,6 +538,10 @@ class OpenApp(Tool[OpenAppArgs]):
         key, hints, ways, error = await asyncio.to_thread(self.plan, args)
         if error:
             return ToolResult(False, error)
+        if hit := self.blocked([key, args.name, *hints, *(w.exe for w in ways)]):
+            return ToolResult(False, f"BLOCKED: '{args.name}' would open '{hit}', an app you blocked in Delta's "
+                                     "settings (Permissions). Delta will not open it.",
+                              {"app": key, "denied": True})
         exe = next((w.exe for w in ways if w.exe), "")
         if not args.argument and not args.new_window:
             names = list(dict.fromkeys([key, args.name.strip(), *hints]))
@@ -534,7 +550,8 @@ class OpenApp(Tool[OpenAppArgs]):
                 await asyncio.to_thread(_bring_front, open_now[0])
                 return ToolResult(True, f"{key} was already open; brought its window '{open_now[1]}' to the front "
                                         "(use new_window=true to start another copy)",
-                                  {"app": key, "process_running": True, "window": open_now[1], "reused": True})
+                                  {"app": key, "process_running": True, "window": open_now[1], "reused": True,
+                                   "verified": True})
         recoveries: list[str] = []
         problems: list[str] = []
         for n, way in enumerate(ways):
@@ -557,9 +574,9 @@ class OpenApp(Tool[OpenAppArgs]):
             ev: dict[str, Any] = {"app": key, "process_running": running, "launched_via": way.how}
             if recoveries:
                 ev["recoveries"] = recoveries
-            if title:
+            if title:  # Windows shows the app's own window in front: that is the proof it opened
                 return ToolResult(True, f"launched {key}; its window '{title}' is open and in front{note}",
-                                  {**ev, "window": title})
+                                  {**ev, "window": title, "verified": True})
             if running or not way.exe or n == len(ways) - 1:
                 # It started (or we cannot tell): never start a second copy, just say what is known.
                 return ToolResult(True, f"launched {key} (no window seen yet; check with list_windows){note}", ev)
@@ -567,6 +584,12 @@ class OpenApp(Tool[OpenAppArgs]):
         return ToolResult(False, f"could not open {key}: " + "; ".join(problems) +
                           ". Windows may be blocking it (for example Smart App Control), or it is not installed.",
                           {"app": key, "tried": [w.how for w in ways]})
+
+
+def _app_key(name: str) -> str:
+    """How app names are compared with the blocked list: any case, no folder, no .exe/.lnk."""
+    n = ntpath.basename(name.strip().strip('"')).lower()
+    return n[:-4] if n.endswith((".exe", ".lnk")) else n
 
 
 def _process_running(exe: str) -> bool:

@@ -13,9 +13,12 @@ from delta.llm.router import ModelRouter
 from delta.memory.extractor import clean_facts
 from delta.memory.skills import Skill
 
+# Layout: everything that is the same for every request comes first and the per-request parts (learned skills
+# that match, the clock and folders, memory) come last, so a provider's automatic prompt cache (OpenAI, Groq,
+# DeepSeek, Gemini) can reuse the first ~90% of this prompt on every task. "Now" used to be on line 3, which made
+# almost the whole planner prompt new every minute.
 PLANNER_PROMPT = """You are the planner of {name}, a personal AI agent running on the user's Windows PC.
 {credit}
-{environment}
 Tools the agent can use: {tools}.
 
 Decide whether the request needs tools (touching files, apps, the system, the web, memory, or
@@ -57,7 +60,7 @@ the request itself, guesses, anything one-off, or secrets. Usually it is empty: 
 FAST PATH (saves the user time and tokens): if ONE tool call does the whole request, fill "direct"
 with it and keep steps short. E.g. "play <song> on YouTube" -> {{"tool": "play_youtube", "args":
 {{"query": "<song + movie/artist>"}}}}; "pause the music" -> media_control; "schedule a meeting with
-x@y.com tomorrow 5pm" -> schedule_meeting (start in ISO local time, from Now above);
+x@y.com tomorrow 5pm" -> schedule_meeting (start in ISO local time, from Now in ENVIRONMENT below);
 "start a meet and send the link to x@y.com" -> start_meeting with invite; "move my standup to 3pm" /
 "make the review 1 hour" / "cancel the sync" -> edit_meeting (title = the meeting's name; new_start
 is just "HH:MM" when no day is given, so the meeting keeps its own day).
@@ -89,17 +92,19 @@ plan browser_open/browser_read/browser_click/browser_fill, which read the page a
 name or by element number. Never run_shell "start chrome", and no screenshots or pixel clicks unless
 the page cannot be read.
 
-Skills the agent learned from earlier verified successes on this PC (reuse one when it fits;
-adapt its steps to this request):
-{skills}
-
-Use the folders above directly; do not plan steps to search for them.
+Use the folders in ENVIRONMENT below directly; do not plan steps to search for them.
 success_criteria are CHECKPOINTS, in order, that a person could confirm by looking at the final
 screen (or a file/process): 2-5 of them, each one concrete fact about the END STATE, e.g.
 "NotebookLM is open in the browser", "the page shows the user's Google account (signed in)",
 "a new notebook is open", "the notebook's sources list includes a source about the Indian
 Constitution", "file C:/Users/x/Desktop/notes.txt exists and contains 'hello'".
 Not checkpoints: "clicked X", "typed Y" (actions are not results).
+
+Skills the agent learned from earlier verified successes on this PC (reuse one when it fits;
+adapt its steps to this request):
+{skills}
+
+ENVIRONMENT: {environment}
 
 What you know about the user:
 {memory}"""
