@@ -29,9 +29,14 @@ PERMISSION_WORDS = {"ask": "Ask every time", "always": "Always allow for this si
 MAX_LOGINS = 50
 CAPTCHA_CHOICES = ("on", "off")  # the user's own captcha choice for a login; anything else = never chosen (default)
 # Logins saved before the captcha default changed carry only "simple_captcha" (off by default then). Read once, they
-# become: on -> "on" (the user turned it on), off -> "off" only when the audit log shows the user turning it off
-# (Settings > Logins records login.captcha_setting), otherwise "" so the new default (on with a password) applies.
+# become: on -> "on" (the user turned it on), off -> "off" when the user turned it off (the audit log's
+# login.captcha_setting from Settings > Logins, or the file itself for `delta logins captcha NAME --off`, which #40 did
+# not audit: see LoginStore._switched_off_in_file), otherwise "" so the new default (on with a password) applies.
 CAPTCHA_SCHEMA = 2
+# When the per-login captcha switch first shipped (#40, merged 2026-11-07 06:23:46 IST). A login file written after this
+# by #40's own code carries "simple_captcha"; one written before it does not carry the key at all.
+SWITCH_SHIPPED = datetime(2026, 11, 7, 0, 53, 46, tzinfo=UTC)
+WRITE_SLACK_S = 5.0  # a file write within this of a stamp the file carries is the write that set the stamp
 # What the dashboard and the CLI show for a login's last outcome (delta.logins.signin.OUTCOMES), in plain words.
 OUTCOME_WORDS = {"signed_in": "signed in", "already_signed_in": "already signed in",
                  "wrong_password": "the site said the password is wrong", "refused": "refused (not the saved site)",
@@ -145,10 +150,36 @@ class LoginStore:
             login.captcha_choice = choice if choice in CAPTCHA_CHOICES else ""
         else:  # saved before the default changed: migrated once, then written back with the new schema
             login.captcha_choice = ("on" if data.get("simple_captcha") is True else
-                                    "off" if lid in self._explicit_off() else "")
+                                    "off" if lid in self._explicit_off() or self._switched_off_in_file(lid, data)
+                                    else "")
             with contextlib.suppress(Exception):
                 self._save(login)
         return login
+
+    def _switched_off_in_file(self, lid: str, data: dict[str, Any]) -> bool:
+        """A #40-era login file whose stored flag says off and whose last write was the user's own switch, not a save
+        Delta stamped: `delta logins captcha NAME --off` (#40 did not audit it) leaves exactly that. The file was
+        written after the switch shipped, carries "simple_captcha": false, and its last write time matches none of
+        the stamps every other #40 write leaves (created on a new login, last_used on a sign-in, an own-browser
+        consent). The other unstamped #40 writes (the permission switch, a Replace) also read as off here: the safe
+        side, the user gets the captcha picture and can turn reading back on with one switch."""
+        if data.get("simple_captcha") is not False:
+            return False
+        try:
+            written = datetime.fromtimestamp((self.folder / f"{lid}.bin").stat().st_mtime, UTC)
+        except (OSError, ValueError):
+            return False
+        if written < SWITCH_SHIPPED:
+            return False
+        raw = data.get("own_browser")
+        own: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        for stamp in (data.get("created"), data.get("last_used"), *own.values()):
+            with contextlib.suppress(TypeError, ValueError):
+                when = datetime.fromisoformat(str(stamp))
+                when = when if when.tzinfo else when.replace(tzinfo=UTC)
+                if abs((written - when).total_seconds()) <= WRITE_SLACK_S:
+                    return False
+        return True
 
     def _explicit_off(self) -> set[str]:
         """Logins the user turned the captcha switch off for in Settings > Logins (the audit log's

@@ -20,6 +20,20 @@ jobs:
       - run: uv run --locked ruff check src tests
       - run: uv run --locked mypy
       - run: uv run --locked pytest -q
+      # How often Delta reads generated ERP-style captchas by itself (120 pictures, 3 styles): the captcha model,
+      # Windows OCR on its own (what Delta used before the model) and both in Delta's order. The table goes to the
+      # run's summary; the floors catch a regression, the targets are in docs/LOGINS.md.
+      - name: captcha benchmark
+        shell: pwsh
+        run: |
+          uv run --locked python -m delta.evals.captcha_bench --per-style 40 --out captcha-bench.md --min-combined 0.75 --min-three 0.9
+          Get-Content captcha-bench.md | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: captcha-bench
+          path: captcha-bench.md
+          if-no-files-found: ignore
 
   # What a user gets from a plain `uv sync`: core must work, optional tests skip cleanly.
   minimal:

@@ -30,7 +30,7 @@ def probes(tmp_path: Path, **over):
                 version=(3, 12), machine="AMD64", port_in_use=lambda h, p: False, running=lambda d: None,
                 writable=lambda d: "", browsers=lambda: Inst(names={"edge"}, automation=True), ocr=lambda: True,
                 secret=lambda n: None, sac=lambda: 0, signed=lambda exe: True, cli_found=lambda n, c: None,
-                free_gb=lambda d: 50.0)
+                free_gb=lambda d: 50.0, captcha=lambda: "ok")
     base.update(over)
     return base
 
@@ -132,3 +132,20 @@ def test_real_checks_run_on_this_pc(tmp_path):
     checks = run_checks(Settings(data_dir=tmp_path / "data"), ocr=lambda: None)
     assert by_name(checks)["Python"].status == "ok"
     assert by_name(checks)["Data folder"].status == "ok"
+
+
+def test_captcha_reader_is_reported_and_never_fails_the_setup(tmp_path):
+    s = Settings(data_dir=tmp_path / "data")
+    assert by_name(run_checks(s, **probes(tmp_path)))["Captcha reader"].status == "ok"
+    missing = by_name(run_checks(s, **probes(tmp_path, captcha=lambda: "missing")))["Captcha reader"]
+    assert missing.status == "info" and "Windows OCR" in missing.detail and "installer" in missing.fix
+    broken = by_name(run_checks(s, **probes(tmp_path, captcha=lambda: "it could not run here (OSError)")))
+    assert broken["Captcha reader"].status == "warn" and "could not run" in broken["Captcha reader"].detail
+
+
+def test_the_real_captcha_model_probe_answers():
+    from delta.setup.doctor import _captcha_model
+    from delta.tools.captcha_model import installed
+
+    got = _captcha_model()
+    assert got == ("ok" if installed() else "missing") or got.startswith("it ")
