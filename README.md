@@ -123,7 +123,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\
 4. Approve or deny the cards Delta shows. Close (X) hides the window and Delta keeps listening; Shut down stops
    everything.
 
-From a terminal: `delta doctor` checks your setup, `delta app` opens Delta.
+From a terminal: `delta doctor` checks your setup, `delta app` opens Delta. The full install guide (options, what is tested, every fix) is in [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Safety model
 

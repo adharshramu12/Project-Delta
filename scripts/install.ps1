@@ -20,6 +20,10 @@
 # Delta's other scripts are read as text and run here (Invoke-DeltaScript), and nothing changes the PC's or the
 # account's execution policy. The installed files are unblocked (Unblock-File removes the "downloaded from the
 # internet" mark), so Delta's own scripts are not treated as downloaded files later.
+#
+# `irm ... | iex` cannot pass parameters, so three of them can also come from the environment (a parameter given
+# on the command line wins): DELTA_REF (a branch, tag or commit to download instead of main), DELTA_REPO (a fork,
+# owner/name), DELTA_INSTALL_DIR, DELTA_NO_LAUNCH=1. Example: $env:DELTA_REF = "v0.3.0"; irm .../scripts/install.ps1 | iex   (docs/INSTALL.md)
 param(
     [string]$Source = "",   # a Delta folder or .zip; empty = this script's own folder if it is one, else GitHub
     [string]$Repo = "adharshramu12/Project-Delta",
@@ -35,19 +39,60 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is 10x slower with the progress bar
+if (-not $PSBoundParameters.ContainsKey("Branch") -and "$env:DELTA_REF".Trim()) { $Branch = "$env:DELTA_REF".Trim() }
+if (-not $PSBoundParameters.ContainsKey("Repo") -and "$env:DELTA_REPO".Trim()) { $Repo = "$env:DELTA_REPO".Trim() }
+if (-not $PSBoundParameters.ContainsKey("InstallDir") -and "$env:DELTA_INSTALL_DIR".Trim()) {
+    $InstallDir = "$env:DELTA_INSTALL_DIR".Trim()
+}
+if ("$env:DELTA_NO_LAUNCH".Trim() -match "^(1|true|yes)$") { $NoLaunch = [switch]$true }
 # Windows PowerShell 5.1 can default to TLS 1.0, which GitHub and python.org refuse ("Could not create SSL/TLS
 # secure channel"). Allow TLS 1.2 as well (3072); nothing older is added.
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch { }
 $log = Join-Path $env:TEMP "delta-install.log"
 if (-not $DefineOnly) { Start-Transcript -Path $log -Force | Out-Null }
 
+function Test-Interactive {
+    # A person at a console window, who can answer a question. Not a CI runner, a scheduled task or input piped in
+    # (Read-Host would wait forever there, or fail).
+    if ($env:CI -or $env:GITHUB_ACTIONS -or $env:TF_BUILD) { return $false }
+    if ($Host.Name -ne "ConsoleHost" -or -not [Environment]::UserInteractive) { return $false }
+    try { return -not [Console]::IsInputRedirected } catch { return $true }
+}
+
+function Get-SourceZipUrl([string]$repo, [string]$ref) {
+    # GitHub's zip of one branch, tag or commit. A full commit id and a refs/... name are used as they are; any other
+    # name is a branch (refs/heads/<name>, which also works for names with a slash such as fix/x).
+    $ref = $ref.Trim()
+    if ($ref -match "^[0-9a-fA-F]{40}$" -or $ref.StartsWith("refs/")) { return "https://github.com/$repo/archive/$ref.zip" }
+    return "https://github.com/$repo/archive/refs/heads/$ref.zip"
+}
+
+function Test-SignatureValid([string]$path) {
+    # Get-AuthenticodeSignature lives in PowerShell's Security module. Under AllSigned, PowerShell 7 refuses to load
+    # that module when Microsoft's certificate is not in the account's Trusted Publishers ("AuthorizationManager
+    # check failed"), found by the install CI job on pwsh. Windows PowerShell 5.1 (on every Windows) loads its own
+    # catalog-signed copy under AllSigned, so the same check is asked of it then. The path goes through the
+    # environment, so a folder name with quotes or non-English letters needs no escaping.
+    try {
+        return ((Get-AuthenticodeSignature -LiteralPath $path -ErrorAction Stop).Status -eq "Valid")
+    } catch {
+        $ps51 = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+        if ($PSVersionTable.PSEdition -ne "Core" -or -not (Test-Path -LiteralPath $ps51)) { throw }
+        $env:DELTA_SIGNATURE_CHECK = $path
+        try {
+            $status = & $ps51 -NoProfile -NonInteractive -Command "(Get-AuthenticodeSignature -LiteralPath `$env:DELTA_SIGNATURE_CHECK).Status.ToString()" 2>$null
+        } finally { Remove-Item Env:DELTA_SIGNATURE_CHECK -ErrorAction SilentlyContinue }
+        return ("$status".Trim() -eq "Valid")
+    }
+}
+
 function Step($n, $text) { Write-Host "`n[$n/6] $text" -ForegroundColor Cyan }
 function Done($text) { Write-Host "      OK  $text" -ForegroundColor Green }
 function Fail($text) {
     Write-Host "`nDelta could not be installed: $text" -ForegroundColor Red
     Write-Host "Details: $log"
-    Stop-Transcript | Out-Null
-    if ($Host.Name -eq "ConsoleHost") { Read-Host "Press Enter to close" }
+    try { Stop-Transcript | Out-Null } catch { }
+    if (Test-Interactive) { Read-Host "Press Enter to close" }
     exit 1
 }
 
@@ -76,9 +121,12 @@ function Test-Python312x64($exe) {
     if (-not $exe -or -not (Test-Path $exe)) { return $false }
     if ($exe -like "*\WindowsApps\*") { return $false }
     try {
-        $ok = & $exe -c "import sys, platform; print(sys.version_info[:2] == (3, 12) and platform.machine() == 'AMD64')" 2>$null
+        # sysconfig's platform is what the interpreter was BUILT for. platform.machine() reads the environment, and an
+        # x64 Python running under emulation on Windows on ARM can report ARM64 there, so the right Python was
+        # refused on ARM PCs ("Python 3.12 (64-bit, x64) did not install"), found by the windows-11-arm CI job.
+        $ok = & $exe -c "import sys, sysconfig; print(sys.version_info[:2] == (3, 12) and sysconfig.get_platform() == 'win-amd64')" 2>$null
         if ($LASTEXITCODE -ne 0 -or "$ok".Trim() -ne "True") { return $false }
-        return ((Get-AuthenticodeSignature $exe).Status -eq "Valid")
+        return (Test-SignatureValid $exe)
     } catch { return $false }
 }
 
@@ -196,9 +244,10 @@ try {
         }
         if (-not (Test-Python312x64 $py)) {   # no winget (or it failed): python.org's own signed x64 installer
             $exe = Join-Path $env:TEMP "python-3.12.10-amd64.exe"
-            Invoke-WebRequest "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe" -OutFile $exe
-            if ((Get-AuthenticodeSignature $exe).Status -ne "Valid") { Fail "the Python installer's signature is not valid" }
-            Start-Process $exe -ArgumentList "/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=0 Include_test=0" -Wait
+            Invoke-WebRequest "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe" -OutFile $exe -UseBasicParsing
+            if (-not (Test-SignatureValid $exe)) { Fail "the Python installer's signature is not valid" }
+            $setup = Start-Process $exe -ArgumentList "/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=0 Include_test=0" -Wait -PassThru
+            if ($setup.ExitCode -ne 0) { Write-Host "      python.org's installer ended with code $($setup.ExitCode)" -ForegroundColor Yellow }
         }
     }
     if (-not (Test-Python312x64 $py)) {
@@ -215,11 +264,16 @@ try {
     if (-not $Source) {
         $zip = "$staging.zip"
         Write-Host "      downloading $Repo ($Branch)"
-        Invoke-WebRequest "https://github.com/$Repo/archive/refs/heads/$Branch.zip" -OutFile $zip
+        # -UseBasicParsing: Windows PowerShell 5.1 otherwise needs Internet Explorer's engine, which a PC without
+        # it (Windows Server, IE removed) does not have ("The response content cannot be parsed").
+        Invoke-WebRequest (Get-SourceZipUrl $Repo $Branch) -OutFile $zip -UseBasicParsing
         $Source = $zip
     }
     if ($Source -like "*.zip") {
-        Expand-Archive $Source -DestinationPath $staging -Force
+        # .NET's own zip reader, not Expand-Archive: that cmdlet lives in a script module (.psm1), which PowerShell 7
+        # refuses to load under the Restricted policy of a new PC ("running scripts is disabled"), found by CI.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($Source, $staging)
         $inner = Get-ChildItem $staging -Directory | Where-Object { Test-Path (Join-Path $_.FullName "pyproject.toml") } | Select-Object -First 1
         $Source = if ($inner) { $inner.FullName } else { $staging }
     }
@@ -230,7 +284,7 @@ try {
     if ($running.Count -gt 0) {
         $ids = ($running | ForEach-Object { $_.ProcessId }) -join ", "
         $stop = [bool]$StopRunning
-        if (-not $stop -and $Host.Name -eq "ConsoleHost") {
+        if (-not $stop -and (Test-Interactive)) {
             $answer = Read-Host "      Delta is running (process $ids). Close it now so it can be updated? [Y/n]"
             $stop = ($answer -eq "" -or $answer -match "^[Yy]")
         }
@@ -253,7 +307,7 @@ try {
     # 3. Environment ---------------------------------------------------------------------------------
     Step 3 "Delta's environment (exact package versions)"
     $venvPy = Join-Path $InstallDir ".venv\Scripts\python.exe"
-    if ((Test-Path $venvPy) -and (Get-AuthenticodeSignature $venvPy).Status -ne "Valid") {
+    if ((Test-Path $venvPy) -and -not (Test-SignatureValid $venvPy)) {
         Remove-Item (Join-Path $InstallDir ".venv") -Recurse -Force   # an unsigned one would be blocked
     }
     if ((Test-Path $venvPy) -and -not (Test-Python312x64 $venvPy)) {
@@ -272,6 +326,9 @@ try {
     Push-Location $InstallDir
     try {
         $env:UV_PROJECT_ENVIRONMENT = Join-Path $InstallDir ".venv"
+        # Windows' own certificate store, as pip already uses: behind a company proxy that inspects HTTPS its
+        # certificate is in that store (put there by the company), not in uv's built-in list.
+        if (-not "$env:UV_NATIVE_TLS".Trim()) { $env:UV_NATIVE_TLS = "1" }
         & $venvPy -m uv sync --frozen --extra all --no-dev --python $venvPy
         if ($LASTEXITCODE -ne 0) {
             Fail ("installing Delta's packages failed (see the log). Usual causes: no internet, a company proxy " +

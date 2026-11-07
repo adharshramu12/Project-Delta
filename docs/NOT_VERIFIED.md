@@ -16,17 +16,19 @@ saying what you found (it worked, or how it failed) is very welcome.
   blocking a double-clicked `Install Delta.cmd` from a downloaded zip, and `delta update` and the fix commands the
   installer prints (`powershell -ExecutionPolicy Bypass -File ...`) on such a PC. The CI Windows runner checks the
   installer's step 5, `delta update`, `Install Delta.cmd` and the Unblock-File step with the account's execution
-  policy set to Restricted, but it has no Smart App Control, and steps 1 to 4 of a real install (Python, files,
-  packages) are not run under that policy there.
-- **Windows on ARM** (Snapdragon, Copilot+ PCs): installing the x64 Python 3.12 under emulation, building
-  Delta's environment there, and running Delta. Not tried on an ARM PC.
+  policy set to Restricted, but it has no Smart App Control. Since the `install-oneliner` CI job (docs/INSTALL.md),
+  the whole one-liner, steps 1 to 6, runs under Restricted and AllSigned on Windows PowerShell 5.1 and 7.
+- **Windows on ARM** (Snapdragon, Copilot+ PCs): the CI job installs on GitHub's Windows 11 ARM64 runner (x64
+  Python under emulation, the environment, `delta --version`, `delta doctor`). Using Delta day to day on an ARM
+  laptop (screen, apps, browser) is not tried.
 - Finding an existing Python 3.12 through the `py` launcher and the registry (all-users installs, a per-user
   install in a custom folder), and skipping the Microsoft Store Python.
 - The installer's newer checks on a real PC: the free-space check, the TLS 1.2 switch on an older Windows 10, the
   plain messages when `pip install uv` or `uv sync` fail behind a company proxy, and `Install Delta.cmd` opened from
   inside the zip. Their PowerShell syntax is checked (PowerShell 7 parser), but they did not run on Windows 5.1.
-- A user folder with a non-ASCII or apostrophe name (`C:\Users\Rāj Kumar`, `C:\Users\D'Souza`): the Desktop
-  shortcut quoting is unit-tested; the full install from such a folder is not.
+- A user folder with a non-ASCII or apostrophe name (`C:\Users\Rāj Kumar`, `C:\Users\D'Souza`): CI installs into
+  such a folder (spaces, an apostrophe, a macron, Telugu letters) and checks the shortcuts hold the exact Unicode
+  path; a real Windows account with such a name (its TEMP and AppData paths) is not tried.
 - `scripts\uninstall.ps1` stopping a Delta that runs on another port and its dashboard window before removing
   the folder.
 - `delta update` while Delta is running: the "close it first" message, `delta update --stop` closing it, and

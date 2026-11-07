@@ -21,7 +21,10 @@ $installed = -not (Test-Path (Join-Path $root ".git"))   # an installed copy, no
 $pythonw = Join-Path $root ".venv\Scripts\pythonw.exe"
 if (-not (Test-Path $pythonw)) { throw "Delta's environment is missing: run Delta's installer first (or 'uv sync --extra all' in a developer checkout)." }
 $sac = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState
-if ($sac -eq 1 -and (Get-AuthenticodeSignature $pythonw).Status -ne "Valid") {
+# install.ps1 runs this text with its Test-SignatureValid in reach (it also works under AllSigned on PowerShell 7)
+$signed = if (Get-Command Test-SignatureValid -ErrorAction SilentlyContinue) { { Test-SignatureValid $pythonw } } else {
+    { (Get-AuthenticodeSignature -LiteralPath $pythonw).Status -eq "Valid" } }
+if ($sac -eq 1 -and -not (& $signed)) {
     Write-Warning ("Smart App Control is on and .venv uses an unsigned Python, so Windows will block the shortcut. " +
                    "Run Delta's installer again to rebuild .venv on the official python.org Python 3.12.")
 }
@@ -40,36 +43,29 @@ if (Test-Path $clash -PathType Container) {
     }
 }
 
-$shell = New-Object -ComObject WScript.Shell
+# Written through the Unicode shortcut interface (scripts\shell_link.ps1): WScript.Shell alone turned a user folder
+# such as C:\Users\R<a with macron>j into C:\Users\Raj, a folder that does not exist. Its text is run here (policy).
+$linkText = [System.IO.File]::ReadAllText((Join-Path $root "scripts\shell_link.ps1"))
+. ([scriptblock]::Create($linkText))
+$icon = Join-Path $root "src\delta\api\static\delta.ico"
+if (-not (Test-Path $icon)) { $icon = "" }
 $targets = @(
     (Join-Path ([Environment]::GetFolderPath("Desktop")) "Delta.lnk"),
     (Join-Path ([Environment]::GetFolderPath("Programs")) "Delta.lnk")
 )
 foreach ($path in $targets) {
-    $lnk = $shell.CreateShortcut($path)
-    $lnk.TargetPath = $pythonw
-    $lnk.Arguments = "-m delta app"
-    $lnk.WorkingDirectory = $root
-    $lnk.Description = "Delta personal AI agent"
-    $icon = Join-Path $root "src\delta\api\static\delta.ico"
-    if (Test-Path $icon) { $lnk.IconLocation = "$icon,0" }
-    $lnk.Save()
+    [void](Set-DeltaShortcut -Path $path -Target $pythonw -Arguments "-m delta app" -WorkingDirectory $root `
+        -Description "Delta personal AI agent" -Icon $icon)
     Write-Host "created $path"
 }
 
-$icon = Join-Path $root "src\delta\api\static\delta.ico"
 if ($installed) {
     # "Update Delta" in the Start menu: the same as `delta update --stop` (closes a running Delta, keeps your data).
     $menu = Join-Path ([Environment]::GetFolderPath("Programs")) "Delta"
-    [void][System.IO.Directory]::CreateDirectory($menu)
     $path = Join-Path $menu "Update Delta.lnk"
-    $lnk = $shell.CreateShortcut($path)
-    $lnk.TargetPath = Join-Path $root ".venv\Scripts\python.exe"
-    $lnk.Arguments = "-m delta update --stop"
-    $lnk.WorkingDirectory = $root
-    $lnk.Description = "Update Delta to the newest version (closes Delta first, keeps your data)"
-    if (Test-Path $icon) { $lnk.IconLocation = "$icon,0" }
-    $lnk.Save()
+    [void](Set-DeltaShortcut -Path $path -Target (Join-Path $root ".venv\Scripts\python.exe") `
+        -Arguments "-m delta update --stop" -WorkingDirectory $root `
+        -Description "Update Delta to the newest version (closes Delta first, keeps your data)" -Icon $icon)
     Write-Host "created $path"
 }
 
