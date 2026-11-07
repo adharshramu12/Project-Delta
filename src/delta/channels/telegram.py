@@ -92,6 +92,7 @@ class TelegramChannel(PCMenu):
         self._albums: dict[str, dict[str, Any]] = {}  # media_group_id -> photos of one album, sent as one request
         self._album_tasks: set[asyncio.Task[None]] = set()
         self.app.add_handler(CallbackQueryHandler(self._on_button, pattern=r"^appr:"))
+        self.app.add_error_handler(self._on_error)  # a handler that raises: logged, and the user gets an answer
         from delta.channels.telegram_tasks import attach as attach_tasks
 
         attach_tasks(self)  # /tasks and Resume / Discard for interrupted tasks (delta.engine)
@@ -374,6 +375,20 @@ class TelegramChannel(PCMenu):
         await update.message.reply_text(
             f"health {g['health']} · RAM {g['ram_pct']}% · GPU {g['gpu_temp_c']}°C · "
             f"models {', '.join(self.c.router.usable()) or 'none'}")
+
+    async def _on_error(self, update: Any, ctx: Any) -> None:
+        """A bug in one of this channel's handlers. Before, python-telegram-bot only logged it and the phone got no
+        answer at all; now it is reported (crashguard) and an allowed user is told, so they are not left waiting."""
+        from delta.system.crashguard import guard_of
+
+        guard_of(self.c).report("Telegram", getattr(ctx, "error", None))
+        with contextlib.suppress(Exception):
+            user = getattr(update, "effective_user", None)
+            msg = getattr(update, "effective_message", None)
+            if user is not None and msg is not None and is_allowed(user.id, self.allowed):
+                await msg.reply_text("Sorry, something went wrong on my side with that one. Delta is still running: "
+                                     "please send it again. If it keeps happening, the details are in Delta's log "
+                                     "on the PC.")
 
     async def _on_message(self, update: Any, ctx: Any) -> None:
         user = update.effective_user

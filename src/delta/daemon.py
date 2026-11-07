@@ -388,6 +388,11 @@ async def run(open_ui: bool = False) -> int:
     from delta.system.lifecycle import AlreadyRunningError
 
     c = build(settings)
+    from delta.system.crashguard import guard_of
+
+    guard = guard_of(c)  # an unexpected error in a thread or background task: logged and shown, Delta carries on
+    guard.install_threads()
+    guard.install_loop(asyncio.get_running_loop())
     try:
         await c.start()
     except AlreadyRunningError:
