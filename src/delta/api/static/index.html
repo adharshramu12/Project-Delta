@@ -272,6 +272,8 @@
     <section class="group" id="set_addons"><h3>Add-ons</h3><p class="muted small">To connect apps (Gmail, Notion, Slack and more), use Apps.</p><div id="s_addons"></div></section>
     <section class="group" id="set_keys"><h3>Keys</h3><p class="muted small">Stored in Windows Credential Manager, never in files.</p><div id="s_keys" class="keys"></div></section>
     <section class="group" id="set_about"><h3>Setup and shutdown</h3>
+    <div id="s_autostart"><label class="check"><input type="checkbox" id="s_autostart_on"> Start Delta when I sign in to Windows</label>
+    <p class="muted small" id="s_autostart_msg" role="status">In the background, no window: Telegram and schedules keep working after a restart.</p></div>
     <div class="row"><button class="btn" id="opensetup">Run setup again</button><button class="btn danger-outline" id="shutdown2">Shut Delta down</button></div>
     </section>
     <div class="savebar"><span class="msg" id="s_err" role="status"></span><button class="btn" id="s_reset">Undo changes</button><button class="btn primary" id="s_save">Save changes</button></div>
@@ -341,6 +343,8 @@
     <div id="tgcode" class="msg" role="status"></div></div>
     <label class="field">Allowed Telegram user ids <small>Filled in when you connect. Only these can control Delta.</small><input id="tgid" placeholder="Filled in automatically" inputmode="numeric"></label>
     <label class="check"><input type="checkbox" id="tgon"> Turn on Telegram</label>
+    <div id="tgautorow" hidden><label class="check"><input type="checkbox" id="tgauto"> Start Delta when I sign in to Windows</label>
+    <p class="small muted">Recommended with Telegram: otherwise your bot stops answering after a restart until you open Delta. No window opens.</p></div>
   </section>
   <section data-step="name">
     <h2>What should Delta call you?</h2>

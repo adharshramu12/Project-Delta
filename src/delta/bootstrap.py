@@ -101,6 +101,13 @@ def arm_stop(c: Any) -> None:
         log.warning("signal.arm_failed", error=str(e))
 
 
+# The top bar's warning on a PC with no AI model. The way most people fix it comes first (Settings > Keys, a free Groq
+# key), then a local app; the terminal command last, for people who use one (fresh-user audit: it led with it).
+NO_MODEL_WARNING = ("No AI model is available. Open Settings > Keys and add a free Groq key (console.groq.com/keys), "
+                    "or start Ollama or LM Studio on this PC, or sign in to Claude Code or Codex to use your plan. "
+                    "In a terminal: delta secrets set groq_api_key")
+
+
 @dataclass
 class Container:
     settings: Settings
@@ -248,9 +255,7 @@ class Container:
             return
         local = [p for p in self.router.providers.values() if p.local]
         if not any(callable(ping := getattr(p, "ping", None)) and ping() for p in local):
-            self.warn("No AI model is available. Add a free Groq key (delta secrets set groq_api_key), "
-                      "sign in to Claude Code or Codex to use your existing plan, or start Ollama / "
-                      "LM Studio to run models on this PC.")
+            self.warn(NO_MODEL_WARNING)
 
     async def _start_addons(self) -> None:
         from delta.addons import mcp_settings

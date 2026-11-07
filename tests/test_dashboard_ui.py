@@ -163,10 +163,12 @@ def test_the_payload_stays_small():
     (the "mcp" add-on moved out of Settings), about 1.6 KB together. With both changes the dashboard ships about
     223.1 KB (223,111 bytes). Then to 226 KB for saved logins: the per-login "simple text captcha" switch on the add
     form and each card, Replace for a name saved before, the no-password warning, and the captcha picture shown with
-    a sign-in's answer in Chat (about 2.2 KB; the dashboard then ships about 225.3 KB). Lazy loading would not lower
-    this total: it counts every file the dashboard ships."""
+    a sign-in's answer in Chat (about 2.2 KB; the dashboard then ships about 225.3 KB). Then to 229 KB for "Start Delta
+    when I sign in to Windows": the switch in Settings > Setup and shutdown and its offer on the setup wizard's
+    Telegram step (about 3 KB; the dashboard then ships about 228.4 KB). Lazy loading would not lower this total: it
+    counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 226_000, total
+    assert total < 229_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 

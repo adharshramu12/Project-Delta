@@ -38,6 +38,9 @@ class SetupIn(BaseModel):
     autonomy: Literal["ask-everything", "ask-risky", "trusted", "autopilot"] = "ask-risky"
     telegram_enabled: bool = False
     telegram_user_ids: list[str] = Field(default_factory=list)
+    # Offered on the Telegram step: start Delta at sign-in so the bot keeps answering after a restart. None = the
+    # question was not shown (no change); True/False = what the person ticked.
+    start_with_windows: bool | None = None
 
 
 def register(app: FastAPI, c: Container, auth: Any) -> None:
@@ -155,5 +158,15 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
         c.orchestrator.executor.policy.b.autonomy = body.autonomy
         c.settings.channels["telegram"] = ChannelConfig(enabled=body.telegram_enabled, allowed_user_ids=ids)
         restart = body.telegram_enabled != old_tg.enabled or (body.telegram_enabled and ids != old_tg.allowed_user_ids)
-        c.audit.record("setup.complete", autonomy=body.autonomy, telegram=body.telegram_enabled)
-        return {"ok": True, "restart_needed": restart, "models_ready": c.router.usable()}
+        autostart_on: bool | None = None
+        if body.start_with_windows is not None:
+            from delta.system import autostart
+
+            try:
+                autostart_on = (await asyncio.to_thread(autostart.set_enabled, body.start_with_windows)).enabled
+            except OSError:
+                autostart_on = None  # setup itself is saved; Settings > Setup and shutdown can try again
+        c.audit.record("setup.complete", autonomy=body.autonomy, telegram=body.telegram_enabled,
+                       start_with_windows=autostart_on)
+        return {"ok": True, "restart_needed": restart, "models_ready": c.router.usable(),
+                "start_with_windows": autostart_on}

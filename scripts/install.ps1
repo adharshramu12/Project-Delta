@@ -24,6 +24,12 @@
 # `irm ... | iex` cannot pass parameters, so three of them can also come from the environment (a parameter given
 # on the command line wins): DELTA_REF (a branch, tag or commit to download instead of main), DELTA_REPO (a fork,
 # owner/name), DELTA_INSTALL_DIR, DELTA_NO_LAUNCH=1. Example: $env:DELTA_REF = "v0.3.0"; irm .../scripts/install.ps1 | iex   (docs/INSTALL.md)
+#
+# Scope: `irm ... | iex` runs this text in the user's own PowerShell window. Everything below runs inside one script
+# block (& { ... }), so its settings ($ErrorActionPreference = "Stop"), variables and functions end with it and the
+# window is left as it was. A failure prints what went wrong and returns: it never closes that window (`exit` there
+# would). Run as a file (Install Delta.cmd, delta update) it still ends with exit code 1 on a failure.
+$__DeltaInstaller = {
 param(
     [string]$Source = "",   # a Delta folder or .zip; empty = this script's own folder if it is one, else GitHub
     [string]$Repo = "adharshramu12/Project-Delta",
@@ -37,7 +43,7 @@ param(
     [string]$WaitForPid = "", # comma-separated process ids to wait for first (the `delta update` that started us)
     [switch]$DefineOnly      # only define the functions below and stop (the tests use this)
 )
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"   # this script block's own scope: the user's window keeps its own setting
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is 10x slower with the progress bar
 if (-not $PSBoundParameters.ContainsKey("Branch") -and "$env:DELTA_REF".Trim()) { $Branch = "$env:DELTA_REF".Trim() }
 if (-not $PSBoundParameters.ContainsKey("Repo") -and "$env:DELTA_REPO".Trim()) { $Repo = "$env:DELTA_REPO".Trim() }
@@ -47,7 +53,11 @@ if (-not $PSBoundParameters.ContainsKey("InstallDir") -and "$env:DELTA_INSTALL_D
 if ("$env:DELTA_NO_LAUNCH".Trim() -match "^(1|true|yes)$") { $NoLaunch = [switch]$true }
 # Windows PowerShell 5.1 can default to TLS 1.0, which GitHub and python.org refuse ("Could not create SSL/TLS
 # secure channel"). Allow TLS 1.2 as well (3072); nothing older is added.
-try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch { }
+$tlsSaved = $null
+try {
+    $tlsSaved = [Net.ServicePointManager]::SecurityProtocol   # put back at the end: the user's window keeps its own
+    [Net.ServicePointManager]::SecurityProtocol = $tlsSaved -bor 3072
+} catch { }
 $log = Join-Path $env:TEMP "delta-install.log"
 if (-not $DefineOnly) { Start-Transcript -Path $log -Force | Out-Null }
 
@@ -88,16 +98,19 @@ function Test-SignatureValid([string]$path) {
 
 function Step($n, $text) { Write-Host "`n[$n/6] $text" -ForegroundColor Cyan }
 function Done($text) { Write-Host "      OK  $text" -ForegroundColor Green }
+$failMark = "DELTA-INSTALL-FAILED: "
 function Fail($text) {
+    # Says what went wrong and stops the install by throwing to the end of this script block. Never `exit`: under
+    # `irm ... | iex` that closed the user's PowerShell window, error and all, before they could read it.
     Write-Host "`nDelta could not be installed: $text" -ForegroundColor Red
     Write-Host "Details: $log"
-    try { Stop-Transcript | Out-Null } catch { }
-    if (Test-Interactive) { Read-Host "Press Enter to close" }
-    exit 1
+    throw ($failMark + $text)
 }
 
 function Test-FreeSpace($path, [double]$needGB) {
-    # Python, Delta's packages and uv's download cache take about 1.5 GB on a first install.
+    # Delta's packages and uv's download cache (both in the install folder) take about 1.5 GB on a first install, so
+    # this measures the drive the install folder is on (DELTA_INSTALL_DIR can put it on another drive than
+    # %LOCALAPPDATA%: that drive was measured before, and a full D: passed the check).
     try {
         $drive = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($path))
         $free = (New-Object System.IO.DriveInfo($drive)).AvailableFreeSpace / 1GB
@@ -210,6 +223,58 @@ function Install-DeltaShortcuts([string]$dir, [bool]$noPath, [bool]$noShortcuts)
     return $result
 }
 
+function Get-DeltaRuntime([string]$dir) {
+    # Where this Delta keeps its data, the address its dashboard listens on and its save folder, read the way Delta
+    # itself reads its settings (a port changed in settings.yaml included). Defaults when its Python cannot say.
+    $data = if ("$env:DELTA_DATA_DIR".Trim()) { "$env:DELTA_DATA_DIR".Trim() } else { Join-Path $env:LOCALAPPDATA "Delta" }
+    $rt = [pscustomobject]@{ Host = "127.0.0.1"; Port = 7878; Data = $data; Save = ""; FromDelta = $false }
+    $py = Join-Path $dir ".venv\Scripts\python.exe"
+    if (-not (Test-Path -LiteralPath $py)) { return $rt }
+    $eap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"   # a warning on stderr is not a failure here
+    try {
+        $code = ("import json; from delta.config import load_settings, save_dir; s = load_settings(); " +
+                 "print('DELTA-RUNTIME ' + json.dumps({'host': s.api.host, 'port': s.api.port, " +
+                 "'data': str(s.data_dir), 'save': str(save_dir(s.files, create=False))}))")
+        $line = @(& $py -c $code 2>$null) | Where-Object { "$_".StartsWith("DELTA-RUNTIME ") } | Select-Object -Last 1
+        if ($line) {
+            $j = "$line".Substring(14) | ConvertFrom-Json
+            $rt.Host = if ("$($j.host)" -in "", "0.0.0.0", "::") { "127.0.0.1" } else { "$($j.host)" }
+            $rt.Port = [int]$j.port
+            $rt.Data = "$($j.data)"
+            $rt.Save = "$($j.save)"
+            $rt.FromDelta = $true
+        }
+    } catch { } finally { $ErrorActionPreference = $eap }
+    return $rt
+}
+
+function Request-DeltaShutdown($rt) {
+    # The dashboard's Shut down button: Delta stops its channels, its helpers and its own window. True when it said yes.
+    $tokenFile = Join-Path $rt.Data "api_token"
+    if (-not (Test-Path -LiteralPath $tokenFile)) { return $false }
+    try {
+        Invoke-RestMethod -Method Post -Uri ("http://{0}:{1}/api/shutdown" -f $rt.Host, $rt.Port) -TimeoutSec 5 `
+            -UseBasicParsing -Headers @{ Authorization = "Bearer " + (Get-Content -LiteralPath $tokenFile -Raw).Trim() } | Out-Null
+        return $true
+    } catch { return $false }
+}
+
+function Get-DeltaWindowProcesses([string]$dataDir) {
+    # Edge processes of Delta's own dashboard window: started with Delta's private profile (<data>\app-window), which
+    # only Delta uses. Never the user's own Edge or Chrome.
+    $profileDir = [regex]::Escape((Join-Path $dataDir "app-window").ToLowerInvariant())
+    @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" -ErrorAction SilentlyContinue | Where-Object {
+        $_.CommandLine -and $_.CommandLine.ToLowerInvariant() -match ("--user-data-dir=""?" + $profileDir + "(""|\s|$)")
+    })
+}
+
+function Close-DeltaWindows([string]$dataDir) {
+    $procs = @(Get-DeltaWindowProcesses $dataDir)
+    foreach ($p in $procs) { try { & taskkill.exe /PID $p.ProcessId /T /F 2>$null | Out-Null } catch { } }
+    return $procs.Count
+}
+
 function Get-RunningDelta {
     # Processes started from this install's environment (python.exe, pythonw.exe, delta.exe in .venv\Scripts).
     $venv = (Join-Path $InstallDir ".venv").TrimEnd("\") + "\"
@@ -222,6 +287,7 @@ function Get-RunningDelta {
 
 if ($DefineOnly) { return }
 
+$failed = $false
 try {
     Write-Host "Installing Delta, your personal AI agent for Windows" -ForegroundColor White
     $waitIds = @()
@@ -229,7 +295,12 @@ try {
     foreach ($id in $waitIds) { Wait-Process -Id $id -Timeout 60 -ErrorAction SilentlyContinue }
     $onArm = Test-Arm64
     $fresh = -not (Test-Path (Join-Path $InstallDir ".venv\Scripts\python.exe"))
-    Test-FreeSpace $env:LOCALAPPDATA $(if ($fresh) { 2 } else { 0.5 })
+    Test-FreeSpace $InstallDir $(if ($fresh) { 2 } else { 0.5 })
+    # Python 3.12 (when it has to be installed) and Delta's data go to %LOCALAPPDATA%: a little room there too.
+    if ([System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($InstallDir)) -ne
+        [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($env:LOCALAPPDATA))) {
+        Test-FreeSpace $env:LOCALAPPDATA 0.3
+    }
 
     # 1. Signed Python 3.12 -----------------------------------------------------------------------
     Step 1 "Python 3.12 (official, signed)"
@@ -291,9 +362,17 @@ try {
             $stop = ($answer -eq "" -or $answer -match "^[Yy]")
         }
         if (-not $stop) { Fail "Delta is running. Close it (the Shut down button in Delta's window) and run this again." }
-        foreach ($p in $running) { try { & taskkill.exe /PID $p.ProcessId /T /F 2>$null | Out-Null } catch { } }
+        # As its Shut down button does first (Delta closes its own window too), then whatever is left. Its dashboard
+        # window's Edge processes stayed behind when only the service was killed (fresh-user CI journey).
+        $rt = Get-DeltaRuntime $InstallDir
+        if (Request-DeltaShutdown $rt) {
+            $deadline = (Get-Date).AddSeconds(20)
+            while ((Get-Date) -lt $deadline -and @(Get-RunningDelta).Count -gt 0) { Start-Sleep -Milliseconds 500 }
+        }
+        foreach ($p in @(Get-RunningDelta)) { try { & taskkill.exe /PID $p.ProcessId /T /F 2>$null | Out-Null } catch { } }
         Start-Sleep -Seconds 2
-        Done "closed the running Delta"
+        $windows = Close-DeltaWindows $rt.Data
+        Done ("closed the running Delta" + $(if ($windows) { " and its window" } else { "" }))
     }
     if (-not $same) {
         New-Item -ItemType Directory -Force $InstallDir | Out-Null
@@ -378,7 +457,33 @@ try {
         foreach ($fix in $setup.Fixes) { Write-Host "  $fix" -ForegroundColor Yellow }
     }
     if (Test-Path $staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue }
-    Stop-Transcript | Out-Null
 } catch {
-    Fail $_.Exception.Message
+    $failed = $true
+    $why = "$($_.Exception.Message)"
+    if (-not $why.StartsWith($failMark)) {   # an unexpected error (Fail has already said what went wrong)
+        Write-Host "`nDelta could not be installed: $why" -ForegroundColor Red
+        Write-Host "Details: $log"
+    }
+} finally {
+    try { Stop-Transcript | Out-Null } catch { }
+    if ($null -ne $tlsSaved) { try { [Net.ServicePointManager]::SecurityProtocol = $tlsSaved } catch { } }
+}
+if ($failed) {
+    if ($PSCommandPath) {
+        # Run as a file (Install Delta.cmd, delta update): its own window, so let the person read it, and exit 1 for
+        # whatever started it. Never under `irm ... | iex`: there it would close the user's window.
+        if (Test-Interactive) { Read-Host "Press Enter to close" }
+        exit 1
+    }
+    Write-Host "Your PowerShell window stays open. Fix the cause above and paste the install command again." -ForegroundColor Yellow
+    $global:LASTEXITCODE = 1
+}
+}
+
+# Run the installer in its own scope (see "Scope" at the top). -DefineOnly (tests) dot-sources it instead, so its
+# functions stay defined for the caller.
+try {
+    if (@($args) -contains "-DefineOnly") { . $__DeltaInstaller @args } else { & $__DeltaInstaller @args }
+} finally {
+    if (-not (@($args) -contains "-DefineOnly")) { Remove-Variable -Name __DeltaInstaller -ErrorAction SilentlyContinue }
 }

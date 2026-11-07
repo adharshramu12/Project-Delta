@@ -45,13 +45,21 @@ async def _cli() -> int:
     except AlreadyRunningError as e:
         print(e)
         return 1
+    marker = settings.data_dir / CLI_MARKER
+    with contextlib.suppress(OSError):  # the Desktop icon reads it: "Delta is running in a terminal"
+        marker.write_text(str(os.getpid()), encoding="ascii")
     try:
         await CliChannel(c).run()
     finally:
         print("Shutting down: unloading models, stopping monitors…")
+        with contextlib.suppress(OSError):
+            marker.unlink()
         await c.stop()
         print("Delta is fully stopped.")
     return 0
+
+
+CLI_MARKER = "delta.cli"  # in the data folder while `delta cli` runs: its process id
 
 
 def running_delta(data_dir: Path) -> int | None:
@@ -69,6 +77,19 @@ def running_delta(data_dir: Path) -> int | None:
     except psutil.Error:
         return None
     return pid if ("python" in name or "delta" in name) else None  # a reused pid of something else is not Delta
+
+
+def terminal_delta(data_dir: Path) -> int | None:
+    """The process id of a Delta running in a terminal (`delta cli`) now, else None. That Delta holds the one-Delta
+    lock (delta.pid) but serves no dashboard, so the Desktop icon must not wait for one."""
+    pid = running_delta(data_dir)
+    if pid is None:
+        return None
+    try:
+        marked = int((data_dir / CLI_MARKER).read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return None
+    return pid if marked == pid else None
 
 
 def _own_processes(root: Path) -> list[int]:
@@ -229,7 +250,9 @@ def main() -> None:
     sub.add_parser("cli", help="interactive terminal")
     rp = sub.add_parser("run", help="background service: dashboard API + Telegram/Slack")
     rp.add_argument("--open", action="store_true", help="open the dashboard window")
-    sub.add_parser("app", help="open Delta (starts the service in the background if needed)")
+    app_p = sub.add_parser("app", help="open Delta (starts the service in the background if needed)")
+    app_p.add_argument("--background", action="store_true",
+                       help="only start the service, no window (what starting with Windows runs)")
     sub.add_parser("doctor", help="check setup")
     sp = sub.add_parser("secrets", help="manage API keys and tokens")
     sp.add_argument("action", choices=["set", "delete", "list"])
@@ -333,7 +356,7 @@ def _dispatch(args: argparse.Namespace, no_console: bool) -> None:
         try:
             from delta.daemon import launch_app
 
-            sys.exit(launch_app())
+            sys.exit(launch_app(background=args.background))
         except SettingsError:
             raise  # shown as it is, with how to fix it (main)
         except Exception:

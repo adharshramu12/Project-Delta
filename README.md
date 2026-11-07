@@ -79,6 +79,10 @@ docs below cover each one.
    to install on a PC with Smart App Control on. The installer reuses or installs the official signed Python 3.12
    (64-bit), copies Delta to `%LOCALAPPDATA%\Programs\Delta`, installs its packages (a few minutes), adds a Delta
    icon to the Desktop and Start menu, and adds the `delta` command. The log is at `%TEMP%\delta-install.log`.
+   Windows security: the one command is not expected to show a SmartScreen or firewall prompt. Delta's dashboard
+   listens on this PC only (127.0.0.1), so Windows Firewall has nothing to ask. If you use the zip and Windows says "Windows protected
+   your PC" (SmartScreen), or Microsoft Defender stops a file, see
+   [docs/INSTALL.md](docs/INSTALL.md#windows-security-prompts).
 2. **Or from a zip.** On GitHub press **Code > Download ZIP**, right-click the zip, choose **Extract All...**, then
    double-click **`Install Delta.cmd`** in the extracted folder. With Smart App Control on, Windows may block a
    file from a downloaded zip; use the command in step 1 instead.
@@ -93,13 +97,17 @@ own Python by its full path:
 & "$env:LOCALAPPDATA\Programs\Delta\.venv\Scripts\python.exe" -m delta update --stop
 ```
 
-**Uninstall.** This removes Delta and the `delta` command. Your chats and memory stay unless you add `-RemoveData`:
+**Uninstall.** This removes Delta, its icons, the `delta` command and "Start Delta when I sign in to Windows". Your
+chats and memory stay unless you add `-RemoveData`:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\Delta\scripts\uninstall.ps1"
 ```
 
-`-ExecutionPolicy Bypass` applies to that one run only.
+`-ExecutionPolicy Bypass` applies to that one run only. Two things always stay, and the uninstaller prints their
+exact paths: the files Delta made for you (the **Delta files** folder on your Desktop), because they are yours, and
+**Python 3.12**, because other programs may use it. Delete the folder yourself when you no longer need it; remove
+Python from Settings > Apps > Installed apps if nothing else needs it.
 
 ### Troubleshooting
 
@@ -111,7 +119,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\
 | "Could not create SSL/TLS secure channel" | Older Windows PowerShell. Run `[Net.ServicePointManager]::SecurityProtocol = 3072`, then the `irm` command again. |
 | "Some optional parts were not set up" | Delta is installed and works. Paste the command the installer printed under that line. |
 | "delta is not recognized" | Open a new PowerShell window. Still not found: paste the install command again, or use the full Python path shown under Update. |
-| "No AI model is available" | Add a free Groq key in Setup, sign in to Codex or Claude Code, or start LM Studio or Ollama. |
+| "No AI model is available" | In Delta, open Settings > Keys and add a free Groq key, or start LM Studio or Ollama, or sign in to Codex or Claude Code. |
+| "Windows protected your PC" or Defender stops a file | See [Windows security prompts](docs/INSTALL.md#windows-security-prompts). The `irm` command from step 1 avoids SmartScreen. |
 | The icon does nothing | Read the last lines of `%LOCALAPPDATA%\Delta\logs\service.log`, or run `delta doctor` in a new PowerShell window. |
 
 ## Quick start
@@ -121,7 +130,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\
 3. Ask something in the chat, for example "open Notepad and write today's to-do list", "summarise this PDF" or
    "what is on my timetable tomorrow?" after saving a login.
 4. Approve or deny the cards Delta shows. Close (X) hides the window and Delta keeps listening; Shut down stops
-   everything.
+   everything. After a restart Delta is off (and Telegram stops answering) until you open it again, unless you turn
+   on **Start Delta when I sign in to Windows** in Settings > Setup and shutdown (setup offers it when you connect
+   Telegram). It then starts in the background with no window.
 
 From a terminal: `delta doctor` checks your setup, `delta app` opens Delta. The full install guide (options, what is tested, every fix) is in [docs/INSTALL.md](docs/INSTALL.md).
 

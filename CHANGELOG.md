@@ -6,6 +6,13 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Added
+- **Start Delta when I sign in to Windows** (Settings > Setup and shutdown, off unless you turn it on; setup offers it
+  when you connect Telegram). Without it Delta, and your Telegram bot, stayed off after a restart until you opened
+  Delta again. It is one entry for your account only (`HKCU\...\Run`, named `DeltaAgent`, no administrator rights)
+  that runs `pythonw.exe -m delta app --background`: the service starts with no window. Turning it off, or
+  uninstalling, removes it. A choice made in Task Manager's Startup apps is shown and respected.
+
 ### Changed
 - **Simple captchas are read far more often by Delta itself.** A small offline model made for text captchas
   ([ddddocr](https://github.com/sml2h3/ddddocr), MIT, run on the CPU with onnxruntime, MIT) is now the first reader,
@@ -21,6 +28,27 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   solved.
 
 ### Fixed
+- **The one-line install leaves your PowerShell window as it was.** `irm ... | iex` runs the installer in your own
+  window: it left `$ErrorActionPreference = "Stop"`, its variables and its functions there, and a failure ran `exit 1`,
+  which closed the window before the error could be read. The installer now runs in its own scope, puts back the
+  TLS setting it changes, and on a failure prints what went wrong and keeps the window open. Run as a file
+  (Install Delta.cmd, `delta update`) it still ends with exit code 1.
+- **`delta update --stop` closes Delta's dashboard window too.** It killed only the service, and Edge processes of
+  Delta's own window kept running. It now asks Delta to shut down (as the Shut down button does), then closes what
+  is left, including Edge processes started with Delta's private window profile. Your own browser is never touched.
+- **Uninstall says what it keeps.** Your save folder ("Delta files" on the Desktop) and Python 3.12 stayed without a
+  word. The uninstaller now lists them at the end with their exact paths, why they stay, and how to remove Python.
+- **Uninstall shuts Delta down on the port in your settings.** It always asked port 7878, so a Delta moved to
+  another port was killed instead of shut down. Both scripts now read the port, data folder and save folder the way
+  Delta does.
+- **The Desktop icon with `delta cli` running.** It waited 2 minutes for a dashboard that never comes, then said
+  "Delta is taking too long". It now says at once that Delta is running in a terminal and how to close it there.
+- **Free-space check on the right drive.** With `DELTA_INSTALL_DIR` on another drive, the installer measured the
+  %LOCALAPPDATA% drive. It now measures the drive Delta is installed to (and keeps a small check on the
+  %LOCALAPPDATA% drive for Python and Delta's data).
+- **No-model warnings lead with the dashboard.** The top bar and `delta doctor` now say Settings > Keys (a free Groq
+  key) or start Ollama or LM Studio first, and the terminal command last.
+- **Docs: SmartScreen, Defender and the firewall** are explained in docs/INSTALL.md, with a line in the README.
 - **First message with no AI model says how to add one.** On a new PC with no key, the only models Delta could try
   are Ollama and LM Studio, which are not running, so the reply was router internals ("No model provider is
   available for task 'plan'. Errors: lmstudio: not reachable at http://127.0.0.1:1234/v1; ...") instead of how to
