@@ -14,6 +14,16 @@
 #  10. logs\crashes.log empty, no traceback in the service log, Shut down leaves no process behind
 #  11. uninstall -RemoveData: folder, icons, Start-menu folder, Path, data, Delta's saved keys and download caches
 #      gone; a stranger's saved key with "delta" in its name kept; no startup entry or scheduled task added
+# and the fixes for the minor problems this journey found (tests/test_fresh_user_minors.py):
+#   - the one-liner leaves the user's window as it was (no Stop preference, no variables or functions), and a failed
+#     install keeps that window open (1)
+#   - the free-space check measures the drive Delta is installed to (8)
+#   - "Start Delta when I sign in to Windows": on, off and on again from Settings; its sign-in command starts Delta
+#     in the background with no window (4)
+#   - `delta cli` running: the Desktop icon says so at once instead of waiting 2 minutes (7)
+#   - no Edge process of Delta's dashboard window is left after `delta update --stop` (2)
+#   - uninstall shuts Delta down on a port changed in settings.yaml (6), removes the sign-in entry (4) and says
+#     which of the user's files and which Python stay, with their paths (3)
 # Findings are collected (every check runs) and the job fails at the end if any check failed. Logs go to
 # $env:RUNNER_TEMP\fresh-user (uploaded as an artifact).
 # Keep this file ASCII: Windows PowerShell 5.1 reads a file without a BOM in the ANSI code page.
@@ -139,6 +149,13 @@ function DeltaProcesses {
         $_.ExecutablePath -and $_.ExecutablePath.StartsWith($venv, [StringComparison]::OrdinalIgnoreCase) })
 }
 
+function WindowProcesses {
+    # Edge processes of Delta's own dashboard window (its private profile), never anything else
+    $win = (Join-Path $data "app-window").ToLowerInvariant()
+    @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object {
+        $_.CommandLine -and $_.CommandLine.ToLowerInvariant() -match ("--user-data-dir=""?" + [regex]::Escape($win) + "(""|\s|$)") })
+}
+
 function Leftovers {
     # What a program can leave behind that starts it again or shows it to the user.
     $run = @()
@@ -171,12 +188,34 @@ try {
     # 1. the README one-liner ---------------------------------------------------------------------------------
     Child "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Restricted -Force" @{ PSExecutionPolicyPreference = "Bypass" } | Out-Null
     $t = Get-Date
-    $r = Child "Write-Host ('policy: ' + (Get-ExecutionPolicy)); irm '$url' | iex" `
+    $probe = ("; 'AFTER EAP=' + `$ErrorActionPreference + ' FUNCS=' + ((Get-Command Fail, Step, Test-Interactive, " +
+              "Get-DeltaRuntime -ErrorAction SilentlyContinue | ForEach-Object Name) -join ',') + ' VARS=' + " +
+              "((Get-Variable InstallDir, Repo, Source, Branch, failMark, __DeltaInstaller -ErrorAction SilentlyContinue | " +
+              "ForEach-Object Name) -join ',') + ' END'")
+    $r = Child ("Write-Host ('policy: ' + (Get-ExecutionPolicy)); irm '$url' | iex" + $probe) `
                @{ DELTA_REF = $Ref; DELTA_REPO = $Repo; DELTA_NO_LAUNCH = "1" }
     Must ($r.Code -eq 0 -and $r.Out -match "Delta is installed") ("README one-liner installs Delta under Restricted " +
           "(exit $($r.Code), $([int]((Get-Date) - $t).TotalSeconds) s)")
     Check ($r.Out -match "policy: Restricted") "the one-liner ran under the Restricted policy" | Out-Null
     Copy-Item (Join-Path $env:TEMP "delta-install.log") (Join-Path $out "install-first.log") -Force -ErrorAction SilentlyContinue
+    Check ($r.Out -match "AFTER EAP=Continue FUNCS= VARS= END") ("the one-liner leaves the user's window as it was " +
+          "(no Stop preference, no installer variables or functions) (got: $([regex]::Match($r.Out, 'AFTER .*').Value))") | Out-Null
+
+    # a failed install (a branch that does not exist) says why and keeps the user's window open
+    $r = Child ("irm '$url' | iex; 'STILL-OPEN CODE=' + `$LASTEXITCODE") `
+               @{ DELTA_REF = "no-such-branch-$PID"; DELTA_REPO = $Repo; DELTA_NO_LAUNCH = "1"
+                  DELTA_INSTALL_DIR = (Join-Path $env:RUNNER_TEMP "delta-failed-install") }
+    Check ($r.Out -match "Delta could not be installed" -and $r.Out -match "STILL-OPEN CODE=1") `
+        "a failed one-liner says why and leaves the user's PowerShell window open" | Out-Null
+    Check (Test-Path (Join-Path $dir ".venv\Scripts\python.exe")) "the failed run did not touch the installed Delta" | Out-Null
+
+    # the free-space check measures the drive Delta is installed to (DELTA_INSTALL_DIR on another drive)
+    $drives = @("C:\", "D:\") | Where-Object { Test-Path $_ }
+    foreach ($drv in $drives) {
+        $r = Child ("`$t = irm '$url'; . ([scriptblock]::Create(`$t)) -DefineOnly; try { Test-FreeSpace '" +
+                    (Join-Path $drv "delta-space-test\Delta") + "' 999999; 'NO-FAIL' } catch { 'CAUGHT ' + `$_.Exception.Message }")
+        Check ($r.Out -match ("free on " + [regex]::Escape($drv) + ",")) "the free-space check measures $drv for an install on $drv" | Out-Null
+    }
 
     # 2. a new PowerShell ------------------------------------------------------------------------------------
     $v = Child ($newWindow + "delta --version; exit `$LASTEXITCODE")
@@ -250,6 +289,21 @@ try {
     Check ($r.Code -eq 200 -and $r.Json.id) "Memory: add a fact (got $($r.Code))" | Out-Null
     if ($r.Json.id) { Check ((Api DELETE "/api/memory/$($r.Json.id)").Code -eq 200) "Memory: delete it" | Out-Null }
 
+    # Settings > Setup and shutdown: "Start Delta when I sign in to Windows" (on, off, on again for later steps)
+    $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    $r = Api GET "/api/autostart"
+    Check ($r.Code -eq 200 -and $r.Json.supported -and -not $r.Json.enabled) "start with Windows is off on a fresh PC (got $($r.Code): $($r.Text))" | Out-Null
+    $r = Api PUT "/api/autostart" @{ enabled = $true }
+    $run = (Get-ItemProperty $runKey -Name DeltaAgent -ErrorAction SilentlyContinue).DeltaAgent
+    Check ($r.Code -eq 200 -and $r.Json.enabled -and "$run" -like ('"' + $dir + '\.venv\Scripts\pythonw.exe" -m delta app --background')) `
+        "turning on start with Windows adds Delta's sign-in entry (got: $run)" | Out-Null
+    Check ((Api GET "/api/autostart").Json.enabled) "Settings shows start with Windows as on" | Out-Null
+    $r = Api PUT "/api/autostart" @{ enabled = $false }
+    Check ($r.Code -eq 200 -and -not $r.Json.enabled -and -not (Get-ItemProperty $runKey -Name DeltaAgent -ErrorAction SilentlyContinue)) `
+        "turning it off removes the sign-in entry" | Out-Null
+    $r = Api PUT "/api/autostart" @{ enabled = $true }
+    Check ($r.Code -eq 200 -and $r.Json.enabled) "start with Windows is on again (uninstall must remove it)" | Out-Null
+
     # 7. a local model appears (LM Studio stand-in) ----------------------------------------------------------
     $fakeLog = Join-Path $out "fake-lmstudio.log"
     $py = (Get-Command python -ErrorAction Stop).Source
@@ -302,9 +356,8 @@ try {
     Check ($done -and $ulog -match "Delta is installed") "the update finishes and says Delta is installed" | Out-Null
     Check ($ulog -match "closed the running Delta") "the update closed the running Delta itself" | Out-Null
     Check (-not (PortOpen 7878)) "Delta is stopped after the update" | Out-Null
-    $win = (Join-Path $data "app-window").ToLowerInvariant()
-    $stale = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.ToLowerInvariant().Contains($win) })
-    if ($stale.Count) { Info "after 'delta update --stop', $($stale.Count) Edge process(es) of Delta's closed dashboard window were still running" }
+    Check (WaitFor { @(WindowProcesses).Count -eq 0 } 20) ("no Edge process of Delta's dashboard window is left after " +
+          "'delta update --stop' (left: $(@(WindowProcesses).Count))") | Out-Null
     $v = Child ($newWindow + "delta --version; exit `$LASTEXITCODE")
     Check ($v.Code -eq 0) "delta still works after the update" | Out-Null
 
@@ -329,12 +382,65 @@ try {
     Check (WaitFor { -not (PortOpen 7878) } 30) "the dashboard stops after Shut down" | Out-Null
     Check (WaitFor { @(DeltaProcesses).Count -eq 0 } 30) "no Delta process is left after Shut down (left: $(@(DeltaProcesses | ForEach-Object { $_.CommandLine }) -join ' | '))" | Out-Null
 
+    # 10b. `delta cli` is running, then the Desktop icon is double-clicked ----------------------------------------
+    $venvPy = Join-Path $dir ".venv\Scripts\python.exe"
+    $psi = New-Object System.Diagnostics.ProcessStartInfo $venvPy, "-m delta cli"
+    $psi.UseShellExecute = $false; $psi.RedirectStandardInput = $true; $psi.CreateNoWindow = $true
+    $psi.WorkingDirectory = $env:USERPROFILE
+    $psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8"
+    $cli = [System.Diagnostics.Process]::Start($psi)
+    $marker = Join-Path $data "delta.cli"
+    if (Check (WaitFor { Test-Path $marker } 120) "delta cli starts and marks itself (delta.cli)") {
+        $launcherLog = Join-Path $data "logs\launcher.log"
+        $t = Get-Date
+        Start-Process -FilePath $desktopLnk
+        $said = WaitFor { (Test-Path $launcherLog) -and ((Get-Content $launcherLog -Raw) -match "running in a terminal window") } 90
+        $secs = [int]((Get-Date) - $t).TotalSeconds
+        Check $said "with delta cli running, the icon says at once that Delta runs in a terminal (after $secs s)" | Out-Null
+        Check ($said -and $secs -lt 30) "the icon did not wait for a dashboard that never comes (said it after $secs s)" | Out-Null
+        Check (-not (PortOpen 7878)) "the icon started no second Delta next to delta cli" | Out-Null
+        if (Test-Path $launcherLog) { Copy-Item $launcherLog (Join-Path $out "launcher-cli.log") -Force }
+    }
+    # the icon's message box waits for OK; close that launcher (pythonw ... -m delta app)
+    Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -match "-m delta app" } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    try { $cli.StandardInput.WriteLine("/quit"); $cli.StandardInput.Close() } catch { }
+    if (-not $cli.WaitForExit(60000)) { Stop-Process -Id $cli.Id -Force -ErrorAction SilentlyContinue }
+    Check (-not (Test-Path $marker)) "delta cli removes its mark when it ends" | Out-Null
+    Check (WaitFor { @(DeltaProcesses).Count -eq 0 } 30) "nothing of Delta runs after /quit" | Out-Null
+
+    # 10c. a restart: the sign-in entry starts Delta in the background, on a port changed in settings.yaml -----------
+    & $venvPy -c "import os; from pathlib import Path; from delta.config import write_user_settings; write_user_settings(Path(os.environ['LOCALAPPDATA']) / 'Delta', {'api': {'port': 7979}})"
+    $run = "$((Get-ItemProperty $runKey -Name DeltaAgent -ErrorAction SilentlyContinue).DeltaAgent)"
+    $m = [regex]::Match($run, '^"([^"]+)"\s+(.*)$')
+    Must ($m.Success) "the sign-in entry is there to start Delta (got: $run)"
+    Start-Process -FilePath $m.Groups[1].Value -ArgumentList $m.Groups[2].Value -WorkingDirectory $env:USERPROFILE
+    Check (WaitFor { PortOpen 7979 } 180) "the sign-in command starts Delta in the background, on port 7979 from settings.yaml" | Out-Null
+    Check (-not (PortOpen 7878)) "nothing listens on the old port 7878" | Out-Null
+    Start-Sleep -Seconds 5
+    Check (@(WindowProcesses).Count -eq 0) "starting at sign-in opens no window" | Out-Null
+
     # 11. uninstall with -RemoveData ------------------------------------------------------------------------
     & "$dir\.venv\Scripts\python.exe" -c "import keyring; keyring.set_password('delta-agent', 'groq_api_key', 'gsk_fake_for_ci')"
     & cmdkey.exe "/generic:$cmdTarget" /user:someone /pass:not-delta | Out-Null
     SaveLogs
     $r = Child "powershell -NoProfile -ExecutionPolicy Bypass -File `"$dir\scripts\uninstall.ps1`" -RemoveData; exit `$LASTEXITCODE"
+    $r.Out | Out-File (Join-Path $out "uninstall.txt") -Encoding utf8
     Check ($r.Code -eq 0) "uninstall.ps1 -RemoveData exits 0" | Out-Null
+    Check ($r.Out -match "asked Delta to shut down \(its dashboard on port 7979\)") "uninstall shuts Delta down on the port from settings.yaml (7979)" | Out-Null
+    Check (WaitFor { -not (PortOpen 7979) } 30) "Delta on port 7979 is stopped by uninstall" | Out-Null
+    Check ($r.Out -match "removed 'Start Delta when I sign in to Windows'" -and -not (Get-ItemProperty $runKey -Name DeltaAgent -ErrorAction SilentlyContinue)) `
+        "uninstall removes Delta's sign-in entry" | Out-Null
+    $files = Join-Path ([Environment]::GetFolderPath("Desktop")) "Delta files"
+    if (Test-Path $files) {
+        Check ($r.Out -match "Kept on this PC" -and $r.Out -match [regex]::Escape("The files Delta made for you: $files")) `
+            "uninstall says the 'Delta files' folder is kept, with its path" | Out-Null
+    } else { Info "no 'Delta files' folder on the Desktop to report" }
+    $py312 = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
+    if (Test-Path $py312) {
+        Check ($r.Out -match [regex]::Escape("Python 3.12 ($py312)") -and $r.Out -match "winget uninstall --id Python.Python.3.12") `
+            "uninstall says Python 3.12 stays, where it is and how to remove it" | Out-Null
+    } else { Info "Python 3.12 is not in %LOCALAPPDATA% on this runner (another one was reused)" }
     Check (-not (Test-Path $dir)) "the install folder is gone" | Out-Null
     Check (-not (Test-Path $data)) "the data folder is gone (-RemoveData)" | Out-Null
     Check (-not (Test-Path $desktopLnk) -and -not (Test-Path $menuLnk) -and -not (Test-Path $menuDir)) "Desktop icon, Start-menu icon and folder are gone" | Out-Null
@@ -351,10 +457,6 @@ try {
         $mb = SizeMB (Join-Path $env:LOCALAPPDATA "$k\cache")
         Check ($mb - $cachesBefore[$k] -lt 5) "no download cache of Delta's is left in %LOCALAPPDATA%\$k\cache (grew by $([math]::Round($mb - $cachesBefore[$k], 1)) MB)" | Out-Null
     }
-    $files = Join-Path ([Environment]::GetFolderPath("Desktop")) "Delta files"
-    if (Test-Path $files) { Info "after uninstall, the Desktop folder 'Delta files' (Delta's save folder) is still there" }
-    $py312 = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
-    if (Test-Path $py312) { Info "Python 3.12 stays installed after uninstall ($py312)" }
 } catch {
     $script:failures.Add("stopped: $($_.Exception.Message)")
     Write-Host "STOPPED  $($_.Exception.Message)" -ForegroundColor Red
@@ -364,6 +466,7 @@ try {
     ShowLog (Join-Path $data "logs\launcher.log") 40
 } finally {
     if ($fake) { Stop-Process -Id $fake.Id -Force -ErrorAction SilentlyContinue }
+    Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name DeltaAgent -ErrorAction SilentlyContinue
     & cmdkey.exe "/delete:$cmdTarget" 2>$null | Out-Null
     Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     SaveLogs

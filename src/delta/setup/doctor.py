@@ -308,7 +308,8 @@ def run_checks(settings: Any, *, root: Path = ROOT, which: Callable[[str], str |
     else:
         out.append(Check("AI models", "warn", "no cloud key or AI app is set up yet" +
                          (f" (local: {', '.join(local)}, checked below)" if local else ""),
-                         "Open Delta and follow the setup page (a free Groq key takes a minute), or run: "
+                         "In Delta, open Settings > Keys and add a free Groq key (console.groq.com/keys, it takes "
+                         "a minute), or start Ollama or LM Studio on this PC. In a terminal: "
                          "delta secrets set groq_api_key"))
     return out
 

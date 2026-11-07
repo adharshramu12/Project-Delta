@@ -109,7 +109,7 @@
   }
   async function load() {
     $("settingserr").hidden = true;
-    guardCard(); sosCard(); tgCard(); notifyState();
+    guardCard(); sosCard(); tgCard(); notifyState(); autostartCard();
     const s = await api("/api/settings").catch(e => ({error: e}));
     if (!s || !s.boundaries) { $("settingserr").hidden = false; $("settingserr").textContent = "Settings could not be loaded. " + (s.error ? D.plain(s.error) : ""); return; }
     loaded = s; fill(s);
@@ -120,7 +120,22 @@
     if (v) { $("s_err").className = "msg"; $("s_err").textContent = "You have unsaved changes."; }
     else if ($("s_err").textContent === "You have unsaved changes.") $("s_err").textContent = "";
   }
-  const own = el => el.closest("#s_guard, #s_sos, #set_notify, #set_look") || el.id === "s_signin_url";
+  const own = el => el.closest("#s_guard, #s_sos, #set_notify, #set_look, #s_autostart") || el.id === "s_signin_url";
+  // ---- Start Delta when I sign in to Windows (applied at once: a Windows setting, not part of Save changes)
+  async function autostartCard() {
+    const a = await api("/api/autostart").catch(() => null);
+    if (!a || !a.supported) { $("s_autostart").hidden = true; return; }
+    $("s_autostart").hidden = false; $("s_autostart_on").checked = !!a.enabled;
+    if (a.blocked_in_task_manager) $("s_autostart_msg").textContent = "Turned off in Task Manager. Tick to turn it on again.";
+  }
+  $("s_autostart_on").onchange = async () => {
+    const box = $("s_autostart_on"), msg = $("s_autostart_msg"), want = box.checked;
+    box.disabled = true;
+    const r = await api("/api/autostart", {method: "PUT", body: JSON.stringify({enabled: want})}).catch(e => ({error: D.plain(e)}));
+    box.disabled = false;
+    if (!r || !r.ok) { box.checked = !want; msg.className = "msg err"; msg.textContent = "Could not change it: " + (D.detail(r) || r.error || "unknown error"); return; }
+    box.checked = !!r.enabled; msg.className = "msg ok"; msg.textContent = r.message;
+  };
   $("settingsbody").addEventListener("input", e => { if (!own(e.target)) setDirty(true); });
   $("settingsbody").addEventListener("change", e => { if (!own(e.target)) setDirty(true); });
   $("s_reset").onclick = () => { if (loaded) fill(loaded); $("s_err").textContent = ""; };

@@ -34,7 +34,18 @@
     $("ownername").value = $("ownername").value || s.owner_name || "";
     $("tgid").value = $("tgid").value || (s.telegram.user_ids || []).join(", ");
     $("tgon").checked = $("tgon").checked || s.telegram.enabled;
+    autoRow();
   }
+  // With Telegram on, offer to start Delta at sign-in (off unless ticked): the bot only answers while Delta runs.
+  let autoKnown = false, autoSupported = true;
+  async function autoRow() {
+    $("tgautorow").hidden = !$("tgon").checked || !autoSupported;
+    if (autoKnown || !autoSupported) return;
+    const a = await api("/api/autostart").catch(() => null);
+    if (!a || !a.supported) { autoSupported = false; $("tgautorow").hidden = true; return; }
+    autoKnown = true; $("tgauto").checked = !!a.enabled;
+  }
+  $("tgon").addEventListener("change", autoRow);
   async function openSetup(at) {
     if (D.renderAIApps) D.renderAIApps($("w_apps"));
     if (!dlg.open) dlg.showModal();
@@ -49,7 +60,7 @@
       b.disabled = true; msg.className = "msg"; msg.textContent = "Checking with the service...";
       const r = await api("/api/setup/key", {method: "POST", body: JSON.stringify({name: row.dataset.key, value: input.value})}).catch(() => ({ok: false, message: "Delta is not reachable."}));
       b.disabled = false; msg.className = "msg " + (r.ok ? "ok" : "err"); msg.textContent = r.message || "";
-      if (r.ok) { input.value = ""; if (row.dataset.key === "telegram_bot_token") { $("tgon").checked = true; tgSteps(); } D.emit("status:refresh"); }
+      if (r.ok) { input.value = ""; if (row.dataset.key === "telegram_bot_token") { $("tgon").checked = true; autoRow(); tgSteps(); } D.emit("status:refresh"); }
     };
     input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); b.click(); } });
     // A pasted Telegram token is saved at once: one less button for people new to this.
@@ -80,7 +91,7 @@
       const s = await api("/api/telegram").catch(() => null);
       if (s && (s.users || []).length > before) {
         out.className = "msg ok"; out.textContent = `Connected. Message @${s.bot} from your phone; approvals arrive there too.`;
-        $("tgid").value = s.users.join(", "); $("tgon").checked = true; tgSteps(); D.settings.tgCard(); return;
+        $("tgid").value = s.users.join(", "); $("tgon").checked = true; autoRow(); tgSteps(); D.settings.tgCard(); return;
       }
     }
     if (mine === pairing) { out.className = "msg err"; out.textContent = "The code expired. Press Connect my phone again."; }
@@ -98,12 +109,14 @@
       const ids = $("tgid").value.split(/[ ,]+/).filter(Boolean);
       if ($("tgon").checked && !ids.length) { showStep(STEPS.indexOf("telegram")); $("werr").textContent = "Add your Telegram user id, or turn Telegram off."; return; }
       const body = {owner_name: $("ownername").value, autonomy: dlg.querySelector("input[name=autonomy]:checked").value, telegram_enabled: $("tgon").checked, telegram_user_ids: ids};
+      if ($("tgon").checked && autoKnown) body.start_with_windows = $("tgauto").checked;
       $("wnext").disabled = true;
       const r = await api("/api/setup/complete", {method: "POST", body: JSON.stringify(body)}).catch(e => ({error: D.plain(e)}));
       $("wnext").disabled = false;
       if (!r.ok) { $("werr").textContent = "Could not save: " + (D.detail(r) || r.error || "unknown error"); return; }
       const level = {"ask-everything": "Careful", "ask-risky": "Balanced", "trusted": "Trusted", "autopilot": "Autopilot"}[body.autonomy];
       $("summary").textContent = `AI models ready: ${r.models_ready.join(", ") || "none"}\nPermission level: ${level}\nTelegram: ${body.telegram_enabled ? "on" : "off"}` +
+        (r.start_with_windows === true ? "\nStarts when you sign in to Windows: yes" : r.start_with_windows === false ? "\nStarts when you sign in to Windows: no" : "") +
         (r.restart_needed ? "\n\nRestart Delta (Shut down, then open it again) to connect Telegram." : "");
     }
     if (name === "done") { dlg.close(); D.emit("status:refresh"); D.emit("setup:done"); return; }

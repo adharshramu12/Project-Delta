@@ -67,6 +67,10 @@ class SigninIn(BaseModel):
     url: str = Field(default="", max_length=2000)
 
 
+class AutostartIn(BaseModel):
+    enabled: bool
+
+
 class SettingsIn(BaseModel):
     browser: BrowserIn | None = None
     boundaries: BoundariesIn | None = None
@@ -233,6 +237,30 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
         c.audit.record("settings.changed", sections=sorted(changes))
         return {"ok": True, "restart_needed": restart, "save_dir_resolved": str(save_dir(s.files, create=False)),
                 **({"browser_note": browser_note} if browser_note else {})}
+
+    # Settings > Setup and shutdown: "Start Delta when I sign in to Windows" (delta.system.autostart). Applied at
+    # once, not with Save changes: it is a Windows setting, not one of Delta's.
+    @app.get("/api/autostart", dependencies=[Depends(auth)])
+    async def autostart_get() -> dict[str, Any]:
+        from delta.system import autostart
+
+        return (await asyncio.to_thread(autostart.status)).to_dict()
+
+    @app.put("/api/autostart", dependencies=[Depends(auth)])
+    async def autostart_put(body: AutostartIn) -> dict[str, Any]:
+        from delta.system import autostart
+
+        try:
+            st = await asyncio.to_thread(autostart.set_enabled, body.enabled)
+        except OSError as e:
+            raise HTTPException(400, f"Windows did not accept the change: {e}") from e
+        if not st.supported:
+            raise HTTPException(400, "Starting with Windows is only available on Windows.")
+        c.audit.record("settings.autostart", enabled=st.enabled)
+        message = ("Delta starts by itself when you sign in to Windows (in the background, no window), so Telegram "
+                   "keeps working after a restart." if st.enabled else
+                   "Delta no longer starts when you sign in. Open it from its icon when you need it.")
+        return {"ok": True, **st.to_dict(), "message": message}
 
     @app.post("/api/browser/signin", dependencies=[Depends(auth)])
     async def browser_signin(body: SigninIn) -> dict[str, Any]:

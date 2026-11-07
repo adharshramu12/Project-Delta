@@ -464,35 +464,67 @@ async def run(open_ui: bool = False) -> int:
     return 0
 
 
-def launch_app() -> int:
+def terminal_message(pid: int) -> str:
+    return (f"Delta is already running in a terminal window (the 'delta cli' command, process {pid}).\n"
+            "Only one Delta can run at a time, and the terminal one has no dashboard.\n\n"
+            "To use the dashboard, close Delta in that terminal (type /quit or press Ctrl+C), then open Delta "
+            "again. Or keep using it in the terminal.")
+
+
+def _tell(settings: Settings, message: str) -> None:
+    """A dialog (no console when started from the icon), and the same text in logs\\launcher.log."""
+    import time
+
+    with contextlib.suppress(OSError):
+        logs = settings.data_dir / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        with open(logs / "launcher.log", "a", encoding="utf-8") as f:
+            f.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')}\n{message}\n")
+    alert(message)
+
+
+def launch_app(background: bool = False) -> int:
     """Double-click entry (run by pythonw from the shortcut). Starts the service as a hidden console
     process, so it and every helper it spawns get real stdin/stdout/stderr handles (pythonw has none,
-    which breaks logging setup and makes child processes hang), then opens the app window."""
+    which breaks logging setup and makes child processes hang), then opens the app window.
+
+    background (`delta app --background`, what "Start Delta when I sign in to Windows" runs): start the service
+    if it is not running, and open no window."""
     import sys
     import time
 
     settings = load_settings()
+    from delta.__main__ import terminal_delta
     from delta.api.server import load_token
 
     token = load_token(settings.data_dir)
     if _delta_on_port(settings):
-        open_dashboard(settings, token)
+        if not background:
+            open_dashboard(settings, token)
         return 0
     if _port_open(settings.api.host, settings.api.port):
-        alert(port_taken_message(settings))
+        _tell(settings, port_taken_message(settings))
+        return 1
+    if (pid := terminal_delta(settings.data_dir)) is not None:
+        # `delta cli` holds the one-Delta lock and serves no dashboard: starting the service would only wait for a
+        # page that never comes ("taking too long" after 2 minutes). Say so now.
+        _tell(settings, terminal_message(pid))
         return 1
     logs = settings.data_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     console = logs / "service.log"
     with _launch_lock(settings.data_dir) as first:
         if not first:  # clicked again while Delta starts: show what is there, never start a second copy
+            if background:
+                return 0
             if hwnd := _find_app_window():
                 _bring_to_front(hwnd)
                 return 0
             return 0 if _wait_then_open(settings, token, None, console) else 1
-        splash = _show_splash(settings, token, console)
-        if splash and (hwnd := _wait_for_window(10)):
-            _bring_to_front(hwnd)
+        if not background:
+            splash = _show_splash(settings, token, console)
+            if splash and (hwnd := _wait_for_window(10)):
+                _bring_to_front(hwnd)
         python = Path(sys.executable).with_name("python.exe")
         if not python.exists():
             python = Path(sys.executable)
@@ -501,12 +533,12 @@ def launch_app() -> int:
                 console.replace(console.with_suffix(".log.1"))
         start = console.stat().st_size if console.exists() else 0
         with open(console, "a", encoding="utf-8") as out:  # never wipe what a running copy is writing
-            out.write(f"\n--- launch {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+            out.write(f"\n--- launch {time.strftime('%Y-%m-%d %H:%M:%S')}{' (background)' if background else ''} ---\n")
             out.flush()
             proc = subprocess.Popen([str(python), "-m", "delta", "run"], stdin=subprocess.DEVNULL, stdout=out,
                                     stderr=subprocess.STDOUT, cwd=str(Path.home()),
                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        return 0 if _wait_then_open(settings, token, proc, console, start) else 1
+        return 0 if _wait_then_open(settings, token, proc, console, start, show=not background) else 1
 
 
 def _wait_for_window(seconds: float) -> int:
@@ -521,16 +553,20 @@ def _wait_for_window(seconds: float) -> int:
 
 
 def _wait_then_open(settings: Settings, token: str, proc: subprocess.Popen[bytes] | None, console: Path,
-                    start: int = 0) -> bool:
-    """Wait for the service to answer, then show the dashboard. A service that exits because Delta is
-    already running (another click won the race) is not an error: keep waiting for that one."""
+                    start: int = 0, show: bool = True) -> bool:
+    """Wait for the service to answer, then show the dashboard (show=False: only wait). A service that exits because
+    Delta is already running (another click won the race) is not an error: keep waiting for that one, unless the
+    one running is Delta in a terminal (`delta cli`), which never opens a dashboard: say so at once."""
     import time
+
+    from delta.__main__ import terminal_delta
 
     host, port = settings.api.host, settings.api.port
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         if _port_open(host, port, 0.2):
-            open_dashboard(settings, token)
+            if show:
+                open_dashboard(settings, token)
             return True
         if proc is not None and proc.poll() is not None:
             with open(console, "rb") as f:
@@ -538,9 +574,12 @@ def _wait_then_open(settings: Settings, token: str, proc: subprocess.Popen[bytes
                 ours = f.read().decode("utf-8", "replace")
             if "AlreadyRunningError" not in ours and ALREADY_RUNNING not in ours:
                 tail = ours.strip().splitlines()[-8:]
-                alert("Delta could not start.\n\n" + "\n".join(tail) + f"\n\nFull log: {console}")
+                _tell(settings, "Delta could not start.\n\n" + "\n".join(tail) + f"\n\nFull log: {console}")
+                return False
+            if (pid := terminal_delta(settings.data_dir)) is not None:
+                _tell(settings, terminal_message(pid))
                 return False
             proc = None  # another copy is starting it: wait for that one
         time.sleep(0.2)
-    alert(f"Delta is taking too long to start.\n\nDetails: {console}")
+    _tell(settings, f"Delta is taking too long to start.\n\nDetails: {console}")
     return False
