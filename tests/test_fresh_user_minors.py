@@ -197,6 +197,8 @@ def test_uninstall_says_what_it_keeps_and_how_to_remove_python():
     assert "The files Delta made for you: $save" in tail and "They are yours" in tail
     assert 'Join-Path ([Environment]::GetFolderPath("Desktop")) "Delta files"' in tail  # the default save folder
     assert "Python 3.12 ($python)" in tail and "winget uninstall --id Python.Python.3.12" in tail
+    assert "$python = $basePython" in tail  # the Python Delta's environment was built from, read from .venv\pyvenv.cfg
+    assert ps.index('".venv\\pyvenv.cfg"') < ps.index("Remove-Item $InstallDir")
     assert "Settings > Apps > Installed apps" in tail
     assert "-RemoveData to delete them" in tail
 

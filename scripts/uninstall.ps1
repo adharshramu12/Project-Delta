@@ -43,6 +43,17 @@ function Get-DeltaRuntime([string]$dir) {
     return $rt
 }
 $rt = Get-DeltaRuntime $InstallDir
+# The Python 3.12 Delta's environment was built from (.venv\pyvenv.cfg, "home = <folder>"), read before the folder
+# goes: it stays installed, and the end of this script says where it is.
+$basePython = $null
+try {
+    $cfg = Get-Content -LiteralPath (Join-Path $InstallDir ".venv\pyvenv.cfg") -ErrorAction Stop
+    $homeLine = @($cfg | Where-Object { $_ -match '^\s*home\s*=\s*(.+?)\s*$' }) | Select-Object -First 1
+    if ($homeLine -and $homeLine -match '^\s*home\s*=\s*(.+?)\s*$') {
+        $exe = Join-Path $Matches[1] "python.exe"
+        if (Test-Path -LiteralPath $exe) { $basePython = $exe }
+    }
+} catch { }
 
 # Stop a running Delta the way its Shutdown button does (it closes its own window too).
 $tokenFile = Join-Path $rt.Data "api_token"
@@ -133,8 +144,10 @@ if (Test-Path -LiteralPath $save) {
 }
 $saveLink = Join-Path ([Environment]::GetFolderPath("Desktop")) "Delta files.lnk"
 if (Test-Path -LiteralPath $saveLink) { $kept.Add("The Desktop shortcut to them: $saveLink.") }
-$python = $null
-foreach ($c in @((Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"))) { if (Test-Path -LiteralPath $c) { $python = $c } }
+$python = $basePython
+foreach ($c in @((Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"))) {
+    if (-not $python -and (Test-Path -LiteralPath $c)) { $python = $c }
+}
 if (-not $python) {
     try {
         $reg = Get-ItemProperty -Path "HKCU:\Software\Python\PythonCore\3.12\InstallPath" -ErrorAction Stop

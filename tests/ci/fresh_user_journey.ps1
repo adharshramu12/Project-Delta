@@ -424,6 +424,7 @@ try {
     & "$dir\.venv\Scripts\python.exe" -c "import keyring; keyring.set_password('delta-agent', 'groq_api_key', 'gsk_fake_for_ci')"
     & cmdkey.exe "/generic:$cmdTarget" /user:someone /pass:not-delta | Out-Null
     SaveLogs
+    $venvHome = [regex]::Match((Get-Content (Join-Path $dir ".venv\pyvenv.cfg") -Raw), '(?m)^\s*home\s*=\s*(.+?)\s*$').Groups[1].Value
     $r = Child "powershell -NoProfile -ExecutionPolicy Bypass -File `"$dir\scripts\uninstall.ps1`" -RemoveData; exit `$LASTEXITCODE"
     $r.Out | Out-File (Join-Path $out "uninstall.txt") -Encoding utf8
     Check ($r.Code -eq 0) "uninstall.ps1 -RemoveData exits 0" | Out-Null
@@ -436,11 +437,9 @@ try {
         Check ($r.Out -match "Kept on this PC" -and $r.Out -match [regex]::Escape("The files Delta made for you: $files")) `
             "uninstall says the 'Delta files' folder is kept, with its path" | Out-Null
     } else { Info "no 'Delta files' folder on the Desktop to report" }
-    $py312 = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
-    if (Test-Path $py312) {
-        Check ($r.Out -match [regex]::Escape("Python 3.12 ($py312)") -and $r.Out -match "winget uninstall --id Python.Python.3.12") `
-            "uninstall says Python 3.12 stays, where it is and how to remove it" | Out-Null
-    } else { Info "Python 3.12 is not in %LOCALAPPDATA% on this runner (another one was reused)" }
+    $py312 = Join-Path $venvHome "python.exe"
+    Check ($venvHome -and $r.Out -match [regex]::Escape("Python 3.12 ($py312)") -and $r.Out -match "winget uninstall --id Python.Python.3.12") `
+        "uninstall says the Python 3.12 Delta used stays, where it is ($py312) and how to remove it" | Out-Null
     Check (-not (Test-Path $dir)) "the install folder is gone" | Out-Null
     Check (-not (Test-Path $data)) "the data folder is gone (-RemoveData)" | Out-Null
     Check (-not (Test-Path $desktopLnk) -and -not (Test-Path $menuLnk) -and -not (Test-Path $menuDir)) "Desktop icon, Start-menu icon and folder are gone" | Out-Null

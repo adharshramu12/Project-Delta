@@ -87,8 +87,8 @@ With parameters, run the downloaded text as a script block:
   - **The files Delta made for you**: the save folder, normally **Delta files** on your Desktop
     (`%USERPROFILE%\Delta` when OneDrive holds your Desktop, with a "Delta files" shortcut on the Desktop). They are
     yours, so the uninstaller never deletes them. Delete the folder yourself when you no longer need it.
-  - **Python 3.12** (`%LOCALAPPDATA%\Programs\Python\Python312`). The installer reuses it or installs it, and other
-    programs may use it too. To remove it: Settings > Apps > Installed apps, find "Python 3.12", then Uninstall. Or
+  - **Python 3.12**, the one Delta was built on (normally `%LOCALAPPDATA%\Programs\Python\Python312`; the uninstaller
+    prints the exact path). The installer reuses it or installs it, and other programs may use it too. To remove it: Settings > Apps > Installed apps, find "Python 3.12", then Uninstall. Or
     in PowerShell: `winget uninstall --id Python.Python.3.12`.
 
 ## Start with Windows
