@@ -100,9 +100,11 @@ saying what you found (it worked, or how it failed) is very welcome.
   tell a small letter from its capital); a site that checks case-blind does better than the exact-match numbers.
   The model's settings (passes, capital lean, case margin) were chosen on benchmark seeds that are not the reported
   ones, but from the same generator, so the numbers may flatter it.
-- **The captcha model on other PCs**: installed and run on CI's Windows x64 runners (`--extra all`) and on Linux.
-  Not tried on Windows on ARM64 (onnxruntime ships a wheel; if it fails to load, Delta falls back to Windows OCR,
-  which is tested only with a stand-in), on a PC without AVX, or with antivirus that blocks onnxruntime's DLLs.
+- **The captcha model on other PCs**: installed by the one-line installer and checked by `delta doctor` (it reads a
+  test picture) on CI's Windows Server 2025 and 2022 x64 runners and on Windows 11 on ARM (x64 Python under
+  emulation, as the installer sets it up). Not tried on a real user's PC, on an older x64 CPU without AVX, or with
+  antivirus that blocks onnxruntime's DLLs; if the model fails to load, Delta falls back to Windows OCR (tested only
+  with a stand-in) and `delta doctor` shows a WARN.
 - **The #40 terminal turn-off migration**: read from the login file's last write time. Tested with files whose times
   are set by the test; a PC whose clock was wrong when the switch was changed, or files copied in a way that resets
   their times, may read the switch as on. A permission change or Replace made under #40 reads as off (the safe
