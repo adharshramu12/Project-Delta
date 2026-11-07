@@ -99,6 +99,38 @@ jobs:
           path: ${{ runner.temp }}/delta-install.log
           if-no-files-found: ignore
 
+  # Everything a brand-new user does, on clean runners, against this commit: the README one-liner, a new
+  # PowerShell (delta --version, delta doctor), Delta opened from its Desktop icon, every first-run dashboard page
+  # and API, the first message with no AI model, onboarding, settings, a login, a schedule, a chat with a local
+  # model (a stand-in for LM Studio: no keys), a task that opens Notepad, Stop, delta update, a restart,
+  # crashes.log, Shut down, and uninstall with nothing left behind. Steps: tests/ci/fresh_user_journey.ps1.
+  fresh-user-journey:
+    name: fresh user (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-2022]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install, use, update, uninstall as a new user
+        shell: pwsh
+        env:
+          DELTA_T_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+          DELTA_T_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+        run: |
+          $version = [regex]::Match((Get-Content pyproject.toml -Raw), '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
+          ./tests/ci/fresh_user_journey.ps1 -Ref $env:DELTA_T_REF -Repo $env:DELTA_T_REPO -Version $version
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fresh-user-${{ matrix.os }}
+          path: ${{ runner.temp }}/fresh-user
+          if-no-files-found: ignore
+
   # The eval suite (evals/tasks) with the scripted model: no keys, no network beyond 127.0.0.1, never a
   # paid API. Checks the harness, its checkers and Delta's agent loop on a clean Windows PC. Not a
   # required check; real-model runs are manual (`delta eval run --model <provider>`).
