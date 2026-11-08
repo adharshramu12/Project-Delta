@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from delta.llm.providers import inject_tool_prompt, lean_schema, tool_lines, wire_tools
 
 SPEC = {"type": "function", "function": {
@@ -86,11 +88,17 @@ def test_screen_lines_need_screen_tools() -> None:
     assert "EVERY mouse/keyboard/browser action" in fit_rules(text, {"browser_open"})
 
 
-def test_token_bench_after_numbers() -> None:
-    """Floors on what the bench measured with this change (evals/token_bench.py): a regression shows here."""
+def test_token_bench_before_and_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    """evals/token_bench.py with these cuts and without them, in the same run on the same PC (Windows sends more
+    tools and longer paths than Linux, so absolute numbers differ by platform): the cuts must save at least 8% of
+    the API input and 12% of what a CLI provider is sent. Measured on Linux: 44,766 -> 39,729 tokens (-11%) and
+    177,019 -> 145,443 CLI characters (-18%)."""
     import asyncio
     import sys
     from pathlib import Path
+
+    from delta.core import orchestrator
+    from delta.llm import providers
 
     root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root / "evals"))
@@ -98,7 +106,17 @@ def test_token_bench_after_numbers() -> None:
         import token_bench
     finally:
         sys.path.remove(str(root / "evals"))
-    data = asyncio.run(token_bench.measure())
-    assert sum(r["tokens"] for r in data.values()) <= 41_000  # 44,766 before this change
-    assert sum(r["cli_chars"] for r in data.values()) <= 150_000  # 177,019 before this change
-    assert all(r["status"].startswith("done") for r in data.values())
+    after = asyncio.run(token_bench.measure())
+    monkeypatch.setattr(orchestrator, "fit_rules", lambda system, tools: system)
+    monkeypatch.setattr(providers, "wire_tools", lambda tools: tools)
+    monkeypatch.setattr(providers, "tool_lines", lambda tools: json.dumps([t["function"] for t in tools or []],
+                                                                          separators=(",", ":")))
+    before = asyncio.run(token_bench.measure())
+
+    def total(data: dict, key: str) -> int:
+        return sum(r[key] for r in data.values())
+
+    assert all(r["status"].startswith("done") for r in after.values())
+    assert total(after, "tokens") <= total(before, "tokens") * 0.92, (total(before, "tokens"), total(after, "tokens"))
+    assert total(after, "cli_chars") <= total(before, "cli_chars") * 0.88, (total(before, "cli_chars"),
+                                                                            total(after, "cli_chars"))
