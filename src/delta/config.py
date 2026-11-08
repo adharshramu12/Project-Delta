@@ -209,6 +209,15 @@ class CaptchaConfig(BaseModel):
     allowed_sites: list[str] = Field(default_factory=list)
 
 
+class StudentConfig(BaseModel):
+    # Settings > Student: for requests inside a college portal ("show my timetable"). Today's date alone gives the
+    # academic year and odd/even semester (delta.tools.academic); these add the semester NUMBER some portals list.
+    # 0 = not set. Kept in the user's own settings file only.
+    join_year: int = Field(default=0, ge=0, le=2100)  # the calendar year they started (a July start)
+    year_of_study: int = Field(default=0, ge=0, le=8)  # their year of study when they set it...
+    year_of_study_in: str = ""  # ...in this academic year ("2026-2027"); it moves on by one each year after
+
+
 class AcademyConfig(BaseModel):
     # One light line about the academy in delta/identity.py, at most once per conversation, only when the user asks
     # to learn AI (delta.core.academy). false = never.
@@ -463,6 +472,7 @@ class Settings(BaseModel):
     captcha: CaptchaConfig = Field(default_factory=CaptchaConfig)
     writer: WriterConfig = Field(default_factory=WriterConfig)
     academy: AcademyConfig = Field(default_factory=AcademyConfig)
+    student: StudentConfig = Field(default_factory=StudentConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     updates: UpdatesConfig = Field(default_factory=UpdatesConfig)
     tour: TourConfig = Field(default_factory=TourConfig)

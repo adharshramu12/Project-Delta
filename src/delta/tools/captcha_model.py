@@ -59,9 +59,12 @@ def _ascii_alnum(c: str) -> bool:
 
 class Readings(list[str]):
     """The model's readings, one per pass, and whether the case of any letter was a close call (case_doubt): then the
-    answer is not taken as sure even when every pass agrees, and Windows OCR (or one vision call) gets a say."""
+    answer is not taken as sure even when every pass agrees, and Windows OCR (or one vision call) gets a say.
+    case_from_shape: the case of each letter was measured from the picture (bright coloured captchas,
+    delta.tools.captcha_colour), so when Windows OCR reads the same letters, the model's case stands."""
 
     case_doubt: bool = False
+    case_from_shape: bool = False
 
 
 def decode(probs: Any, charset: list[str], hints: Hints | None = None, upper_bias: float = UPPER_BIAS) -> str:
@@ -200,6 +203,7 @@ class CaptchaModel:
         result = combine(found, layers, hints)
         out = Readings(result.readings)
         out.case_doubt = result.doubt
+        out.case_from_shape = True
         return out
 
     def read_sync(self, picture: bytes, hints: Hints | None = None) -> Readings:

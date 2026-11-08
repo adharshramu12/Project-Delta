@@ -329,6 +329,7 @@ class CaptchaSolver:
         self._last_shot: dict[str, bytes] = {}  # host -> the picture of the last answer typed (kept in memory only)
         self.vision_calls = 0  # pictures sent to a model (each one small); OCR reads are free
         self.last_via = ""  # how the last answer was read: model | model+ocr | ocr | vision | ""
+        self._shape_case = False  # the model's last reading measured letter case from the picture
 
     def _used(self, host: str) -> int:
         count, since = self._attempts.get(host, (0, 0.0))
@@ -367,10 +368,14 @@ class CaptchaSolver:
         and agreement only; the readings themselves only with DELTA_CAPTCHA_DEBUG=1."""
         readings: list[str] = []
         doubt = False
+        if name == "model":
+            self._shape_case = False
         with contextlib.suppress(Exception):  # an engine missing or failing: the next one still reads
             got = await (reader(shot, hints) if name == "model" else reader(shot))
             readings = [str(r or "") for r in got] if isinstance(got, list) else [str(got or "")]
             doubt = bool(getattr(got, "case_doubt", False))
+            if name == "model":
+                self._shape_case = bool(getattr(got, "case_from_shape", False))
         answer = pick(readings, hints) if readings else None
         fitted = [fit(r, hints) for r in readings]
         _log_read(name, readings, fitted, answer, doubt)
@@ -401,9 +406,10 @@ class CaptchaSolver:
             ocr_answer, _fits, _sure = await self._engine("ocr", self.ocr, shot, hints)
         if model_answer and ocr_answer and (ocr_answer == model_answer or ocr_answer in model_fits
                                             or ocr_answer.lower() == model_answer.lower()):
-            # the same characters: Windows OCR, a general text reader, also settles their case
+            # the same characters: Windows OCR, a general text reader, also settles their case, unless the model
+            # measured each letter's case from the picture itself (a bright coloured captcha)
             self.last_via = "model+ocr"
-            return ocr_answer
+            return model_answer if self._shape_case and ocr_answer.lower() == model_answer.lower() else ocr_answer
         if ocr_answer and self.model is None:  # Windows OCR is the only engine here: its vote is the answer
             self.last_via = "ocr"
             return ocr_answer

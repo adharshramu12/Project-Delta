@@ -12,6 +12,12 @@ scalable font, so a Linux box and a Windows runner draw the same pixels:
   coloured     5 or 6 digits, each in its own strong colour, on a speckled coloured background with a few coloured
                lines (the "enter the digits" captcha of many state portals)
 
+and, measured on its own (`--styles kl_bubbly`, never folded into the three above):
+
+  kl_bubbly    4 to 6 fat, rounded, hot-pink letters of both cases on white, touching and overlapping, each turned a
+               little, all on one baseline (small letters small, tails hanging), with the shapes people mix up
+               (i/I, t/T, c/C): the look of some college ERP sign-in captchas
+
 Like those portals, the alphabets leave out the characters people cannot tell apart either (0/O, 1/I/l, g/q/9, and
 in the mixed-case style every letter whose small and capital forms have the same shape, such as c/C, s/S, v/V).
 Everything here is made up; nothing is sent anywhere.
@@ -299,9 +305,9 @@ async def evaluate(items: list[Sample], model: Any = None, ocr: Any = None,
     return out
 
 
-def table(scores: dict[str, dict[str, Score]]) -> str:
+def table(scores: dict[str, dict[str, Score]], styles: tuple[str, ...] = STYLES) -> str:
     """The scores as a Markdown table: exact match (case-blind in brackets) per engine and style."""
-    cols = [*STYLES, "all"]
+    cols = [*styles, "all"] if len(styles) > 1 else [*styles]
     lines = ["| engine | " + " | ".join(cols) + " |", "|---" * (len(cols) + 1) + "|"]
     for engine, by in scores.items():
         cells = []
@@ -338,11 +344,16 @@ async def _main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m delta.evals.captcha_bench",
                                 description="How often Delta reads generated ERP-style captchas by itself.")
     p.add_argument("--per-style", type=int, default=40)
+    p.add_argument("--styles", default=",".join(STYLES),
+                   help=f"comma-separated, from {', '.join(ALL_STYLES)} (default: the first three)")
     p.add_argument("--no-windows-ocr", action="store_true")
     p.add_argument("--out", default="")
     p.add_argument("--min-combined", type=float, default=0.0, help="fail below this first-try rate (0..1)")
     p.add_argument("--min-three", type=float, default=0.0, help="fail below this rate within three tries (0..1)")
     args = p.parse_args(argv)
+    styles = tuple(st.strip() for st in args.styles.split(",") if st.strip())
+    if not styles or any(st not in ALL_STYLES for st in styles):
+        p.error(f"--styles takes {', '.join(ALL_STYLES)}")
     import logging
 
     import structlog
@@ -350,9 +361,10 @@ async def _main(argv: list[str] | None = None) -> int:
     structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))  # no per-pass lines
     m = shared_model()
     ocr = None if args.no_windows_ocr else await _windows_ocr()
-    scores = await evaluate(samples(args.per_style), model=m.read if m else None, ocr=ocr)
-    text = (f"Captcha benchmark: {args.per_style} per style, {len(STYLES)} styles. Captcha model: "
-            f"{'yes' if m else 'not installed'}. Windows OCR: {'yes' if ocr else 'not available'}.\n\n" + table(scores))
+    scores = await evaluate(samples(args.per_style, styles=styles), model=m.read if m else None, ocr=ocr)
+    text = (f"Captcha benchmark: {args.per_style} per style, styles {', '.join(styles)}. Captcha model: "
+            f"{'yes' if m else 'not installed'}. Windows OCR: {'yes' if ocr else 'not available'}.\n\n"
+            + table(scores, styles))
     print(text)
     if args.out:
         from pathlib import Path
@@ -374,5 +386,5 @@ if __name__ == "__main__":
     sys.exit(asyncio.run(_main()))
 
 
-__all__ = ["DIGITS", "MIXED", "RETRY_SEEDS", "STYLES", "UPPER_DIGITS", "Sample", "Score", "evaluate", "matches",
-           "sample", "samples", "table"]
+__all__ = ["ALL_STYLES", "DIGITS", "EXTRA_STYLES", "KL_LETTERS", "MIXED", "RETRY_SEEDS", "STYLES", "UPPER_DIGITS",
+           "Sample", "Score", "evaluate", "matches", "sample", "samples", "table"]

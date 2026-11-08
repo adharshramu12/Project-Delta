@@ -170,7 +170,7 @@
     <section class="view view-settings" data-view="settings" aria-label="Settings" hidden>
     <nav class="settings-nav" aria-label="Settings sections">
     <a href="#set_perm">Permissions</a><a href="#set_browser">Browser</a><a href="#set_logins">Logins</a><a href="#set_folders">Folders</a>
-    <a href="#set_sites">Apps and websites</a><a href="#set_files">Attachments</a><a href="#set_learning">Learning and memory</a><a href="#set_remote">Phone and PIN</a>
+    <a href="#set_sites">Apps and websites</a><a href="#set_files">Attachments</a><a href="#set_student">Student</a><a href="#set_learning">Learning and memory</a><a href="#set_remote">Phone and PIN</a>
     <a href="#set_sos">Emergency contacts</a><a href="#set_notify">Notifications</a><a href="#set_look">Appearance</a>
     <a href="#set_addons">Add-ons</a><a href="#set_keys">Keys</a><a href="#set_about">Setup and shutdown</a><a href="#set_help">Updates and help</a>
     </nav>
@@ -231,6 +231,12 @@
     <label class="field">Pictures <small>Which AI looks at a picture when how it looks matters.</small><select id="s_vision"></select></label>
     <label class="field">Model for pictures <small>Optional, with a named AI. Your main AI does not change.</small><input id="s_vmodel" maxlength="200" placeholder="That AI's own vision model"></label>
     <div class="note" id="s_vnote"></div>
+    </section>
+    <section class="group" id="set_student"><h3>Student</h3>
+    <p class="muted small">For your college portal ("show my timetable"). Delta works out the academic year and semester from today's date; these add your semester number. Optional, kept on this PC.</p>
+    <label class="field">Year you joined <small>For example 2023. Leave empty if you prefer.</small><input id="s_joinyear" type="number" min="1990" max="2100" placeholder="e.g. 2023"></label>
+    <label class="field">Year of study now <small>1 to 8. It moves on by itself each academic year.</small><input id="s_yos" type="number" min="0" max="8" placeholder="e.g. 3"></label>
+    <div class="note" id="s_academic"></div>
     </section>
     <section class="group" id="set_learning"><h3>Learning and memory</h3>
     <label class="check"><input type="checkbox" id="s_mem"> Remember things about me</label>

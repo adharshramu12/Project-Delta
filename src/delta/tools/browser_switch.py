@@ -52,7 +52,8 @@ from delta.tools.browser_choice import (
 # user's own browser). solve_captcha exists only in the private browser.
 BROWSER_NAMES = ("browser_open", "browser_search", "browser_read", "browser_click", "browser_fill",
                  "browser_press", "browser_scroll", "browser_back", "browser_select", "browser_check",
-                 "browser_upload", "browser_hover", "browser_wait", "browser_tabs", "browser_dialog", "solve_captcha")
+                 "browser_upload", "browser_hover", "browser_wait", "browser_tabs", "browser_dialog", "browser_menu",
+                 "solve_captcha")
 SIGNIN_HOLD_S = 30 * 60  # the private browser stays open this long for the user to sign in
 
 
