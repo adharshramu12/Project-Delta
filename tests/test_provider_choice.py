@@ -172,13 +172,14 @@ def test_provider_label_for_the_task_list() -> None:
 
 
 # --- the real wiring: settings -> bootstrap -> router --------------------------------------------------------------
-def test_settings_build_a_strict_router_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settings_build_a_strict_router_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Groq and NVIDIA keys saved, Codex installed, Groq picked as main AI: Groq answers planner, executor and
     checker jobs; NVIDIA is picked the same way."""
     from delta import bootstrap
     from delta.config import load_settings
     from delta.llm import cli_providers
 
+    monkeypatch.setenv("DELTA_DATA_DIR", str(tmp_path))  # Delta's shipped defaults, not this PC's own settings
     settings: Settings = load_settings()
     assert settings.llm.fallback is False
     monkeypatch.setattr(bootstrap, "get_secret", lambda name: FAKE_KEY if name in
@@ -371,3 +372,14 @@ def test_cline_desktop_exe_is_found(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     p = cli_providers.ClineProvider("cline", ProviderConfig(kind="cline", models={"chat": ""}))
     assert p.executable() == str(app)
     assert p.supports("chat") and not p.supports("vision")
+
+
+def test_parallel_helpers_with_a_cli_main_ai_still_use_api_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Helpers never share a CLI session; with Codex as main AI they keep using the API providers, as before."""
+    from delta.llm import router as router_mod
+
+    codex, groq = Fake("codex", jobs=("chat", "helper")), Fake("groq", jobs=("chat", "helper"))
+    monkeypatch.setattr(router_mod, "_is_cli", lambda p: p.name == "codex")
+    r = router("codex", False, codex=codex, groq=groq)
+    resp = asyncio.run(r.complete_api_only([{"role": "user", "content": "hi"}], task="helper"))
+    assert resp.provider == "groq" and codex.calls == []

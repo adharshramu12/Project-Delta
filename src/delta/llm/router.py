@@ -248,6 +248,11 @@ class ModelRouter:
         keep one live session per task and must not be shared by parallel helpers. Changes no route or
         default; raises AllProvidersFailedError when only CLI providers are set up."""
         candidates = [p for p in self.candidates(task) if not _is_cli(p)]
+        if not candidates and self.strict(task) and _is_cli(self.providers[self.preferred]):
+            # The main AI is a CLI, which helpers cannot share: they use the API providers on the route, as before.
+            candidates = [p for n in self.full_route(task) if (p := self.providers.get(n)) is not None
+                          and not _is_cli(p) and p.supports(task) and self._ready(n, p)
+                          and (not p.local or self.allow_local())]
         errors: list[str] = []
         kinds: list[str] = []
         if not candidates:
@@ -315,7 +320,7 @@ class ModelRouter:
                     self._resting_unreachable.add(p.name)
                     if callable(forget := getattr(p, "forget_ping", None)):
                         forget()  # its last "it answers" is stale now: ask again before using it
-                elif e.kind not in ("rate_limit", "too_large", "bad_tool_call", "quota", "auth"):  # not a provider health issue
+                elif e.kind not in ("rate_limit", "too_large", "bad_tool_call", "quota", "auth"):  # not its health
                     self.breakers[p.name].record_failure()
                 errors.append(str(e))
                 kinds.append(e.kind)

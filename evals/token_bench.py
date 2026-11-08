@@ -290,7 +290,8 @@ def table(data: dict[str, Any]) -> str:
         p = r["stable_prefix"]
         pre = " / ".join(f"{p[k]:,} of {p[k + '_total']:,}" if k in p else "-" for k in ("plan", "chat"))
         lines.append(f"| {name} | {r['status']} | {r['calls']} | {r['tokens']:,} | {cell('plan')} | {cell('chat')} | "
-                     f"{cell('verify')} | {r['tools_sent_max']} | {pre} | {r['cli_chars']:,} ({r['cli_chars_max']:,}) |")
+                     f"{cell('verify')} | {r['tools_sent_max']} | {pre} | "
+                     f"{r['cli_chars']:,} ({r['cli_chars_max']:,}) |")
     total = sum(r["tokens"] for r in data.values())
     cli = sum(r["cli_chars"] for r in data.values())
     lines.append(f"| **total** | | {sum(r['calls'] for r in data.values())} | {total:,} | | | | | | {cli:,} |")
