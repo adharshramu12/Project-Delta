@@ -138,10 +138,13 @@ class ModelStatus:
 
 
 class CaptchaModel:
-    """ddddocr's default model, loaded once on first use (about a second), then about 25 ms a picture."""
+    """ddddocr's default model, loaded once on first use (about a second), then about 25 ms a picture. Its second
+    bundled model ("beta", the same package, no download) is loaded only for bright coloured captchas
+    (delta.tools.captcha_colour), where the two read together."""
 
     def __init__(self) -> None:
         self._engine: Any = None
+        self._beta: Any = None
         self._lock = threading.Lock()
         self.status = ModelStatus(installed(), "" if installed() else "the captcha model is not installed")
 
@@ -161,6 +164,44 @@ class CaptchaModel:
                     self._engine = ddddocr.DdddOcr(show_ad=False)
             return self._engine
 
+    def _load_beta(self) -> Any:
+        """The second model, or None when this ddddocr has none (it then reads alone)."""
+        with self._lock:
+            if self._beta is None:
+                import contextlib
+                import os
+
+                try:
+                    with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink):
+                        import ddddocr
+
+                        self._beta = ddddocr.DdddOcr(show_ad=False, beta=True)
+                except Exception:
+                    self._beta = False
+            return self._beta or None
+
+    def _read_colour(self, img: Any, hints: Hints | None) -> Readings:
+        """Bright coloured letters on white: the ink by colour, two layers, both models, case from the shapes."""
+        from delta.tools.captcha_colour import Reading, combine, ink_layers, runs_from
+
+        layers = ink_layers(img)
+        found: list[Reading] = []
+        engines = [("default", self._load()), ("beta", self._load_beta())]
+        for name, engine in engines:
+            if engine is None:
+                continue
+            for i, layer in enumerate(layers):
+                buf = io.BytesIO()
+                layer.save(buf, "PNG")
+                got = engine.classification(buf.getvalue(), probability=True)
+                if isinstance(got, dict):
+                    runs, steps = runs_from(got.get("probabilities"), list(got.get("charset") or []), hints)
+                    found.append(Reading(name, i, runs, steps))
+        result = combine(found, layers, hints)
+        out = Readings(result.readings)
+        out.case_doubt = result.doubt
+        return out
+
     def read_sync(self, picture: bytes, hints: Hints | None = None) -> Readings:
         """One reading per pass (PASSES), each already fitted to the box's character rules. [] when the model cannot
         run here (and it is then marked unavailable, so the next captcha goes straight to Windows OCR)."""
@@ -171,9 +212,12 @@ class CaptchaModel:
             engine = self._load()
             from PIL import Image
 
+            from delta.tools.captcha_colour import is_bright_ink
             from delta.tools.captcha_ocr import variants
 
             img = Image.open(io.BytesIO(picture))
+            if is_bright_ink(img):
+                return self._read_colour(img, hints)
             bands = variants(img)
             for which in PASSES:
                 buf = io.BytesIO()
