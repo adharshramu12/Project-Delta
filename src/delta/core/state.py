@@ -78,6 +78,7 @@ class TaskResult:
     verification: Verification | None = None
     provider: str = ""
     skill_id: int | None = None
+    model: str = ""  # the model of `provider` that answered (e.g. openai/gpt-oss-120b), shown with it
     tokens: dict[str, int] = field(default_factory=dict)  # input / cached / output / calls for this task
     usage: dict[str, Any] = field(default_factory=dict)  # tokens summed for display (delta.llm.usage.summary)
     wall_s: float = 0.0  # wall-clock seconds from start to answer

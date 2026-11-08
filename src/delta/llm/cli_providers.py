@@ -20,6 +20,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -131,6 +132,34 @@ def find_cli(names: tuple[str, ...], configured: str | None = None) -> str | Non
     return None
 
 
+# npm's Windows shim (cmd-shim): `"%_prog%"  "%dp0%\node_modules\pkg\bin\cli.js" %*`, or `"%dp0%\...\x.exe" %*`.
+_NPM_SHIM_TARGET = re.compile(r'"%dp0%\\([^"%]+)"\s+%\*', re.I)
+
+
+def npm_shim_target(shim: str) -> list[str] | None:
+    """The real program behind an npm `.cmd` shim, as [node, script] or [exe], or None if it is not one.
+
+    A prompt passed as an argument to a .cmd file goes through cmd.exe, which cuts it at the first line break and
+    treats & | < > % in it as commands: the CLI would get only the first line of Delta's prompt, and a web page's
+    text could run a command. Running the script with node directly avoids cmd.exe altogether."""
+    path = Path(shim)
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    found = _NPM_SHIM_TARGET.findall(text)
+    if not found:
+        return None
+    target = path.parent / found[-1].replace("\\", os.sep).replace("/", os.sep)
+    if not target.is_file():
+        return None
+    if target.suffix.lower() == ".exe":
+        return [str(target)]
+    local_node = path.parent / "node.exe"
+    node = str(local_node) if local_node.is_file() else shutil.which("node")
+    return [node, str(target)] if node else None
+
+
 class CLIProvider:
     """Base for CLI-backed providers. Subclasses build the command and read the reply."""
 
@@ -160,9 +189,13 @@ class CLIProvider:
         self._path = None
         self._checked_at = -1e9
 
-    def supports(self, task: str) -> bool:
+    def handles(self, task: str) -> bool:
+        """A model is set for this job (whether or not the CLI is installed)."""
         # Both CLIs accept screenshots, so they can also be Delta's eyes (task "vision").
-        return (task in self.cfg.models or "chat" in self.cfg.models) and self.available()
+        return task in self.cfg.models or "chat" in self.cfg.models
+
+    def supports(self, task: str) -> bool:
+        return self.handles(task) and self.available()
 
     def model_for(self, task: str) -> str:
         return self.cfg.models.get(task) or self.cfg.models.get("chat") or ""
@@ -818,9 +851,10 @@ class ClineProvider(CLIProvider):
     names = ("cline", "cline-cli")
     label = "Cline"
 
-    def supports(self, task: str) -> bool:
-        return task != "vision" and super().supports(task)  # its CLI takes no screenshots
+    def handles(self, task: str) -> bool:
+        return task != "vision" and super().handles(task)  # its CLI takes no screenshots
     MAX_PROMPT_CHARS = 30000  # the prompt is a command-line argument; Windows allows ~32k characters
+    MAX_COMMAND_LINE = 32000  # Windows: 32,767 characters for the whole command line, quoting included
     # The list the Cline app shows (free, recommended, ...). Free models cost the user nothing.
     MODELS_URL = "https://api.cline.bot/api/v1/ai/cline/recommended-models"
     FREE_OFFLINE = ("reflection/beam-free", "cline-free/solar-mini4", "cline-free/nemotron-3.5-super-vl",
@@ -910,8 +944,22 @@ class ClineProvider(CLIProvider):
         # Cline reads its prompt only from the command line (piped input is not detected on Windows).
         if len(prompt) > self.MAX_PROMPT_CHARS:
             raise LLMError(f"{self.name}: prompt too long for Cline's command line", kind="too_large")
+        if cmd and sys.platform == "win32" and not Path(cmd[0]).suffix and Path(cmd[0] + ".cmd").is_file():
+            cmd = [cmd[0] + ".cmd", *cmd[1:]]  # npm's extensionless `cline` is a shell script for Git Bash
+        if cmd and cmd[0].lower().endswith((".cmd", ".bat")):
+            # `npm install -g cline` puts cline.cmd on PATH. Never give the prompt to cmd.exe (see npm_shim_target).
+            real = npm_shim_target(cmd[0])
+            if real is None:
+                raise LLMError(f"{self.name}: Delta found {Path(cmd[0]).name} but cannot run it safely (it is a "
+                               "Windows batch file). Install the Cline app, or set llm.providers.cline.command to "
+                               "Cline's .exe or .js file", kind="unreachable")
+            cmd = [*real, *cmd[1:]]
         if prompt:
             cmd = [*cmd, prompt]
+        # Windows' limit is on the command line as written, where every " in the prompt becomes \" (JSON is full of
+        # them): too long there and Windows refuses to start Cline at all (WinError 206).
+        if len(subprocess.list2cmdline(cmd)) > self.MAX_COMMAND_LINE:
+            raise LLMError(f"{self.name}: prompt too long for Cline's command line", kind="too_large")
         wanted = self._delta_tools.get()
         try:
             proc = await asyncio.create_subprocess_exec(

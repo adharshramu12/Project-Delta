@@ -13,7 +13,14 @@
     sel.replaceChildren(h("option", {value: "auto", text: "Automatic (local first, then your plans, then free cloud)"}),
       ...p.options.map(o => h("option", {value: o.name, text: o.label + (o.ready ? "" : " (not ready)")})));
     sel.value = p.preferred;
+    $("s_fallback").checked = !!p.fallback;
   }
+  $("s_fallback").onchange = async () => {
+    const on = $("s_fallback").checked;
+    const r = await api("/api/apps/preferred", {method: "PUT", body: JSON.stringify({name: $("s_main").value, fallback: on})}).catch(e => ({detail: D.plain(e)}));
+    if (r && r.detail) { $("s_fallback").checked = !on; D.toast({title: "Not changed", body: D.detail(r), kind: "danger"}); }
+    else D.toast({title: on ? "Fallback on" : "Fallback off", body: on ? "Your other AIs answer when the main AI fails." : "Only your main AI answers.", kind: "ok"});
+  };
   $("s_main").onchange = async () => {
     const r = await api("/api/apps/preferred", {method: "PUT", body: JSON.stringify({name: $("s_main").value})}).catch(e => ({detail: D.plain(e)}));
     if (r && r.detail) D.toast({title: "Main AI not changed", body: D.detail(r), kind: "danger"});

@@ -145,9 +145,51 @@ What you know about the user:
 {memory}"""
 
 
+# Actor rules that are only about certain tools: (how the rule starts, the tools it is about). A rule is sent when
+# at least one of its tools is; rules not listed here (safety, writing style, asking first) are always sent.
+TOOL_RULES: tuple[tuple[str, frozenset[str]], ...] = (
+    ("- The user may be away", frozenset({"send_file"})),
+    ("- PC controls:", frozenset({"set_volume", "set_brightness", "close_window", "take_screenshot", "camera_photo"})),
+    ("- run_python does", frozenset({"run_python", "run_shell"})),
+    ("- Desktop apps:", frozenset({"read_window", "set_field", "click_element", "click_at", "look_at_screen"})),
+    ("- Websites:", frozenset({"browser_open", "browser_read", "browser_search", "browser_click", "browser_fill"})),
+    ("- If a desktop tool says STOPPED", frozenset({"click_element", "click_at", "type_text", "press_keys",
+                                                     "set_field", "do_actions", "scroll"})),
+    ("- Songs/videos:", frozenset({"media_status", "media_control", "play_youtube"})),
+    ("- Messages in WhatsApp", frozenset({"send_message", "chat_for_me"})),
+    ("- Email:", frozenset({"send_email", "draft_email"})),
+)
+# Lines of the abilities text that are only about acting on the screen or a page.
+SCREEN_LINES: tuple[tuple[str, frozenset[str]], ...] = (
+    ("EVERY mouse/keyboard/browser action", frozenset({
+        "click_element", "click_at", "do_actions", "type_text", "press_keys", "set_field", "scroll", "browser_open",
+        "browser_search", "browser_click", "browser_fill", "browser_press", "browser_scroll", "browser_back"})),
+    ("Mouse work:", frozenset({"do_actions"})),
+)
+
+
+def fit_rules(system: str, tools: set[str]) -> str:
+    """The actor prompt without the rules and ability lines about tools this task is not given."""
+    out: list[str] = []
+    dropping = False
+    for line in system.split("\n"):
+        if line.startswith("- ") or not line.startswith(" "):
+            rule = next((need for start, need in TOOL_RULES if line.startswith(start)), None)
+            screen = next((need for start, need in SCREEN_LINES if line.startswith(start)), None)
+            dropping = (rule is not None and not rule & tools) or (screen is not None and not screen & tools)
+        if not dropping:
+            out.append(line)
+    return "\n".join(out)
+
+
 def friendly_model_error(e: LLMError) -> str:
     """What a non-technical user should read when no model could answer."""
     if isinstance(e, AllProvidersFailedError):
+        if e.user_message:
+            return e.user_message
+        refused = [m.split(": ", 1)[-1] for m, k in zip(e.errors, e.kinds, strict=False) if k == "auth"]
+        if refused and all(k in ("auth", "unreachable", "not_set_up") for k in e.kinds):
+            return refused[0].rstrip(".") + ". Then send your message again."
         if e.only_rate_limited:
             return ("The AI service is busy right now (free-tier usage limit). Please try again in a minute. "
                     "Adding a second provider key (e.g. NVIDIA NIM) or a local model avoids this.")
@@ -527,6 +569,10 @@ class Orchestrator:
         result.usage = usage.summary(result.tokens)
         if models := dict(getattr(self.router, "model_calls", None) or {}):
             result.usage["models"] = models  # which model answered how many calls (the token meter)
+        if callable(answered := getattr(self.router, "answered_by", None)):
+            who, model = answered()
+            if who and result.provider != "delta":  # the AI that did this task's work, not the last call anywhere
+                result.provider, result.model = who, model
         result.wall_s = round(time.monotonic() - started, 2)
         result.fallback = self.router.fallback_note()
         self._finish_proof(result)
@@ -622,6 +668,10 @@ class Orchestrator:
                 messages.append({"role": "user", "content": found.output[:6000]})
         budget = self._step_budget()
         messages[0]["content"] += "\n\n" + abilities_text(self._brain(), self._can_see(), budget)
+        # Rules about tools this task is not given (websites for a file task, WhatsApp for a web read) only cost
+        # tokens on every step: left out. With no tools planned every tool is sent, so every rule stays.
+        sent = {t["function"]["name"] for t in self._tool_specs(plan.tools, req.text)}
+        messages[0]["content"] = fit_rules(messages[0]["content"], sent)
         verification: Verification | None = None
         final = ""
         # The screenshot check runs on its own (cheap) model: boot it while the agent works.

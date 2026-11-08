@@ -86,6 +86,10 @@ llm:
       models:
         chat: meta/llama-3.3-70b-instruct
         vision: meta/llama-3.2-90b-vision-instruct
+  # When you pick a main AI (Apps > AI models), only that AI answers. Set true to let the AIs below answer when
+  # it fails (out of credits, key expired, not installed). A job your main AI cannot do at all, such as reading a
+  # screenshot with a text-only model, still uses the order below.
+  fallback: false
   # Provider order per job. The first healthy, allowed provider wins.
   routes:
     chat: [ollama, lmstudio, claude_code, codex, cline, deepseek, groq, nim]

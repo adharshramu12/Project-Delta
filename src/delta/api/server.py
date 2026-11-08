@@ -148,7 +148,7 @@ def _approval_json(r: ApprovalRequest) -> dict[str, Any]:
 def _result_json(r: TaskResult) -> dict[str, Any]:
     v = r.verification
     return {"task_id": r.task_id, "status": r.status, "answer": r.answer, "attempts": r.attempts,
-            "provider": r.provider, "steps": [{"tool": s.tool, "ok": s.ok} for s in r.steps],
+            "provider": r.provider, "model": r.model, "steps": [{"tool": s.tool, "ok": s.ok} for s in r.steps],
             "checks": v.checks if v else [], "seen_screen": bool(v and v.screenshot), "tokens": r.tokens,
             "usage": r.usage, "wall_s": r.wall_s, "fallback": r.fallback,
             "options": r.options, "questions": r.questions, "asked_about": r.asked_about, "image": r.image}
