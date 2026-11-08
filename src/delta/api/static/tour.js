@@ -125,7 +125,7 @@
   }
 
   function start() {
-    if (root) return;
+    if (root || !$("scrim")) return;  // no dashboard left (the Updating screen replaced it)
     const open = ["setup", "sheet", "confirm"].map(id => $(id)).find(d => d && d.open);
     if (open) { open.addEventListener("close", () => setTimeout(start, 200), {once: true}); return; }
     from = D.view; lastFocus = document.activeElement;

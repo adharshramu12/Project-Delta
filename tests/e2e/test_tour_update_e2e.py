@@ -99,7 +99,7 @@ def serve_delta(data: Path, *, tour_done: bool, newer: str | None) -> Iterator[S
 
 def watch(page: Any) -> list[str]:
     problems: list[str] = []
-    page.on("pageerror", lambda e: problems.append(f"script error: {e}"))
+    page.on("pageerror", lambda e: problems.append(f"script error: {e} {getattr(e, 'stack', '') or ''}"))
     page.on("console", lambda m: problems.append(f"console: {m.text}")
             if m.type == "error" and "Content Security Policy" in m.text else None)
     return problems
