@@ -17,7 +17,7 @@ PC first and sends the AI only what it needs, so a long PDF does not cost thousa
 
 | Kind | Files | What Delta reads |
 |---|---|---|
-| Pictures | JPG, PNG, WebP, GIF, BMP | Text with Windows OCR when the PC has it; the picture itself goes to a vision model only when it matters |
+| Pictures | JPG, PNG, WebP, GIF, BMP (HEIC with `pillow-heif`) | Text with Windows OCR when the PC has it; the picture itself goes to a vision model only when it matters |
 | PDF | .pdf | The text layer, page by page, with page numbers. Scanned pages are rendered and read with Windows OCR |
 | Word | .docx | Headings and paragraphs in order, tables as rows, split into numbered parts |
 | PowerPoint | .pptx | Each slide in order: title, text, tables, picture alt text and speaker notes |
@@ -25,7 +25,8 @@ PC first and sends the AI only what it needs, so a long PDF does not cost thousa
 
 The kind is decided by the file's first bytes, not only its name, so a renamed file is still caught. Files Delta
 cannot read get a plain answer that says what to do instead: old .doc and .ppt (save as .docx or .pptx), Excel
-(save the sheet as .csv), iPhone HEIC photos (send as a normal photo or JPG), and zip files (not opened, for
+(save the sheet as .csv), iPhone HEIC photos (read when the optional `pillow-heif` package is installed; otherwise
+send it as a normal photo or JPG), and zip files (not opened, for
 safety).
 
 ## Limits
@@ -46,8 +47,10 @@ safety).
    clear marker.
 3. **The AI asks for more only when it needs it**, with `read_attachment(id, pages)` ("3", "2-5", "last") or
    `read_attachment(id, find)` to search the file. Each answer is at most `read_chars` (8,000 characters).
-4. **A picture goes to a model only when the picture itself matters**: a photo, a chart, a screenshot with little
-   text, or a question about how something looks. One picture per call, made no bigger than 1024 px on its longest
+4. **A picture goes to a model unless only its text is wanted**: it is looked at unless the request is plainly
+   about the text ("copy the text", "what is the total") and OCR read enough of it. Transparent pictures are put
+   on white first, and a model that answers "I can't see images" is not taken as having seen it (the next model
+   that can see is asked; the user hears which model could not). One picture per call, made no bigger than 1024 px on its longest
    side, re-encoded as JPEG, and sent in low detail where the provider supports it (OpenAI) for plain photos.
    `look_at_attachment` does this on demand, also for a rendered PDF page.
 5. **Cached by file hash.** Asking again about the same file, in any chat, costs no reading, and the same
@@ -133,7 +136,7 @@ attachments:
   encrypted with DPAPI). They are removed after `retention_days` and with their chat.
 - **Resumed tasks do not restore attachments.** A task resumed after a crash or power cut runs without the files
   it was sent with; send them again if the task needs them.
-- Old Office formats (.doc, .ppt), Excel files and HEIC photos are not read (see Formats).
+- Old Office formats (.doc, .ppt) and Excel files are not read; HEIC photos only with `pillow-heif` (see Formats).
 - Token numbers in the usage line are estimates where the provider does not report its own count.
 
 What has not been checked on real hardware is listed in [NOT_VERIFIED.md](NOT_VERIFIED.md#attachments).

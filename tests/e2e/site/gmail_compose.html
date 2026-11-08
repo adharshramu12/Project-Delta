@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Compose - Fake Gmail</title>
+<!-- A stand-in for Gmail's compose window, for tests/e2e/test_gmail_compose_e2e.py. Same names and accessible labels
+     as Gmail (subjectbox, "To recipients", "Message Body", Send, "Save & close"), the same chip and suggestion
+     behaviour (the FIRST suggestion is highlighted and Enter takes it, even when it is another contact; a comma ends a
+     typed address), and modes that reproduce what went wrong: ?mode=empty (the link filled nothing), ?mode=swap (the
+     body landed in Subject), ?mode=loose (the address stayed loose text in the To box). -->
+<style>
+  body { font: 14px sans-serif; margin: 0; }
+  [role=dialog] { width: 640px; margin: 20px auto; border: 1px solid #ccc; padding: 8px; }
+  .row { display: flex; gap: 6px; align-items: center; border-bottom: 1px solid #eee; padding: 4px 0; flex-wrap: wrap; }
+  .chip { background: #e8eaed; border-radius: 12px; padding: 2px 8px; }
+  .chip span { cursor: pointer; margin-left: 4px; }
+  #sugg { border: 1px solid #ccc; background: #fff; }
+  #sugg[hidden] { display: none; }
+  [role=option][aria-selected=true] { background: #d2e3fc; }
+  [contenteditable] { min-height: 160px; padding: 6px; white-space: pre-wrap; }
+  #toast { position: fixed; bottom: 10px; left: 10px; }
+</style>
+</head>
+<body>
+<div role="main"><h2>Inbox</h2></div>
+<div role="dialog" aria-label="New Message">
+  <div class="row" id="torow"><span>To</span><span id="chips"></span>
+    <input id="to" aria-label="To recipients" role="combobox" autocomplete="off"></div>
+  <div role="listbox" id="sugg" hidden></div>
+  <div class="row"><input name="subjectbox" aria-label="Subject" placeholder="Subject" id="subject" size="60"></div>
+  <div id="body" aria-label="Message Body" role="textbox" contenteditable="true" g_editable="true"></div>
+  <div class="row">
+    <div role="button" tabindex="0" id="send" aria-label="Send &#x202a;(Ctrl-Enter)&#x202c;" data-tooltip="Send">Send</div>
+    <img alt="" id="close" aria-label="Save &amp; close" data-tooltip="Save &amp; close" width="16" height="16"
+         src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">
+    <span id="saved" aria-live="polite"></span>
+  </div>
+</div>
+<div id="toast" role="alert"></div>
+<script>
+  const CONTACTS = [["Ravi Kumar", "ravi.k@gmail.com"], ["Ravi Teja", "ravi@example.com"], ["Priya S", "priya@example.org"]];
+  const q = new URLSearchParams(location.search);
+  const mode = q.get("mode") || "ok";
+  const to = document.getElementById("to"), chips = document.getElementById("chips"), sugg = document.getElementById("sugg");
+  const subject = document.getElementById("subject"), body = document.getElementById("body");
+  window.__sent = null; window.__saved = 0;
+
+  function addChip(email) {
+    email = email.trim().replace(/,$/, "");
+    if (!email || [...chips.children].some(c => c.dataset.hovercardId.toLowerCase() === email.toLowerCase())) return;
+    const c = document.createElement("div");
+    c.className = "chip"; c.dataset.hovercardId = email; c.setAttribute("data-hovercard-id", email);
+    c.textContent = email;
+    const x = document.createElement("span");
+    x.setAttribute("role", "button"); x.setAttribute("aria-label", "Remove " + email); x.textContent = "x";
+    x.addEventListener("click", () => { c.remove(); autosave(); });
+    c.appendChild(x);
+    chips.appendChild(c);
+    autosave();
+  }
+  function hideSugg() { sugg.hidden = true; sugg.replaceChildren(); }
+  function showSugg(text) {
+    const key = text.toLowerCase().split("@")[0];
+    const found = key.length < 2 ? [] : CONTACTS.filter(([n, e]) => n.toLowerCase().includes(key) || e.includes(key));
+    if (!found.length) { hideSugg(); return; }
+    sugg.replaceChildren(...found.map(([n, e], i) => {
+      const o = document.createElement("div");
+      o.setAttribute("role", "option"); o.setAttribute("aria-selected", i === 0 ? "true" : "false");
+      o.dataset.email = e; o.textContent = n + " " + e;
+      o.addEventListener("mousedown", ev => { ev.preventDefault(); addChip(e); to.value = ""; hideSugg(); });
+      return o;
+    }));
+    sugg.hidden = false;
+  }
+  to.addEventListener("input", () => {
+    if (to.value.endsWith(",")) { addChip(to.value); to.value = ""; hideSugg(); return; }
+    showSugg(to.value);
+  });
+  to.addEventListener("keydown", ev => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      const hi = sugg.querySelector('[aria-selected="true"]');
+      if (!sugg.hidden && hi) addChip(hi.dataset.email); else addChip(to.value);  // Gmail: Enter takes the highlighted one
+      to.value = ""; hideSugg();
+    }
+  });
+  let timer = 0;
+  function autosave() {
+    clearTimeout(timer);
+    document.getElementById("saved").textContent = "";
+    timer = setTimeout(() => { document.getElementById("saved").textContent = "Draft saved"; }, 300);
+  }
+  subject.addEventListener("input", autosave);
+  body.addEventListener("input", autosave);
+  document.getElementById("send").addEventListener("click", () => {
+    window.__sent = {to: [...chips.children].map(c => c.dataset.hovercardId), subject: subject.value, body: body.innerText,
+                     loose: to.value};
+    document.getElementById("toast").textContent = "Message sent";
+    document.querySelector("[role=dialog]").remove();
+  });
+  document.getElementById("close").addEventListener("click", () => {
+    window.__saved += 1;
+    window.__draft = {to: [...chips.children].map(c => c.dataset.hovercardId), subject: subject.value, body: body.innerText};
+    document.getElementById("toast").textContent = "Draft saved";
+  });
+
+  // what the compose link did
+  const recips = (q.get("to") || "").split(",").filter(Boolean);
+  if (mode === "ok") { recips.forEach(addChip); subject.value = q.get("su") || ""; body.innerText = q.get("body") || ""; }
+  if (mode === "swap") { recips.forEach(addChip); subject.value = q.get("body") || ""; }
+  if (mode === "loose") { to.value = recips.join(", "); subject.value = q.get("su") || ""; body.innerText = q.get("body") || ""; }
+  body.insertAdjacentHTML("beforeend", mode === "empty" ? "" : "");
+</script>
+</body>
+</html>
