@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import date
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -91,3 +92,51 @@ def test_normalising():
     assert norm("  2026 \u2013 2027 : ") == "2026-2027"
     assert years("2026-27 and 2008-2009") == {"2026-2027", "2008-2009"}
     assert years("2026-2030") == set()
+
+
+# --- Settings > Student ----------------------------------------------------------------------------------------------
+
+def test_settings_student_year_is_saved_with_the_year_it_was_said_in(tmp_path, monkeypatch):
+    from engine_helpers import no_registry
+    from fastapi.testclient import TestClient
+
+    from delta.api.server import create_app, load_token
+    from delta.bootstrap import build
+    from delta.config import Settings
+
+    no_registry(monkeypatch, tmp_path)
+    import delta.tools.user_browser as ub
+
+    monkeypatch.setattr(ub, "default_browser", lambda prefer="auto": None)  # not what this test is about
+    c = build(Settings(data_dir=tmp_path))
+    token = load_token(tmp_path)
+    with TestClient(create_app(c, token)) as tc:
+        tc.headers["Authorization"] = f"Bearer {token}"
+        _student_checks(tc, c, tmp_path)
+
+
+def _student_checks(tc: Any, c: Any, tmp_path: Any) -> None:
+    got = tc.get("/api/settings").json()["student"]
+    assert got["join_year"] == 0 and got["year_of_study"] == 0 and got["now"].startswith("Academic year ")
+    assert tc.put("/api/settings", json={"student": {"join_year": 1200}}).status_code == 400
+    assert tc.put("/api/settings", json={"student": {"year_of_study": 9}}).status_code == 422
+    ok = tc.put("/api/settings", json={"student": {"year_of_study": 3}})
+    assert ok.status_code == 200
+    from delta.tools.academic import year_label, year_start
+
+    assert c.settings.student.year_of_study == 3
+    assert c.settings.student.year_of_study_in == year_label(year_start(date.today()))
+    assert "year 3 of study" in tc.get("/api/settings").json()["student"]["now"]
+    from delta.config import read_user_settings
+
+    assert read_user_settings(tmp_path)["student"]["year_of_study"] == 3  # the user's own settings file
+
+
+def test_a_menu_path_asks_like_its_riskiest_click():
+    from delta.tools.base import Risk
+    from delta.tools.browser_actions import MENU_SPLIT, menu_risk
+
+    assert MENU_SPLIT.split("Time Tables > My Timetable") == ["Time Tables", "My Timetable"]
+    assert MENU_SPLIT.split("Academics › Attendance") == ["Academics", "Attendance"]
+    assert menu_risk("Time Tables > My Timetable") == Risk.ACT
+    assert menu_risk("Account > Delete account") != Risk.ACT

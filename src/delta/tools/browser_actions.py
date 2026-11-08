@@ -221,6 +221,13 @@ MENU_NAMES_JS = """() => {
 MENU_SHOW_S = 3.0  # a group that opens with an animation gets this long to show its entries
 
 
+def menu_risk(path: str) -> Risk:
+    """The riskiest click of the path ('Settings > Delete account' asks like clicking Delete)."""
+    risks = [click_risk(p) for p in MENU_SPLIT.split(path.strip()) if p] or [Risk.ACT]
+    order = list(Risk)
+    return max(risks, key=order.index)
+
+
 class MenuArgs(BaseModel):
     path: str = Field(description="The menu entries to click in order, by their visible text, separated by '>', "
                                   "e.g. 'Time Tables > My Timetable'. One entry is fine too; a closed group around "
@@ -237,10 +244,7 @@ class BrowserMenu(_BrowserTool[MenuArgs]):
     Args = MenuArgs
 
     def risk_for(self, args: MenuArgs) -> Risk:
-        steps = [p for p in MENU_SPLIT.split(args.path.strip()) if p]
-        risks = [click_risk(p) for p in steps] or [Risk.ACT]
-        order = list(Risk)
-        return max(risks, key=order.index)
+        return menu_risk(args.path)
 
     def summary(self, args: MenuArgs) -> str:
         return f"open '{args.path}' in the menu on {self.mgr.current_url or 'the page'}"

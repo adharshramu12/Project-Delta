@@ -12,7 +12,10 @@ portal in the ways that matter to saved logins and watchers, with switches for t
              erp_noisy (erp_captcha with a NOISY captcha: a new random 5-character answer, letters and digits, drawn
              with Pillow under lines and dots each time the picture loads; the box has maxlength=5) |
              erp_canvas (the same, digits only, drawn on a bare <canvas id='cv1'> with nothing saying "captcha", into a
-             Yii-style LoginForm[verifyCode] box with pattern [0-9]{5} and inputmode numeric)
+             Yii-style LoginForm[verifyCode] box with pattern [0-9]{5} and inputmode numeric) |
+             erp_pink (the ERP form with a fat, rounded, hot-pink captcha of 4 to 6 letters in both cases
+             (delta.evals.captcha_bench style kl_bubbly), checked WITH case, no maxlength on the box; a wrong answer
+             just shows the form again with a new picture and NO error message, as some portals do)
   layout     v1 | v2 (v2 changes the exams page, so an old recipe no longer reads it)
   down       every page answers 503
   expire()   signs every session out (the next page shows "Your session has expired")
@@ -165,6 +168,8 @@ class _Handler(BaseHTTPRequestHandler):
         s = self.state
         if s.mode in ("erp_noisy", "erp_canvas"):
             return self._noisy_form(error)
+        if s.mode == "erp_pink":
+            return self._erp_form(error)
         if s.mode == "erp_captcha":
             return self._erp_form(error or ("Your session has expired. Please log in again." if expired else ""))
         extra = ""
@@ -220,7 +225,12 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/index.php" and "captcha" in self.path:
             with s.lock:
                 s.captcha_views += 1
-                if s.mode in ("erp_noisy", "erp_canvas"):
+                if s.mode == "erp_pink":
+                    from delta.evals.captcha_bench import sample
+
+                    made = sample("kl_bubbly", s.rng.randrange(1 << 30))
+                    s.captcha_answer, pic = made.answer, made.png
+                elif s.mode in ("erp_noisy", "erp_canvas"):
                     alphabet = "0123456789" if s.mode == "erp_canvas" else "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
                     s.captcha_answer = "".join(s.rng.choice(alphabet) for _ in range(5))
                     pic = noisy_captcha_png(s.captcha_answer, s.rng.randrange(1 << 30))
@@ -288,14 +298,20 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/login":
             with s.lock:
                 s.posts.append({k: ("<set>" if k == "password" else v) for k, v in form.items()})
-            erp = s.mode in ("erp_captcha", "erp_noisy", "erp_canvas")
+            erp = s.mode in ("erp_captcha", "erp_noisy", "erp_canvas", "erp_pink")
             if erp:  # LoginForm[...] names, as real ERPs post them
                 form = {"username": form.get("LoginForm[username]", ""),
                         "password": form.get("LoginForm[password]", ""),
                         "captcha": form.get("LoginForm[captcha]", form.get("LoginForm[verifyCode]", ""))}
                 s.posts[-1] = {k: ("<set>" if k == "password" else v) for k, v in form.items()}
-            want = s.captcha_answer if s.mode in ("erp_noisy", "erp_canvas") else CAPTCHA
-            if (s.mode == "captcha" or erp) and form.get("captcha", "").strip().upper() != want:
+            want = s.captcha_answer if s.mode in ("erp_noisy", "erp_canvas", "erp_pink") else CAPTCHA
+            typed = form.get("captcha", "").strip()
+            if s.mode == "erp_pink" and typed != want:  # with case, and not a word about it: the form comes back
+                with s.lock:
+                    s.captcha_wrong += 1
+                self._send(200, self._login_form())
+                return
+            if (s.mode == "captcha" or erp) and typed.upper() != want:
                 with s.lock:
                     s.captcha_wrong += 1
                 self._send(200, self._login_form("The verification code is incorrect." if erp
@@ -398,7 +414,7 @@ class PortalSite:
 # --- the eval harness (delta.evals.runner, tasks with `portal:`) ---------------------------------------------------
 # A task with `portal:` gets this site, one saved login for it and, when asked, a watcher, all wired through Delta's
 # real LoginService, WatchService and their tools. Spec keys (all optional):
-#   mode: normal | otp | captcha | recaptcha | erp_captcha | erp_noisy | erp_canvas   the site's sign-in switch
+#   mode: normal | otp | captcha | recaptcha | erp_captcha | erp_noisy | erp_canvas | erp_pink   the sign-in switch
 #   login: {name, origin, permission, simple_captcha}  origin: portal (default) | other (the same server on another
 #                                                 host name) | a URL; permission: always (default) | ask;
 #                                                 simple_captcha: the login's "let Delta read it" switch: true / false

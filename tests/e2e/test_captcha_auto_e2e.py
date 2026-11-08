@@ -220,3 +220,28 @@ async def test_real_windows_ocr_sign_in_never_calls_an_ai(mgr: BrowserManager, t
         assert result.ok or (result.outcome == "needs_user" and result.captcha_image)
         assert svc.solver.vision_calls == 0 and erp.state.failed == 0
     no_secret_anywhere(tmp_path)
+
+
+# --- a pink, both-case captcha that the site turns down WITHOUT saying so (mode erp_pink) ---------------------------
+
+async def test_a_silently_rejected_captcha_is_read_again_from_a_new_picture(mgr: BrowserManager, tmp_path):
+    seen: list[bytes] = []
+    with site("erp_pink") as erp:
+        # the first answer has the wrong case: the site just shows the form again, with a new picture and no error
+        svc = make(tmp_path, erp, ["{captcha_swapcase}", "{captcha}"], seen=seen)
+        queue_fix = svc.solver.ocr
+
+        async def reader(jpeg: bytes) -> Any:
+            text = await queue_fix(jpeg)  # type: ignore[misc]
+            return text if text != "{captcha_swapcase}" else erp.state.captcha_answer.swapcase()
+
+        svc.solver.ocr = reader
+        token = chat()
+        try:
+            result = await svc.sign_in("Fixture ERP", await mgr.page())
+        finally:
+            CURRENT_REQUEST.reset(token)
+        assert result.ok, result.message
+        assert erp.state.captcha_wrong == 1 and erp.state.logins == 1 and len(erp.state.posts) == 2
+        assert len(seen) == 2 and seen[0] != seen[1]  # the second answer was read from the new picture
+    no_secret_anywhere(tmp_path)
