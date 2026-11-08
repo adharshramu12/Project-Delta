@@ -169,9 +169,11 @@ def test_the_payload_stays_small():
     (tour.js: nine spotlight steps, keyboard and screen-reader support, no library, about 9 KB) and update
     notifications (updates.js: the new-version banner, Update now and its progress screen, What's new, Settings >
     Updates and help, about 6.8 KB), with their markup and styles (about 3 KB); the dashboard then ships about
-    247.4 KB. Lazy loading would not lower this total: it counts every file the dashboard ships."""
+    247.4 KB. Then to 250 KB for Settings > Student (year joined / year of study, for college-portal requests such as
+    "show my timetable"; about 1.3 KB, the dashboard then ships about 248.7 KB). Lazy loading would not lower this
+    total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 248_000, total
+    assert total < 250_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 
