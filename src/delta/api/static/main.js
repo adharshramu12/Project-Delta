@@ -77,7 +77,7 @@
     $("sysinfo").hidden = !open; $("st_conn").setAttribute("aria-expanded", String(open));
     if (open) sysinfo();
   };
-  document.addEventListener("click", e => { if (!$("sysinfo").hidden && !$("sysinfo").contains(e.target)) { $("sysinfo").hidden = true; $("st_conn").setAttribute("aria-expanded", "false"); } });
+  document.addEventListener("click", e => { const si = $("sysinfo"); if (si && !si.hidden && !si.contains(e.target)) { si.hidden = true; $("st_conn").setAttribute("aria-expanded", "false"); } });  // gone on the Updating screen
   $("st_model").onclick = () => status && status.providers.length ? D.go("apps") : D.openSetup("models");
   $("st_browser").onclick = () => D.go("settings", {section: "set_browser"});
   $("st_remote").onclick = () => D.go("settings", {section: "set_remote"});
@@ -132,7 +132,8 @@
     if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") { e.preventDefault(); toggleSidebar(); }
     else if (e.altKey && !e.ctrlKey && /^[1-7]$/.test(e.key)) { e.preventDefault(); D.go(ORDER[Number(e.key) - 1]); }
     else if (e.key === "Escape") {
-      if (!$("sysinfo").hidden) { $("sysinfo").hidden = true; $("st_conn").focus(); }
+      const si = $("sysinfo"); if (!si) return;  // the Updating screen replaced the dashboard
+      if (!si.hidden) { si.hidden = true; $("st_conn").focus(); }
       else if (document.body.classList.contains("sb-open")) { document.body.classList.remove("sb-open"); $("scrim").hidden = true; }
     }
   });
@@ -147,6 +148,7 @@
   D.memory.start();
   refreshStatus(); refreshChips();
   D.setup.start();
+  D.updates.start().catch(() => {}).finally(() => D.tour.maybe());  // What's new after an update first, then the tour
   D.every(5000, refreshStatus);
   D.every(60000, refreshChips);
   D.on("visible", refreshStatus);

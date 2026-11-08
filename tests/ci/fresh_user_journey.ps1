@@ -11,6 +11,7 @@
 #      without a restart, a chat message gets its reply
 #   8. a task opens Notepad; a task is stopped while it waits
 #   9. delta update (refused while running), delta update --stop, then Delta opened again from its icon
+#      (pinned to this commit; the installer checks pyproject.toml and uv.lock against it; the tour stays seen)
 #  10. logs\crashes.log empty, no traceback in the service log, Shut down leaves no process behind
 #  11. uninstall -RemoveData: folder, icons, Start-menu folder, Path, data, Delta's saved keys and download caches
 #      gone; a stranger's saved key with "delta" in its name kept; no startup entry or scheduled task added
@@ -224,6 +225,8 @@ try {
     $d.Out | Out-File (Join-Path $out "doctor-first.txt") -Encoding utf8
     Check ($d.Out -notmatch "FAIL ") "delta doctor reports no FAIL on a fresh PC" | Out-Null
     Check ($d.Out -notmatch "Traceback") "delta doctor prints no traceback" | Out-Null
+    Check ($d.Out -match ("this PC  Delta " + [regex]::Escape($Version)) -and $d.Out -match "latest   ") `
+        "delta doctor shows this version and the newest one" | Out-Null
     Check ((Test-Path $desktopLnk) -and (Test-Path $menuLnk) -and (Test-Path (Join-Path $menuDir "Update Delta.lnk"))) `
         "Desktop icon, Start-menu icon and 'Update Delta' exist" | Out-Null
 
@@ -242,7 +245,8 @@ try {
              "/api/apps", "/api/apps/preferred", "/api/connectors", "/api/mcp-servers", "/api/google",
              "/api/chats", "/api/tasks", "/api/approvals", "/api/runs/unfinished", "/api/schedules",
              "/api/documents", "/api/memory", "/api/memory/stats", "/api/skills", "/api/learned", "/api/learn",
-             "/api/logins", "/api/watchers", "/api/attachments", "/api/addons", "/api/boundaries", "/api/audit"
+             "/api/logins", "/api/watchers", "/api/attachments", "/api/addons", "/api/boundaries", "/api/audit",
+             "/api/updates", "/api/tour"
     foreach ($p in $pages) {
         $r = Api GET $p
         Check ($r.Code -eq 200) "GET $p on first run (got $($r.Code)$(if ($r.Code -ne 200) { ': ' + $r.Text.Substring(0, [Math]::Min(200, $r.Text.Length)) }))" | Out-Null
@@ -272,6 +276,12 @@ try {
     $r = Api POST "/api/setup/complete" @{ owner_name = "Fresh User"; autonomy = "ask-risky"; telegram_enabled = $false }
     Check ($r.Code -eq 200 -and $r.Json.ok) "onboarding: setup complete saves (got $($r.Code))" | Out-Null
     Check ((Api GET "/api/setup").Json.completed) "onboarding: setup is completed afterwards" | Out-Null
+    $tour = (Api GET "/api/tour").Json
+    Check ($tour.setup_completed -and -not $tour.done) "the first-run tour is due after onboarding" | Out-Null
+    $r = Api PUT "/api/tour" @{ done = $true }
+    Check ($r.Code -eq 200 -and (Api GET "/api/tour").Json.done) "the tour is saved as seen (got $($r.Code))" | Out-Null
+    $upd = (Api GET "/api/updates").Json
+    Check ($upd.current -eq $Version -and $upd.enabled) "update checks are on and know this version (got $($upd.current))" | Out-Null
     $r = Api PUT "/api/settings" @{ memory = @{ auto_extract = $true; learn_skills = $true } }
     Check ($r.Code -eq 200) "Settings: save (got $($r.Code): $($r.Text.Substring(0, [Math]::Min(200, $r.Text.Length))))" | Out-Null
     $r = Api POST "/api/logins" @{ name = "Test portal"; site = "https://portal.example.edu"; username = "student1"; password = "not-a-real-password" }
@@ -347,6 +357,7 @@ try {
     Remove-Item $installLog -Force -ErrorAction SilentlyContinue
     $u = Child ($newWindow + "delta update --stop; exit `$LASTEXITCODE") @{ DELTA_REF = $Ref; DELTA_REPO = $Repo }
     Check ($u.Code -eq 0) "'delta update --stop' starts the update" | Out-Null
+    Check ($u.Out -match ("commit " + $Ref.Substring(0, 12))) "the update is pinned to this commit (got: $($u.Out))" | Out-Null
     Start-Sleep -Seconds 5
     $done = WaitFor {
         -not (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine -match "install\.ps1" -and $_.CommandLine -match "FromGitHub" }) -and
@@ -355,6 +366,7 @@ try {
     Copy-Item $installLog (Join-Path $out "install-update.log") -Force -ErrorAction SilentlyContinue
     Check ($done -and $ulog -match "Delta is installed") "the update finishes and says Delta is installed" | Out-Null
     Check ($ulog -match "closed the running Delta") "the update closed the running Delta itself" | Out-Null
+    Check ($ulog -match "verified pyproject.toml and uv.lock") "the installer checked the downloaded files against the pinned commit" | Out-Null
     Check (-not (PortOpen 7878)) "Delta is stopped after the update" | Out-Null
     Check (WaitFor { @(WindowProcesses).Count -eq 0 } 20) ("no Edge process of Delta's dashboard window is left after " +
           "'delta update --stop' (left: $(@(WindowProcesses).Count))") | Out-Null
@@ -365,6 +377,7 @@ try {
     OpenFromIcon "after the update"
     $setup = (Api GET "/api/setup").Json
     Check ($setup.completed) "setup stays completed after the update" | Out-Null
+    Check ((Api GET "/api/tour").Json.done) "the tour stays seen after the update (it never shows twice)" | Out-Null
     $chats = Api GET "/api/chats"
     Check ($chats.Text -match "fun fact") "old chats are kept after the update" | Out-Null
     $hi2 = RunTask "one more fun fact please" 120

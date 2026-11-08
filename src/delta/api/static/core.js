@@ -247,7 +247,7 @@
   function every(ms, fn, when = () => true) {
     let timer = 0, live = true;
     const tick = async () => {
-      if (!live) return;
+      if (!live || closing) return;  // page went off-screen (update or shutdown): stop background work
       if (!document.hidden && when()) { try { await fn(); } catch { /* next tick tries again */ } }
       if (live) timer = setTimeout(tick, ms);
     };

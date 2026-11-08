@@ -86,10 +86,14 @@ docs below cover each one.
 2. **Or from a zip.** On GitHub press **Code > Download ZIP**, right-click the zip, choose **Extract All...**, then
    double-click **`Install Delta.cmd`** in the extracted folder. With Smart App Control on, Windows may block a
    file from a downloaded zip; use the command in step 1 instead.
-3. **Set up.** The setup wizard opens: pick your AI, set permissions and pair your Telegram.
+3. **Set up.** The setup wizard opens: pick your AI, set permissions and pair your Telegram. A short tour of the
+   dashboard follows; skip it with Esc, or take it again later by typing `/tour` in the chat box.
 
-**Update.** Choose **Update Delta** in the Start menu (Delta folder), or run `delta update --stop` in a new
-PowerShell window. `--stop` closes a running Delta first; plain `delta update` asks you to close it yourself. Your
+**Update.** When a newer version is out, Delta shows a banner (and, with Telegram on, sends one message). Press
+**Update now**: Delta checks the release's files, closes, updates and opens again, and your chats and settings are
+kept. Nothing is installed until you press it, and Settings > Updates and help can turn the checks off. More in
+[docs/UPDATES.md](docs/UPDATES.md). You can also choose **Update Delta** in the Start menu (Delta folder), or run
+`delta update --stop` in a new PowerShell window. `--stop` closes a running Delta first; plain `delta update` asks you to close it yourself. Your
 data is kept. If `delta` is not recognised, paste the install command again (it updates in place), or run Delta's
 own Python by its full path:
 
@@ -181,7 +185,7 @@ Set them up in Setup, or from Telegram with `/ai`, `/model` and `/keys`. Routes 
 - [Saved logins](docs/LOGINS.md) and [watchers](docs/WATCHERS.md)
 - [Attachments](docs/ATTACHMENTS.md)
 - [Writing style and identity](docs/STYLE_AND_IDENTITY.md)
-- [Dashboard design](docs/UI.md)
+- [Dashboard design](docs/UI.md) and [updates](docs/UPDATES.md)
 - [Security](SECURITY.md)
 - [What has not been checked on real hardware](docs/NOT_VERIFIED.md)
 - [Changelog](CHANGELOG.md) and [contributing](CONTRIBUTING.md)

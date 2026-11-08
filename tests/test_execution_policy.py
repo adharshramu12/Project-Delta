@@ -127,7 +127,7 @@ def test_python_starts_scripts_only_with_bypass():
             if ".ps1" in line and "/" not in line.split(".ps1")[0][-40:]:
                 # a .ps1 named in a message to the user: the command shown must work under Restricted too
                 assert "-ExecutionPolicy Bypass -File" in line, (py, n, line)
-    assert "__main__.py" in hits  # delta update starts the installer
+    assert "install.py" in hits  # delta update starts the installer (delta/updates/install.py)
 
 
 def test_delta_update_starts_the_installer_with_bypass(tmp_path, monkeypatch):

@@ -136,6 +136,7 @@ class Container:
     watchers: Any = None  # delta.watchers.service.WatchService: portals watched on a schedule
     signal: Any = None  # delta.system.agent_cursor.AgentCursor: "Delta is in control" ring and stop hotkeys
     active: dict[str, asyncio.Task[Any]] = field(default_factory=dict)  # every task asked for, waiting or running
+    updates: Any = None  # delta.updates.service.UpdateService: newer-version check (its loop starts in `delta run`)
 
     @property
     def engine(self) -> Any:
@@ -589,5 +590,8 @@ def build(settings: Settings) -> Container:
                           live_channels=live_channels, guard=guard, emergency=emergency, scheduler=scheduler,
                           browsers=browsers, connectors=connectors, logins=logins, watchers=watchers,
                           signal=signal)
+    from delta.updates.service import UpdateService
+
+    container.updates = UpdateService(settings)  # only looks; nothing is fetched until `delta run` starts it
     scheduler.bind(container)
     return container

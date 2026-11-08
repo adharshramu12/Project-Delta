@@ -201,3 +201,19 @@ saying what you found (it worked, or how it failed) is very welcome.
   on the next call: tested with the fake stdio server, not with the real Node or Python servers.
 - The "about 100 MB at rest" figure and the battery and GPU guard come from the author's own laptop, not from
   a measured set of machines.
+
+## Updates and the first-run tour (0.3.0)
+
+- **Update now on a real PC, end to end.** CI checks the banner, the confirm, the pinned commit and the file hashes
+  in a real browser with a stand-in GitHub and a recorder in place of the launcher, and runs the real
+  `delta update --stop` pinned to a commit with the installer's file check (fresh-user journey). It has not run
+  the dashboard's own launcher (`python -m delta update --from-dashboard`) closing a running Delta and opening it
+  again on a user's PC, nor watched the progress window and the What's new panel after a real restart.
+- **Against the real GitHub Releases API.** There is no release yet, so the release path is tested against the
+  stand-in only; the pyproject.toml fallback is what real users get until the first tagged release.
+- **Behind a company proxy or HTTPS inspection.** The check uses the Windows proxy and HTTPS_PROXY; a proxy whose
+  certificate is only in the Windows store (not in certifi's list) makes the check fail quietly. Not tried.
+- **The Telegram message** for a new version is tested with a fake channel, not a real bot.
+- **The tour with a real screen reader** (Narrator, NVDA) and in Windows high contrast: checked for roles, labels
+  and focus in code and in headless Chrome, not listened to.
+
