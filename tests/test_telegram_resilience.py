@@ -373,7 +373,7 @@ async def test_a_slow_start_shows_no_banner_unless_it_keeps_failing(monkeypatch)
     assert "telegram" in c.live_channels and c.warnings == []
 
     starts["n"] = 0
-    monkeypatch.setattr(daemon, "START_OUTAGE_S", 0.05)
+    monkeypatch.setattr(daemon, "START_OUTAGE_S", 0)  # "sustained" from the first failed retry (no wall clock)
     c = container()
     monkeypatch.setattr(daemon, "CHANNELS", {"telegram": (lambda _c: Flaky(10_000), "channels")})
     await daemon._start_channels(c)
