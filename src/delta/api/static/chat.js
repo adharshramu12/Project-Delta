@@ -95,17 +95,33 @@
     const label = h("span", {class: "run-label", text: "Working"});
     const toggle = h("button", {type: "button", class: "run-toggle", "aria-expanded": "true"}, icon("chev-down"), label);
     const stop = btn("Stop", () => stopTask(taskId), "sm", "stop");
-    const block = h("div", {class: "run running", dataset: {task: taskId}}, h("div", {class: "run-head"}, h("span", {class: "spinner", "aria-hidden": "true"}), toggle, stop), list);
+    // The live line: what Delta is doing right now, in plain words, with a timer, so a slow step never looks stuck.
+    const now = h("div", {class: "run-now", role: "status", "aria-live": "polite"}, h("span", {class: "now-text", text: "Getting started"}), h("span", {class: "now-time"}));
+    const block = h("div", {class: "run running", dataset: {task: taskId}}, h("div", {class: "run-head"}, h("span", {class: "spinner", "aria-hidden": "true"}), toggle, stop), now, list);
     toggle.onclick = () => { const open = block.classList.toggle("collapsed"); toggle.setAttribute("aria-expanded", String(!open)); };
-    const r = runs[taskId] = {block, list, label, stop, steps: 0, hidden: 0, started: Date.now(), plan: null, goal: "", status: "running"};
+    const r = runs[taskId] = {block, list, label, stop, now, nowText: "Getting started", stepAt: Date.now(), tick: 0, steps: 0, hidden: 0, started: Date.now(), plan: null, goal: "", status: "running"};
+    r.tick = setInterval(() => drawNow(r), 1000);
     put(block);
     return r;
   }
-  function stepLine(taskId, cls, tool, text) {
+  const secsText = ms => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`; };
+  function drawNow(r) {
+    if (r.status !== "running") return;
+    const slow = Date.now() - r.stepAt > 15000 && !r.waiting;
+    r.now.firstChild.textContent = (slow ? "Still waiting: " : "") + r.nowText;
+    r.now.lastChild.textContent = secsText(Date.now() - r.started);
+    r.now.classList.toggle("slow", slow);
+  }
+  function setNow(taskId, text, waiting = false) {
+    const r = runFor(taskId);
+    r.nowText = text; r.stepAt = Date.now(); r.waiting = waiting;
+    drawNow(r);
+  }
+  function stepLine(taskId, cls, tool, text, detail) {
     const r = runFor(taskId);
     r.steps++;
     if (r.list.children.length >= MAX_STEPS) { r.hidden++; r.label.textContent = `Working: ${r.steps} steps (${r.hidden} older not shown)`; return; }
-    r.list.append(h("li", {class: cls}, tool ? h("code", {text: tool}) : null, text ? h("span", {text}) : null));
+    r.list.append(h("li", {class: cls, title: detail || ""}, tool ? h("code", {text: tool}) : null, text ? h("span", {text}) : null));
     updateRunLabel(taskId);
     scrollEnd();
   }
@@ -158,7 +174,7 @@
   }
   function taskEnded(taskId, status) {
     const r = runs[taskId];
-    if (r) { r.status = status || "done"; r.block.classList.remove("running"); r.stop.remove(); r.block.classList.add("collapsed");
+    if (r) { r.status = status || "done"; clearInterval(r.tick); r.now.remove(); r.block.classList.remove("running"); r.stop.remove(); r.block.classList.add("collapsed");
       r.block.querySelector(".run-toggle").setAttribute("aria-expanded", "false"); updateRunLabel(taskId); }
     for (const c of document.querySelectorAll(`.approval[data-task="${CSS.escape(taskId)}"]`)) dropApproval(c.dataset.approval);
     if (taskId === active) renderProgress();
@@ -367,7 +383,14 @@
       }
       if (d.task_id && !shown(d.task_id)) return;  // belongs to a chat that is not open
       if (ev === "task.plan" && d.plan && d.plan.needs_tools) showChecklist(d.task_id, d.plan);
-      if (ev === "task.step") { tickStep(d.task_id, d.tool); if (!(d.args && d.args.auto)) stepLine(d.task_id, "", d.tool, JSON.stringify(d.args || {}).slice(0, 140)); }
+      if (ev === "task.queued") setNow(d.task_id, "Waiting for the task already running to finish", true);
+      if (ev === "task.started") setNow(d.task_id, "Thinking about how to do this");
+      if (ev === "task.plan" && d.plan && d.plan.needs_tools) setNow(d.task_id, "Plan ready, starting");
+      if (ev === "task.step") {
+        tickStep(d.task_id, d.tool); setNow(d.task_id, d.label || d.tool);
+        if (!(d.args && d.args.auto)) stepLine(d.task_id, "", "", d.label || d.tool, `${d.tool} ${JSON.stringify(d.args || {}).slice(0, 200)}`);
+      }
+      if (ev === "task.verify") setNow(d.task_id, d.passed ? "Checked the result" : "Checking the result again");
       if (ev === "task.verify") { if (d.passed) tickAll(d.task_id); stepLine(d.task_id, d.passed ? "ok" : "bad", "", (d.passed ? "Verified: " : "Not verified: ") + d.reason); }
       if (ev === "task.recovery") stepLine(d.task_id, d.ok ? "ok" : "", "", "Self-heal: " + d.line);
       if (ev === "task.attachments") stepLine(d.task_id, "", "", `Read ${d.files} file(s) on this PC: ~${D.k(d.tokens)} tokens` + (d.full_tokens > d.tokens ? ` instead of ${D.k(d.full_tokens)}` : ""));

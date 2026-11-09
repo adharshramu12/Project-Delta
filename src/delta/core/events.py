@@ -3,6 +3,7 @@ live progress (plan, each step, verification) without coupling to the orchestrat
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -18,7 +19,19 @@ class EventBus:
     def subscribe(self, handler: Handler) -> None:
         self._handlers.append(handler)
 
+    def unsubscribe(self, handler: Handler) -> None:
+        with contextlib.suppress(ValueError):
+            self._handlers.remove(handler)
+
     async def publish(self, event: str, **data: Any) -> None:
+        if event == "task.step" and "label" not in data:  # plain words for the live progress line (no AI call)
+            from delta.core.activity import describe
+
+            data["label"] = describe(str(data.get("tool", "")), data.get("args") or {})
+        if event == "task.step":
+            from delta.core.activity import note
+
+            note(str(data.get("task_id", "")), str(data["label"]))
         for h in self._handlers:
             try:
                 await h(event, data)

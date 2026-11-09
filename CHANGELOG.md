@@ -4,6 +4,21 @@ All notable changes to Delta are listed here. The format follows [Keep a Changel
 and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The version lives in one place,
 `pyproject.toml`; `delta --version` reads it from there.
 
+## Unreleased
+
+### Added
+- **Live progress, so Delta never looks stuck.** While a task runs, the chat shows what Delta is doing now in plain
+  words ("Working in Notion: search", "Opening youtube.com") with a timer and a soft shimmer, and "Still waiting"
+  when one step takes long. On Telegram, a task that takes more than a few seconds gets one status message that is
+  edited as it goes and ends with Finished, Stopped or Could not finish. The words are worked out on the PC from the
+  tool and its arguments, with no AI call.
+- **"Waiting for the task already running to finish"** in the chat and on Telegram when a request has to queue
+  (Delta runs one heavy task at a time), instead of silence.
+
+### Changed
+- **A task never runs for ever.** After `agent.task_timeout_s` (20 minutes by default, 0 turns it off) it is stopped
+  and you are told the last thing it was doing.
+
 ## 0.3.0 - 2026-11-09
 
 The first version under AGPL-3.0-or-later, and the first that tells you when a newer one is out. In short:

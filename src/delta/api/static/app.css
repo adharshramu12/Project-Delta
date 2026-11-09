@@ -572,3 +572,11 @@ dialog::backdrop{background:var(--overlay)}
 .app-facts dd{margin:0}
 .app-advanced{margin-top:var(--s6)}
 @media (max-width:640px){.app-how{display:none}}
+/* The live "now" line under a running task: plain words, a timer and a soft shimmer so it never looks frozen */
+.run-now{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);margin:var(--s1) 0 var(--s2);padding:6px 10px;border-radius:var(--r-md);background:var(--surface-2);font-size:var(--fs-sm);color:var(--text)}
+.run-now .now-text{background:linear-gradient(90deg,var(--text) 0%,var(--text-3) 50%,var(--text) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:now-sheen 2.4s linear infinite;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.run-now .now-time{flex:none;color:var(--text-3);font-size:var(--fs-xs);font-variant-numeric:tabular-nums}
+.run-now.slow{background:var(--warn-soft)}
+.run-now.slow .now-text{background:none;color:var(--warn);animation:none}
+@keyframes now-sheen{from{background-position:200% 0}to{background-position:0 0}}
+@media (prefers-reduced-motion:reduce){.run-now .now-text{animation:none;background:none;color:var(--text)}}

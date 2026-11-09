@@ -57,6 +57,8 @@ class AgentConfig(BaseModel):
     auto_observe: bool = True  # after each mouse/keyboard/browser action, show the model the result
     max_attempts: int = 3
     approval_timeout_s: float = 300
+    # A task that has not finished after this long is stopped and the user is told where it was. 0 = no limit.
+    task_timeout_s: float = Field(default=1200, ge=0)
     # Tokens one task may use before Delta pauses and asks whether to keep going. 0 = no limit.
     token_budget: int = 0  # 0 or less = off
     # Environment variables that look like secrets (API keys, tokens, passwords, DELTA_<NAME> overrides) are
