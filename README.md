@@ -44,7 +44,7 @@ If something failed, it tells you plainly instead of pretending.
   the whole email with every recipient. It sends only when you press Approve, every single time, at every
   permission level. Edit and Cancel send nothing.
 - **Apps and MCP.** Connect Notion, GitHub, Jira and Confluence, Linear, Slack, Sentry, Stripe, Gmail, Google Drive
-  and Calendar, Asana, Vercel, Supabase, Hugging Face, Figma or any MCP server you add, all from the Apps page.
+  and Calendar, Asana, Vercel, Supabase, Hugging Face, Product Hunt, Figma or any MCP server you add, all from the Apps page.
   Reading tools run at once; anything that changes something asks first. More: [docs/APPS.md](docs/APPS.md).
 - **Human writing.** Chat answers, emails and documents come out in plain Indian English. A check in code (no extra
   AI call) removes long dashes, stock AI phrases and US spellings before you see the text. More:

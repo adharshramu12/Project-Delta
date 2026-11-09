@@ -1,7 +1,7 @@
 # Connected apps (MCP)
 
 Delta can work inside your apps: Notion, GitHub, Jira and Confluence, Linear, Slack, Sentry, Stripe, Gmail,
-Google Drive, Google Calendar, Asana, Vercel, Supabase, Hugging Face, Figma (desktop) and any other app that
+Google Drive, Google Calendar, Asana, Vercel, Supabase, Hugging Face, Product Hunt, Figma (desktop) and any other app that
 publishes a [Model Context Protocol](https://modelcontextprotocol.io) server. You connect an app once, then just
 ask, in the dashboard chat or on Telegram:
 
@@ -44,6 +44,7 @@ live: the server's 401 answer, its protected resource metadata and its authoriza
 | Vercel | official | browser sign-in | |
 | Supabase | official | browser sign-in | database tools ask first |
 | Hugging Face | official | none | public Hub data |
+| Product Hunt | official | browser sign-in | no ads scopes (never spends money); submitting a launch asks first, editing one is off until you switch it on |
 | Figma (desktop app) | official | none | Figma's remote server only accepts clients in Figma's own list |
 | Files (MCP reference) | reference | none | runs on your PC with Node.js (`npx`), version pinned |
 | Web fetch (MCP reference) | reference | none | runs on your PC with uv (`uvx`), version pinned |

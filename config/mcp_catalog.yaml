@@ -246,6 +246,26 @@ apps:
     checked: "2026-11-06"
     notes: Works without signing in (public Hub data).
 
+  producthunt:
+    name: Product Hunt
+    publisher: Product Hunt
+    status: official
+    description: Research products, launches and leaderboards, and draft, check and submit your own launch.
+    transport: http
+    url: https://mcp.producthunt.com/mcp
+    auth: {type: oauth, client: dynamic, scopes: ["mcp:account", "launches:read", "launches:write"]}
+    docs: https://www.producthunt.com/mcp/install
+    checked: "2026-11-09"
+    notes: >-
+      Hosted server. Dynamic client registration, public clients and PKCE (S256) confirmed in its authorization
+      server metadata. Delta does not ask for the ads scopes (ads:read, ads:write), so it can never spend money on
+      ads. Submitting a launch is public and always asks first; editing a launch is off until you switch it on.
+    tools:
+      read: [get_my_account, get_launch_context, list_my_launches, get_launch, get_launch_preview_view,
+             get_categories, get_products, find_alternatives, get_product_profile, search_launches,
+             semantic_product_search, get_leaderboard, find_investable_startups]
+      destructive: [update_launch]
+
   figma_desktop:
     name: Figma (desktop app)
     publisher: Figma
