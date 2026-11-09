@@ -463,11 +463,12 @@ def build(settings: Settings) -> Container:
         FetchPage(),
         *(memory_tools(memory) if settings.memory.enabled else []),
     ])
-    from delta.tools.email import email_tools
+    from delta.tools.email import email_tools, save_draft_tool
 
     draft_email, send_email = email_tools(router)  # every email is shown in full and sent only on a human yes
     registry.register(draft_email)
     registry.register(send_email)
+    registry.register(save_draft_tool(send_email))  # keep it in Gmail Drafts, checked field by field, never sent
     send_email.registry = registry
     from delta.addons.writer import writer_tools
 

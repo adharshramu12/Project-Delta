@@ -6,7 +6,18 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
+
+- **Pictures are recognised**: a picture from the dashboard or Telegram is looked at unless only its text is wanted;
+  transparent PNG/WebP/GIF no longer reach the model as black squares; pictures are kept under a size every vision
+  API takes; a model that says it cannot see images is not taken as an answer (the next one is asked); the user
+  hears why a picture was not seen, with models that can see it. iPhone HEIC photos open with `pillow-heif`.
+- **Writing an email in Gmail**: the compose window is filled and read back field by field (recipients picked by
+  exact address, Subject, body as plain text) before anything is saved or sent; new `save_email_draft` keeps it in
+  Gmail Drafts without sending; typing into Gmail's compose fields with browser_fill points to the email tools.
+- **Telegram keeps working on slow networks**: timeouts fit slow links (were 5 s), replies are retried, "typing..."
+  never stops a request, a long task says "Still working on it", the poll loop is watched and restarted, and the
+  dashboard shows a plain line only for a sustained outage (two copies on one bot and a bad token have their own).
 
 ## 0.3.0 - not tagged yet
 

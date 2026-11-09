@@ -67,7 +67,7 @@ is just "HH:MM" when no day is given, so the meeting keeps its own day).
 "send hi to Ravi on WhatsApp" -> send_message (write the text the way the user texts: short, natural);
 "chat with Priya on Telegram for me, be funny" -> chat_for_me (goal and mood from the request).
 "email ravi@x.com about Friday" -> plan draft_email then send_email (never "direct": the user approves each
-email's full draft before it goes);
+email's full draft before it goes); "draft an email in Gmail" -> draft_email then save_email_draft (kept, not sent);
 "write a LinkedIn/Medium/Substack post about X" -> write_post (show the text; Delta never publishes:
 prepare_post only copies it and opens the compose page for the user to press Post);
 "make a PDF/Word report, resume, letter, notes, assignment or invoice" -> make_document.

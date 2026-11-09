@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
@@ -336,11 +337,12 @@ async def _start_channels(c: Container) -> list[object]:
             c.warn(f"{name.title()} is enabled but not installed. Run: uv sync --extra {extra}")
             continue
         except Exception as e:
-            # Usually the network to the service is slow for a moment: keep trying in the background
-            # instead of leaving the phone unanswered until the next restart.
+            # Usually the network to the service is slow for a moment (just after boot or sleep): keep trying in
+            # the background instead of leaving the phone unanswered until the next restart. The dashboard says so
+            # only when it keeps failing for START_OUTAGE_S (it showed "Timed out" for every slow start before).
             await _stop_quietly(channel)  # a half-started bot would fight the retry for its chat
-            c.warn(f"{name.title()} could not start: {e or type(e).__name__}. Retrying in the background.")
-            retry = asyncio.create_task(_retry_channel(c, name), name=f"retry-{name}")
+            log.info("channel.start_failed", channel=name, error=str(e) or type(e).__name__)
+            retry = asyncio.create_task(_retry_channel(c, name, e), name=f"retry-{name}")
             c.lifecycle.on_shutdown(f"retry-{name}", _cancel_task(retry))
             continue
         c.lifecycle.on_shutdown(name, channel.stop)  # type: ignore[attr-defined]
@@ -356,15 +358,40 @@ async def _stop_quietly(channel: object) -> None:
 
 
 RETRY_DELAYS_S = (10, 30, 60)  # then every 60 s
+START_OUTAGE_S = 120.0  # a channel that still cannot start after this long gets a line on the dashboard
 
 
-async def _retry_channel(c: Container, name: str) -> None:
+def _start_problem(name: str, e: BaseException) -> str:
+    """Plain words for a channel that keeps failing to start (never a bare "Timed out")."""
+    why = str(e) or type(e).__name__
+    if name == "telegram":
+        with contextlib.suppress(Exception):
+            from delta.channels.telegram_net import describe
+
+            low = f"{type(e).__name__} {why}".lower()
+            if any(w in low for w in ("timed out", "timeout", "network", "connect", "proxy", "ssl", "unreachable")) \
+                    or "telegram" in type(e).__module__:
+                why = describe(e)
+    return f"{name.title()} could not start: {why} Retrying in the background."
+
+
+async def _retry_channel(c: Container, name: str, first: BaseException | None = None) -> None:
+    began = time.monotonic()
+    shown = ""
+    last: BaseException | None = first
     for attempt in range(10_000):
+        if last is not None and not shown and time.monotonic() - began >= START_OUTAGE_S:
+            shown = _start_problem(name, last)
+            c.warn(shown)
         await asyncio.sleep(RETRY_DELAYS_S[min(attempt, len(RETRY_DELAYS_S) - 1)])
         try:
             await start_channel(c, name)
         except Exception as e:
+            last = e
             log.info("channel.retry_failed", channel=name, attempt=attempt + 1, error=str(e) or type(e).__name__)
+            if not shown and time.monotonic() - began >= START_OUTAGE_S:
+                shown = _start_problem(name, e)
+                c.warn(shown)
             continue
         c.warnings[:] = [w for w in c.warnings if not w.startswith(f"{name.title()} could not start")]
         log.info("channel.connected_after_retry", channel=name, attempts=attempt + 1)

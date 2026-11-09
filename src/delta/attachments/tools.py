@@ -85,9 +85,11 @@ class LookAtAttachment(Tool[LookArgs]):
         seen, text = await self.service.look(att, ex, args.question, args.page)
         if seen:
             return ToolResult(True, text, {"attachment": att.id, "seen": True})
-        reason = text or ("No AI that can see pictures is available, so the picture itself was not seen. Tell the "
-                          "user plainly, and answer from the text already read from it if that is enough.")
-        return ToolResult(False, reason, {"attachment": att.id, "seen": False, "vision_available": False})
+        reason = text.replace("{what}", "the text Delta read from it") if text else (
+            "No AI that can see pictures is available, so the picture itself was not seen. Tell the user plainly, and "
+            "answer from the text already read from it if that is enough.")
+        return ToolResult(False, reason, {"attachment": att.id, "seen": False,
+                                          "vision_available": self.service.can_see()})
 
 
 def attachment_tools(service: Any) -> list[Tool[Any]]:
