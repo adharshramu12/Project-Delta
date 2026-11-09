@@ -86,15 +86,23 @@ llm:
       models:
         chat: meta/llama-3.3-70b-instruct
         vision: meta/llama-3.2-90b-vision-instruct
+    nebius:                           # Nebius Token Factory: your own Nebius credits (OpenAI-compatible API)
+      base_url: https://api.tokenfactory.nebius.com/v1
+      secret: nebius_api_key
+      timeout_s: 90
+      models:
+        chat: openai/gpt-oss-120b     # change to any model in your Token Factory catalogue
+        plan: openai/gpt-oss-120b
+        verify: openai/gpt-oss-120b
   # When you pick a main AI (Apps > AI models), only that AI answers. Set true to let the AIs below answer when
   # it fails (out of credits, key expired, not installed). A job your main AI cannot do at all, such as reading a
   # screenshot with a text-only model, still uses the order below.
   fallback: false
   # Provider order per job. The first healthy, allowed provider wins.
   routes:
-    chat: [ollama, lmstudio, claude_code, codex, cline, deepseek, groq, nim]
-    plan: [claude_code, codex, cline, deepseek, groq, nim, lmstudio, ollama]
-    verify: [groq, nim, deepseek, claude_code, codex, cline, lmstudio, ollama]
+    chat: [ollama, lmstudio, claude_code, codex, cline, deepseek, groq, nim, nebius]
+    plan: [claude_code, codex, cline, deepseek, groq, nim, nebius, lmstudio, ollama]
+    verify: [groq, nim, nebius, deepseek, claude_code, codex, cline, lmstudio, ollama]
     vision: [ollama, lmstudio, claude_code, codex, nim]
 
 search:

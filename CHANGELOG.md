@@ -7,6 +7,9 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Nebius Token Factory as an AI provider.** Add your Nebius key in Settings > Keys, the setup wizard or `/keys`
+  on Telegram (it is checked against Nebius before it is saved) and Delta can think with your Nebius credits. It
+  uses `openai/gpt-oss-120b` by default; any model in your Token Factory catalogue can be set in `config/delta.yaml`.
 - **Live progress, so Delta never looks stuck.** While a task runs, the chat shows what Delta is doing now in plain
   words ("Working in Notion: search", "Opening youtube.com") with a timer and a soft shimmer, and "Still waiting"
   when one step takes long. On Telegram, a task that takes more than a few seconds gets one status message that is
