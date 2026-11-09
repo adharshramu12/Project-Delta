@@ -371,7 +371,7 @@ def test_version_comes_from_pyproject_only():
     import delta
 
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    assert delta.__version__ == project["version"] == "0.3.0"
+    assert delta.__version__ == project["version"] == "0.4.0"
     init = (ROOT / "src" / "delta" / "__init__.py").read_text(encoding="utf-8")
     assert not re.search(r'__version__\s*=\s*"\d', init)  # no second copy to forget
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
