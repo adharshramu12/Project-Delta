@@ -43,14 +43,26 @@ If something failed, it tells you plainly instead of pretending.
 - **Gmail drafts with approval.** "Email Ravi that the review moves to 4 pm." Delta drafts it in your voice and shows
   the whole email with every recipient. It sends only when you press Approve, every single time, at every
   permission level. Edit and Cancel send nothing.
-- **Apps and MCP.** Connect Notion, GitHub, Jira and Confluence, Linear, Slack, Sentry, Stripe, Gmail, Google Drive
-  and Calendar, Asana, Vercel, Supabase, Hugging Face, Product Hunt, Canva, Todoist, ClickUp, monday.com, Airtable,
-  Zapier, Webflow, Wix, Netlify, Neon, Intercom, docs servers (DeepWiki, Context7, Microsoft Learn, AWS), market data
-  (Zerodha Kite, Alpaca, CoinGecko), Figma or any MCP server you add, all from the Apps page.
-  Reading tools run at once; anything that changes something asks first. More: [docs/APPS.md](docs/APPS.md).
+- **43 apps, one click each.** The Apps page is a directory: search, filters by category (Productivity, Email and
+  chat, Design, Developer tools, Databases, Websites, Automation, Docs and AI, Finance and markets, Marketing) and a
+  details panel for every app saying what it does, how it signs in, where it runs and what asks first. Most connect
+  with a browser sign-in and nothing to paste: Notion, Linear, Atlassian, Canva, Todoist, ClickUp, monday.com,
+  Airtable, Zapier, Webflow, Wix, Netlify, Neon, Intercom, Product Hunt and more; DeepWiki, Context7, Microsoft Learn,
+  AWS Knowledge and Excalidraw need no sign-in at all. GitHub, Slack, Gmail, Google Drive and Calendar, Asana and any
+  MCP server you add are there too. Reading runs at once; anything that changes something asks first. Market data
+  (Zerodha Kite, Alpaca, CoinGecko) is read-only by default: Kite's order tools stay off until you switch them on,
+  and every order still needs your yes. More: [docs/APPS.md](docs/APPS.md).
+- **Never looks stuck.** While a task runs, the chat shows what Delta is doing right now in plain words ("Working in
+  Notion: search", "Opening youtube.com") with a timer, and says "Still waiting" when one step is slow. On Telegram a
+  longer task gets one status message that updates itself and ends with Finished, Stopped or Could not finish, then
+  the answer. A request that has to wait for the running task says so, and no task runs for more than 20 minutes.
 - **Human writing.** Chat answers, emails and documents come out in plain Indian English. A check in code (no extra
   AI call) removes long dashes, stock AI phrases and US spellings before you see the text. More:
   [docs/STYLE_AND_IDENTITY.md](docs/STYLE_AND_IDENTITY.md).
+
+- **Light on your laptop.** About 100 MB of memory in the background, near-zero CPU at rest, and no GPU unless you
+  pick a local model. On disk the browser caches are capped and their leftovers are tidied away by themselves, so
+  Delta stays under about 1 GB instead of growing.
 
 Delta also runs scheduled tasks and reminders, keeps a history of every task with resume after a crash, lets you
 undo its file changes, remembers what you tell it (encrypted on your PC) and writes PDF and Word documents. The
