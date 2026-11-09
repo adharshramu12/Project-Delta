@@ -194,7 +194,8 @@ def find_chrome() -> str | None:  # kept for scripts and older callers
 
 def chrome_args(profile: Path, port: int | None = None) -> list[str]:
     return [f"--remote-debugging-port={port or PORT or LEGACY_PORT}", f"--user-data-dir={profile}", "--no-first-run",
-            "--no-default-browser-check", "--disable-features=Translate"]
+            "--no-default-browser-check", "--disable-features=Translate",
+            "--disk-cache-size=104857600"]  # 100 MB cache cap: browsing never fills the disk
 
 
 def free_port() -> int:

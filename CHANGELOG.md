@@ -4,6 +4,16 @@ All notable changes to Delta are listed here. The format follows [Keep a Changel
 and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The version lives in one place,
 `pyproject.toml`; `delta --version` reads it from there.
 
+## Unreleased
+
+### Changed
+- **Delta stays small on disk.** Its two browser profiles (the dashboard window and the private browser) start with a
+  capped disk cache (32 MB and 100 MB), and a minute after start Delta removes their regenerable leftovers: Edge and
+  Chrome components, provenance data, metrics, crash dumps, shader and web caches, and the window's built-in
+  extensions. Only profiles no browser is using are touched, and sign-ins, cookies, settings and Local Storage are
+  never removed. On a real PC the window's profile had grown to 737 MB for a dashboard page. The installer also
+  deletes its 130 MB download cache when it is done.
+
 ## 0.3.0 - 2026-11-09
 
 The first version under AGPL-3.0-or-later, and the first that tells you when a newer one is out. In short:
