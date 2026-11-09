@@ -6,6 +6,13 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Added
+- **Tri, Delta's pet.** A small triangle (Delta's own Δ) in the corner of the dashboard that shows what
+  Delta is doing: it thinks while Delta plans, bounces while it works, jumps when a task is done, tips over when one
+  fails, ducks while you type, sleeps when nothing happens, says good morning once a day and laughs when clicked.
+  It only reacts to real events, stays still with Windows' reduced motion, hides on narrow windows and can be
+  switched off in Settings. Drawn with SVG shapes and CSS: no images, no library.
+
 ## 0.4.0 - 2026-11-09
 
 Faster everyday controls, your own Nebius credits, and a Delta that always shows what it is doing. In short:
