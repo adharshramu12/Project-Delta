@@ -455,13 +455,14 @@ try {
     # afterwards, so a later `uv sync` of the user's own project in that window does not go into Delta's folder.
     $uvSaved = @{}
     $ownCache = -not "$env:UV_CACHE_DIR".Trim()
-    foreach ($k in "UV_PROJECT_ENVIRONMENT", "UV_CACHE_DIR", "UV_NATIVE_TLS") { $uvSaved[$k] = [Environment]::GetEnvironmentVariable($k) }
+    foreach ($k in "UV_PROJECT_ENVIRONMENT", "UV_CACHE_DIR", "UV_SYSTEM_CERTS") { $uvSaved[$k] = [Environment]::GetEnvironmentVariable($k) }
     try {
         $env:UV_PROJECT_ENVIRONMENT = Join-Path $InstallDir ".venv"
         if (-not "$env:UV_CACHE_DIR".Trim()) { $env:UV_CACHE_DIR = Join-Path $InstallDir ".uv-cache" }
         # Windows' own certificate store, as pip already uses: behind a company proxy that inspects HTTPS its
-        # certificate is in that store (put there by the company), not in uv's built-in list.
-        if (-not "$env:UV_NATIVE_TLS".Trim()) { $env:UV_NATIVE_TLS = "1" }
+        # certificate is in that store (put there by the company), not in uv's built-in list. UV_SYSTEM_CERTS is the
+        # name current uv reads (the step above installs the newest uv); the old UV_NATIVE_TLS now prints a warning.
+        if (-not ("$env:UV_SYSTEM_CERTS".Trim() -or "$env:UV_NATIVE_TLS".Trim())) { $env:UV_SYSTEM_CERTS = "1" }
         & $venvPy -m uv sync --frozen --extra all --no-dev --python $venvPy
         if ($LASTEXITCODE -ne 0) {
             Fail ("installing Delta's packages failed (see the log). Usual causes: no internet, a company proxy " +
