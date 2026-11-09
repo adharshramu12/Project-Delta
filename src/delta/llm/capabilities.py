@@ -21,6 +21,7 @@ BRAINS = {
     "codex": Brain("Codex (your ChatGPT plan)", "frontier", 2.0),
     "groq": Brain("Groq cloud model", "strong", 1.3),
     "nim": Brain("NVIDIA NIM cloud model", "strong", 1.3),
+    "nebius": Brain("Nebius Token Factory cloud model", "strong", 1.3),
     "ollama": Brain("a small model on this PC (Ollama)", "small", 0.8),
     "lmstudio": Brain("a small model on this PC (LM Studio)", "small", 0.8),
 }
