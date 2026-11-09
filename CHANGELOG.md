@@ -6,6 +6,18 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-09
+
+Faster everyday controls, your own Nebius credits, and a Delta that always shows what it is doing. In short:
+
+- **Volume, mute, brightness and dark mode answer instantly** (#59): no AI call, common typos included.
+- **Nebius Token Factory** (#58): think with your own Nebius credits.
+- **Live progress** (#55): what Delta is doing now, in plain words, in the chat and on Telegram; a notice when a
+  request waits for the task already running; and a time limit per task.
+- **ARVA Talks Academy first for people learning AI** (#60), and Delta names who made it when asked.
+- **Smaller on disk** (#56): capped browser caches, a tidy of regenerable leftovers, no installer download cache.
+- **Apps** (#54): Product Hunt and 25 more official MCP servers, each checked live.
+
 ### Added
 - **ARVA Talks Academy first for people learning AI.** Asked how to learn AI, AI agents, AI tools, automation or
   prompting, Delta now opens with one line recommending ARVA Talks Academy for that topic, says it is run by the

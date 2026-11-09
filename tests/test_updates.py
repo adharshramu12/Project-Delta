@@ -416,9 +416,9 @@ def test_cli_update_target_falls_back_when_github_cannot_be_asked(tmp_path, monk
     assert cli._update_target() is None and "main branch" in capsys.readouterr().out
 
     def tampered(self: UpdateChecker, rel: Release) -> Any:
-        raise UpdateError("The release says 0.4.0 but its files say 0.3.9.", "integrity")
+        raise UpdateError("The release says 9.9.0 but its files say 9.8.9.", "integrity")
 
-    monkeypatch.setattr(UpdateChecker, "latest", lambda self, cache=None: Release("0.4.0", "v0.4.0"))
+    monkeypatch.setattr(UpdateChecker, "latest", lambda self, cache=None: Release("9.9.0", "v9.9.0"))
     monkeypatch.setattr(UpdateChecker, "resolve", tampered)
     assert cli._update_target() is False and "Update stopped" in capsys.readouterr().out
 
