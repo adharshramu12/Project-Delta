@@ -83,6 +83,65 @@ def _platform(p: str) -> str:
     return "zoom" if "zoom" in p else "teams" if "teams" in p else "google_meet"
 
 
+# PC controls: volume, mute, brightness and light/dark mode answer at once, with no AI call. A friend's first day
+# with Delta: "increase the colume" went through the planner, was slow and sometimes ended in "sorry". Strict:
+# one control and an optional amount; typos people really make; casual endings ("buddy", "please"). Anything
+# else ("mute Ravi on WhatsApp") goes to the planner as before.
+_VOL = (r"(?:the\s+|my\s+|pc\s+|system\s+|laptop\s+)?"
+        r"(?:volume|volum|volumn|voulme|volme|voluem|valume|colume|vol|sound|audio)")
+_BRI = r"(?:the\s+|my\s+|screen\s+|display\s+)?(?:brightness|brightnes|brigtness|brighness|brightess|brightnss)"
+_UP = r"(?:increase|incrase|increse|inc|raise|turn\s+up|up|boost|higher|more)"
+_DOWN = r"(?:decrease|decrese|dec|reduce|lower|turn\s+down|down|less)"
+_BY = r"(?:\s+(?:by\s+)?(?P<by>\d{1,3})\s*%?)?"
+_END = r"(?:\s+(?:please|pls|plz|buddy|bro|yaar|da|now|a\s+bit|a\s+little|little|slightly))*\s*[.!]*$"
+_PC_RULES: list[tuple[re.Pattern[str], Any]] = []
+
+
+def _level_rules(what: str, tool: str, noun: str) -> None:
+    def step(sign: int) -> Any:
+        went = f"the {noun} went {'up' if sign > 0 else 'down'}"
+        return lambda m: Intent(tool, {"change": sign * int(m["by"] or 10)}, went)
+
+    to_level = rf"(?:set\s+|make\s+|put\s+|change\s+)?{what}\s+(?:to\s+|at\s+)?(?P<n>\d{{1,3}})\s*%?{_END}"
+    to_max = rf"(?:(?:set\s+)?{what}\s+(?:to\s+)?(?:max|maximum|full|100\s*%)|(?:max|maximum|full)\s+{what}){_END}"
+    _PC_RULES.extend([
+        (re.compile(POLITE + rf"(?:can\s+you\s+|could\s+you\s+)?{_UP}\s+{what}{_BY}{_END}", re.I), step(1)),
+        (re.compile(POLITE + rf"(?:can\s+you\s+|could\s+you\s+)?{_DOWN}\s+{what}{_BY}{_END}", re.I), step(-1)),
+        (re.compile(POLITE + rf"(?:turn\s+)?{what}\s+(?:{_UP}){_BY}{_END}", re.I), step(1)),
+        (re.compile(POLITE + rf"(?:turn\s+)?{what}\s+(?:{_DOWN}){_BY}{_END}", re.I), step(-1)),
+        (re.compile(POLITE + to_level, re.I),
+         lambda m: Intent(tool, {"level": min(100, int(m["n"]))}, f"the {noun} is {min(100, int(m['n']))}%")),
+        (re.compile(POLITE + to_max, re.I), lambda m: Intent(tool, {"level": 100}, f"the {noun} is 100%")),
+    ])
+
+
+_level_rules(_VOL, "set_volume", "volume")
+_level_rules(_BRI, "set_brightness", "brightness")
+_PC_RULES.extend([
+    (re.compile(POLITE + r"(?:make\s+it\s+|a\s+bit\s+)?(?:louder)" + _END, re.I),
+     lambda m: Intent("set_volume", {"change": 10}, "the volume went up")),
+    (re.compile(POLITE + r"(?:make\s+it\s+|a\s+bit\s+)?(?:quieter|softer)" + _END, re.I),
+     lambda m: Intent("set_volume", {"change": -10}, "the volume went down")),
+    (re.compile(POLITE + rf"mute(?:\s+(?:it|the\s+pc|{_VOL}))?{_END}", re.I),
+     lambda m: Intent("set_volume", {"mute": True}, "the PC is muted")),
+    (re.compile(POLITE + rf"unmute(?:\s+(?:it|the\s+pc|{_VOL}))?{_END}", re.I),
+     lambda m: Intent("set_volume", {"mute": False}, "the PC is unmuted")),
+    (re.compile(POLITE + r"(?:turn\s+on\s+|switch\s+(?:on\s+|to\s+)|enable\s+|change\s+to\s+|go\s+)?"
+                r"(?P<mode>dark|light)\s+(?:mode|theme)(?:\s+on)?" + _END, re.I),
+     lambda m: Intent("set_windows_theme", {"mode": m["mode"].lower()}, f"Windows is in {m['mode'].lower()} mode")),
+    (re.compile(POLITE + r"(?:turn\s+off|disable)\s+(?P<mode>dark|light)\s+(?:mode|theme)" + _END, re.I),
+     lambda m: Intent("set_windows_theme", {"mode": "light" if m["mode"].lower() == "dark" else "dark"},
+                      "Windows switched theme")),
+])
+
+
+def pc_intent(text: str) -> Intent | None:
+    for pattern, build in _PC_RULES:
+        if m := pattern.match(text):
+            return build(m)
+    return None
+
+
 def match_intent(text: str, available: set[str]) -> Intent | None:
     t = " ".join(text.split())
     if len(t) > 160 or "\n" in text:
@@ -92,6 +151,8 @@ def match_intent(text: str, available: set[str]) -> Intent | None:
         if m:
             intent = build(m)
             return intent if intent.tool in available else None
+    if (pc := pc_intent(t)) is not None:
+        return pc if pc.tool in available else None
     if (opened := open_app_intent(t)) is not None:
         return opened if opened.tool in available else None
     if (browser := browser_intent(t)) is not None:
