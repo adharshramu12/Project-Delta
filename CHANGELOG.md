@@ -7,6 +7,10 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Volume, mute, brightness and dark mode answer instantly, with no AI call.** "increase the volume",
+  "volume 30", "make it louder", "mute", "brightness up", "turn on dark mode" and common typos ("colume",
+  "brigtness") go straight to the control. From a first-day user: these went through the AI, were slow and
+  sometimes ended in "sorry".
 - **Nebius Token Factory as an AI provider.** Add your Nebius key in Settings > Keys, the setup wizard or `/keys`
   on Telegram (it is checked against Nebius before it is saved) and Delta can think with your Nebius credits. It
   uses `openai/gpt-oss-120b` by default; any model in your Token Factory catalogue can be set in `config/delta.yaml`.
