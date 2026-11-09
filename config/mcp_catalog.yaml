@@ -21,7 +21,7 @@
 #        when you tick "trust this app's read-only labels" for that app.
 
 version: 1
-checked: "2026-11-06"
+checked: "2026-11-09"
 
 apps:
   notion:
@@ -265,6 +265,322 @@ apps:
              get_categories, get_products, find_alternatives, get_product_profile, search_launches,
              semantic_product_search, get_leaderboard, find_investable_startups]
       destructive: [update_launch]
+
+  todoist:
+    name: Todoist
+    publisher: Doist
+    status: official
+    description: Read, add and complete your Todoist tasks and projects.
+    transport: http
+    url: https://ai.todoist.net/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://www.todoist.com/help/articles/use-todoist-with-ai-tools-via-mcp
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  clickup:
+    name: ClickUp
+    publisher: ClickUp
+    status: official
+    description: Tasks, lists, docs and comments in your ClickUp workspace.
+    transport: http
+    url: https://mcp.clickup.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://help.clickup.com/hc/en-us/articles/33335772678423-What-is-ClickUp-MCP
+    checked: "2026-11-09"
+    notes: Hosted server, available on all ClickUp plans. Dynamic client registration and PKCE (S256) confirmed.
+
+  monday:
+    name: monday.com
+    publisher: monday.com
+    status: official
+    description: Boards, items and updates in your monday.com account.
+    transport: http
+    url: https://mcp.monday.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://developer.monday.com/apps/docs/mondaycom-mcp-integration
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  airtable:
+    name: Airtable
+    publisher: Airtable
+    status: official
+    description: Read and update records in your Airtable bases.
+    transport: http
+    url: https://mcp.airtable.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://support.airtable.com/docs/using-the-airtable-mcp-server
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  canva:
+    name: Canva
+    publisher: Canva
+    status: official
+    description: Find, create and edit Canva designs, and export them.
+    transport: http
+    url: https://mcp.canva.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://www.canva.com/help/mcp-agent-setup/
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  mermaid_chart:
+    name: Mermaid Chart
+    publisher: Mermaid Chart
+    status: official
+    description: Draw and check diagrams (flowcharts, sequence, timelines) with Mermaid.
+    transport: http
+    url: https://mcp.mermaidchart.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.mermaidchart.com/ai/mcp-server
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  webflow:
+    name: Webflow
+    publisher: Webflow
+    status: official
+    description: Pages, CMS collections and items on your Webflow sites.
+    transport: http
+    url: https://mcp.webflow.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://developers.webflow.com/mcp/reference/overview
+    checked: "2026-11-09"
+    notes: Hosted server. Publishing changes a live website, so it asks first like every write.
+
+  wix:
+    name: Wix
+    publisher: Wix
+    status: official
+    description: Manage your Wix site, its content and its business apps.
+    transport: http
+    url: https://mcp.wix.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://dev.wix.com/docs/sdk/articles/use-the-wix-mcp/about-the-wix-mcp
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  netlify:
+    name: Netlify
+    publisher: Netlify
+    status: official
+    description: Create, deploy and manage your Netlify sites.
+    transport: http
+    url: https://netlify-mcp.netlify.app/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.netlify.com/build/build-with-ai/netlify-mcp-server/
+    checked: "2026-11-09"
+    notes: Hosted server. Deploys change a live site, so they ask first.
+
+  neon:
+    name: Neon
+    publisher: Neon
+    status: official
+    description: Neon Postgres projects, branches and SQL.
+    transport: http
+    url: https://mcp.neon.tech/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://neon.com/docs/ai/neon-mcp-server
+    checked: "2026-11-09"
+    notes: Database tools can change or delete data; Delta treats them as external (asks first).
+
+  prisma:
+    name: Prisma Postgres
+    publisher: Prisma
+    status: official
+    description: Create and manage Prisma Postgres databases and run migrations.
+    transport: http
+    url: https://mcp.prisma.io/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://www.prisma.io/docs/postgres/integrations/mcp-server
+    checked: "2026-11-09"
+    notes: Database tools can change or delete data; Delta treats them as external (asks first).
+
+  semgrep:
+    name: Semgrep
+    publisher: Semgrep
+    status: official
+    description: Scan code for security issues and bugs with Semgrep.
+    transport: http
+    url: https://mcp.semgrep.ai/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://semgrep.dev/docs/mcp
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  jam:
+    name: Jam
+    publisher: Jam
+    status: official
+    description: Read Jam bug reports (screen recordings, console logs and network requests).
+    transport: http
+    url: https://mcp.jam.dev/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://jam.dev/docs/debug-a-jam/mcp
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  apify:
+    name: Apify
+    publisher: Apify
+    status: official
+    description: Run Apify Actors to scrape websites and collect data.
+    transport: http
+    url: https://mcp.apify.com
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.apify.com/platform/integrations/mcp
+    checked: "2026-11-09"
+    notes: Actor runs can use your Apify credits; every run asks first.
+
+  globalping:
+    name: Globalping
+    publisher: jsDelivr
+    status: official
+    description: Ping, traceroute, DNS and HTTP checks from probes around the world.
+    transport: http
+    url: https://mcp.globalping.dev/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://github.com/jsdelivr/globalping-mcp-server
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  zapier:
+    name: Zapier
+    publisher: Zapier
+    status: official
+    description: Use the apps and actions you enabled in Zapier (thousands of apps through one connection).
+    transport: http
+    url: https://mcp.zapier.com/api/mcp/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://help.zapier.com/hc/en-us/articles/36265392843917
+    checked: "2026-11-09"
+    notes: Zapier actions run in other apps and count against your Zapier plan; each one asks first.
+
+  intercom:
+    name: Intercom
+    publisher: Intercom
+    status: official
+    description: Search and read Intercom conversations and contacts.
+    transport: http
+    url: https://mcp.intercom.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://developers.intercom.com/docs/guides/mcp
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  deepwiki:
+    name: DeepWiki
+    publisher: Cognition
+    status: official
+    description: Ask questions about any public GitHub repository and read its generated docs.
+    transport: http
+    url: https://mcp.deepwiki.com/mcp
+    auth: {type: none}
+    docs: https://docs.devin.ai/work-with-devin/deepwiki-mcp
+    checked: "2026-11-09"
+    notes: Works without signing in (public repositories).
+
+  context7:
+    name: Context7
+    publisher: Upstash
+    status: official
+    description: Up-to-date documentation and code examples for programming libraries.
+    transport: http
+    url: https://mcp.context7.com/mcp
+    auth: {type: none}
+    docs: https://github.com/upstash/context7
+    checked: "2026-11-09"
+    notes: Works without signing in (a free API key raises the limits).
+
+  microsoft_learn:
+    name: Microsoft Learn
+    publisher: Microsoft
+    status: official
+    description: Search official Microsoft documentation (Windows, Azure, .NET, Microsoft 365).
+    transport: http
+    url: https://learn.microsoft.com/api/mcp
+    auth: {type: none}
+    docs: https://learn.microsoft.com/en-us/training/support/mcp
+    checked: "2026-11-09"
+    notes: Works without signing in (public documentation).
+
+  aws_knowledge:
+    name: AWS Knowledge
+    publisher: Amazon Web Services
+    status: official
+    description: Search AWS documentation, guidance and regional availability.
+    transport: http
+    url: https://knowledge-mcp.global.api.aws
+    auth: {type: none}
+    docs: https://awslabs.github.io/mcp/servers/aws-knowledge-mcp-server
+    checked: "2026-11-09"
+    notes: Works without signing in (public documentation).
+
+  excalidraw:
+    name: Excalidraw
+    publisher: Excalidraw
+    status: official
+    description: Draw hand-drawn style diagrams and sketches.
+    transport: http
+    url: https://mcp.excalidraw.com/mcp
+    auth: {type: none}
+    docs: https://github.com/excalidraw/excalidraw-mcp
+    checked: "2026-11-09"
+    notes: Works without signing in.
+
+  kite:
+    name: Zerodha Kite
+    publisher: Zerodha
+    status: official
+    description: Your Zerodha holdings, positions, orders, margins, quotes and charts data.
+    transport: http
+    url: https://mcp.kite.trade/mcp
+    auth: {type: none}
+    docs: https://github.com/zerodha/kite-mcp-server
+    checked: "2026-11-09"
+    notes: >-
+      Sign in to Kite through its own login tool (Zerodha's page, in your browser). Viewing your portfolio and
+      market data never asks. Every order tool (place, modify or cancel an order or GTT) is off until you switch it
+      on, and even then each order needs your yes: a trade cannot be undone. Not financial advice.
+    tools:
+      read: [get_profile, get_margins, get_holdings, get_mf_holdings, get_positions, get_orders, get_order_history,
+             get_order_trades, get_trades, get_gtts, get_quotes, get_ltp, get_ohlc, get_historical_data,
+             search_instruments, login]
+      destructive: [place_order, modify_order, cancel_order, place_gtt_order, modify_gtt_order, delete_gtt_order]
+
+  alpaca_data:
+    name: Alpaca market data
+    publisher: Alpaca
+    status: official
+    description: US stock, options and crypto prices, bars, quotes and market calendar (data only).
+    transport: http
+    url: https://mcp.alpaca.markets/mcp
+    auth: {type: none}
+    docs: https://docs.alpaca.markets/docs/alpaca-mcp-server
+    checked: "2026-11-09"
+    notes: Market data only; this server has no trading tools. Not financial advice.
+    tools:
+      read: [get_asset, get_all_assets, get_corporate_actions, get_calendar, get_clock, get_stock_bars,
+             get_stock_quotes, get_stock_trades, get_stock_latest_bar, get_stock_latest_quote, get_stock_latest_trade,
+             get_stock_snapshot, get_crypto_bars, get_crypto_quotes, get_crypto_trades, get_crypto_latest_bar,
+             get_crypto_latest_quote, get_crypto_latest_trade, get_crypto_snapshot, get_crypto_latest_orderbook,
+             get_option_contracts, get_option_latest_quote, get_option_snapshot, get_option_chain]
+
+  coingecko:
+    name: CoinGecko
+    publisher: CoinGecko
+    status: official
+    description: Crypto prices, market data, coins and exchanges (data only).
+    transport: http
+    url: https://mcp.api.coingecko.com/mcp
+    auth: {type: none}
+    docs: https://docs.coingecko.com/reference/mcp-server
+    checked: "2026-11-09"
+    notes: Public data with no sign-in. Market data only. Not financial advice.
+    tools:
+      read: [search_docs]
 
   figma_desktop:
     name: Figma (desktop app)
