@@ -393,7 +393,7 @@ DESKTOP_ACTIONS = {"click_element", "click_at", "do_actions", "type_text", "pres
                    "focus_window", "close_window", "open_app", "open_target"}
 BROWSER_ACTIONS = {"browser_open", "browser_search", "browser_click", "browser_fill", "browser_press",
                    "browser_scroll", "browser_back", "browser_select", "browser_check", "browser_upload",
-                   "browser_hover", "browser_wait", "browser_tabs", "sign_in"}
+                   "browser_hover", "browser_wait", "browser_tabs", "browser_menu", "sign_in"}
 TEXT_ACTIONS = {"type_text", "set_field", "press_keys"}
 PIXEL_ACTIONS = {"click_at", "scroll", "do_actions"}  # aimed by coordinates: only a screenshot shows what happened
 OBSERVE_CHARS = 1500
@@ -437,7 +437,8 @@ ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "search_files", "web_searc
                 "list_windows", "read_window", "focus_window", "look_at_screen", "browser_read",
                 "media_status", "do_actions", "scroll",
                 "find_app_tool", "use_app_tool"}  # connected apps: only offered while an app is connected
-BROWSER_TOOLS = BROWSER_ACTIONS | {"browser_read"}
+# academic_context comes with the browser kit: "show my timetable" in a college portal needs the year and semester
+BROWSER_TOOLS = BROWSER_ACTIONS | {"browser_read", "academic_context"}
 ATTACHMENT_TOOLS = {"read_attachment", "look_at_attachment"}
 SCREEN_TOOLS = {"click_element", "click_at", "type_text", "press_keys", "set_field"}
 # Set-of-marks and OCR (delta.perception): sent with the screen tools, and only when they are usable here.

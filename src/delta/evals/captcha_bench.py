@@ -12,6 +12,12 @@ scalable font, so a Linux box and a Windows runner draw the same pixels:
   coloured     5 or 6 digits, each in its own strong colour, on a speckled coloured background with a few coloured
                lines (the "enter the digits" captcha of many state portals)
 
+and, measured on its own (`--styles kl_bubbly`, never folded into the three above):
+
+  kl_bubbly    4 to 6 fat, rounded, hot-pink letters of both cases on white, touching and overlapping, each turned a
+               little, all on one baseline (small letters small, tails hanging), with the shapes people mix up
+               (i/I, t/T, c/C): the look of some college ERP sign-in captchas
+
 Like those portals, the alphabets leave out the characters people cannot tell apart either (0/O, 1/I/l, g/q/9, and
 in the mixed-case style every letter whose small and capital forms have the same shape, such as c/C, s/S, v/V).
 Everything here is made up; nothing is sent anywhere.
@@ -26,6 +32,15 @@ from dataclasses import dataclass
 from typing import Any
 
 STYLES = ("lines_dots", "distorted", "coloured")
+# Styles measured on their own (never folded into the three above, whose floors CI already holds):
+#   kl_bubbly    about 5 fat, rounded, hot-pink letters on white, both cases, touching and overlapping, each turned a
+#                little: the look of some college ERP sign-in captchas, with the letters people mix up (i l I t T c)
+EXTRA_STYLES = ("kl_bubbly",)
+ALL_STYLES = (*STYLES, *EXTRA_STYLES)
+# Both cases, the shapes people mix up kept in on purpose (i/I, t/T, c/C, x/X, z/Z, k/K, y/Y: some differ only in
+# size): the hard part of such captchas. No small l: in the drawing font it is the very same bar as a capital I, so
+# no reader (or person) could tell them apart and the score would measure coin flips.
+KL_LETTERS = "abcdefhikmnprstuxyzABCDEFGHIKMNRTXYZcitT"
 UPPER_DIGITS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 MIXED = "ABDEFGHJLMNQRTYabdefghnrty2345678"  # both cases only where they look different; no q or 9 (they look like g)
 DIGITS = "0123456789"
@@ -138,8 +153,48 @@ def _coloured(rng: random.Random) -> tuple[str, Any]:
     return answer, img
 
 
-_DRAW = {"lines_dots": _lines_dots, "distorted": _distorted, "coloured": _coloured}
-_ATTRS = {"lines_dots": lambda a: {"maxlength": "5"},
+def _kl_bubbly(rng: random.Random) -> tuple[str, Any]:
+    """Fat rounded pink letters: each drawn big with a thick outline, blurred and thresholded so every corner comes
+    out round, turned up to 12 degrees, pushed into its neighbour (up to 8 px), all on one baseline, then the whole
+    picture made small the way a browser shows it."""
+    from PIL import Image, ImageDraw, ImageFilter
+
+    answer = "".join(rng.choice(KL_LETTERS) for _ in range(rng.choice((5, 5, 5, 4, 6))))
+    pink = (rng.randrange(215, 241), rng.randrange(50, 86), rng.randrange(100, 136))
+    size = rng.randrange(58, 68)  # one font size for the picture, as such sites draw it
+    stroke = rng.randrange(2, 4)  # fatter would close up the dot of an i, which no reader could then tell
+    tall = size * 2
+    tiles = []
+    for ch in answer:
+        # every letter on the same baseline (anchor "ls"), so small letters stay small and tails hang below
+        tile = Image.new("L", (size * 2, tall), 0)
+        ImageDraw.Draw(tile).text((size // 2, round(tall * 0.68)), ch, font=_font(size + rng.randrange(-2, 3)),
+                                  fill=255, anchor="ls", stroke_width=stroke, stroke_fill=255)
+        tile = tile.filter(ImageFilter.GaussianBlur(1.6)).point(lambda v: 255 if v > 100 else 0)
+        tile = tile.rotate(rng.uniform(-12, 12), resample=Image.Resampling.BICUBIC, center=(size, round(tall * 0.6)))
+        box = tile.getbbox() or (0, 0, tile.width, tile.height)
+        tiles.append(tile.crop((box[0], 0, box[2], tall)))  # trimmed sideways only: the baseline stays put
+    gaps = [rng.randrange(-8, 1) for _ in tiles]
+    h = tall
+    w = 40 + sum(t.width for t in tiles) + sum(gaps)
+    mask = Image.new("L", (w, h), 0)
+    x = 20
+    for tile, gap in zip(tiles, gaps, strict=True):
+        mask.paste(255, (x, rng.randrange(-3, 4)), tile)
+        x += tile.width + gap
+    box = mask.getbbox() or (0, 0, w, h)
+    mask = mask.crop((0, max(0, box[1] - 14), w, min(h, box[3] + 14)))
+    w, h = mask.size
+    mask = mask.filter(ImageFilter.GaussianBlur(0.8))
+    img = Image.new("RGB", (w, h), (255, 255, 255))
+    img.paste(Image.new("RGB", (w, h), pink), (0, 0), mask)
+    scale = rng.uniform(0.5, 0.8)  # the size it is shown at on the page
+    return answer, img.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.Resampling.LANCZOS)
+
+
+_DRAW = {"lines_dots": _lines_dots, "distorted": _distorted, "coloured": _coloured, "kl_bubbly": _kl_bubbly}
+_ATTRS = {"kl_bubbly": lambda a: {},  # such a box says nothing about the length or the letters
+          "lines_dots": lambda a: {"maxlength": "5"},
           "distorted": lambda a: {"maxlength": "6"},
           "coloured": lambda a: {"maxlength": str(len(a)), "inputmode": "numeric"}}
 
@@ -150,9 +205,9 @@ def sample(style: str, seed: int) -> Sample:
     return Sample(style, seed, answer, _png(img), _ATTRS[style](answer))
 
 
-def samples(per_style: int = 40, start: int = 0) -> list[Sample]:
+def samples(per_style: int = 40, start: int = 0, styles: tuple[str, ...] = STYLES) -> list[Sample]:
     """per_style captchas of each style (120 by default), the same pictures on every machine."""
-    return [sample(st, start + i) for st in STYLES for i in range(per_style)]
+    return [sample(st, start + i) for st in styles for i in range(per_style)]
 
 
 def matches(got: str | None, answer: str, case_sensitive: bool = True) -> bool:
@@ -250,9 +305,9 @@ async def evaluate(items: list[Sample], model: Any = None, ocr: Any = None,
     return out
 
 
-def table(scores: dict[str, dict[str, Score]]) -> str:
+def table(scores: dict[str, dict[str, Score]], styles: tuple[str, ...] = STYLES) -> str:
     """The scores as a Markdown table: exact match (case-blind in brackets) per engine and style."""
-    cols = [*STYLES, "all"]
+    cols = [*styles, "all"] if len(styles) > 1 else [*styles]
     lines = ["| engine | " + " | ".join(cols) + " |", "|---" * (len(cols) + 1) + "|"]
     for engine, by in scores.items():
         cells = []
@@ -289,11 +344,16 @@ async def _main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m delta.evals.captcha_bench",
                                 description="How often Delta reads generated ERP-style captchas by itself.")
     p.add_argument("--per-style", type=int, default=40)
+    p.add_argument("--styles", default=",".join(STYLES),
+                   help=f"comma-separated, from {', '.join(ALL_STYLES)} (default: the first three)")
     p.add_argument("--no-windows-ocr", action="store_true")
     p.add_argument("--out", default="")
     p.add_argument("--min-combined", type=float, default=0.0, help="fail below this first-try rate (0..1)")
     p.add_argument("--min-three", type=float, default=0.0, help="fail below this rate within three tries (0..1)")
     args = p.parse_args(argv)
+    styles = tuple(st.strip() for st in args.styles.split(",") if st.strip())
+    if not styles or any(st not in ALL_STYLES for st in styles):
+        p.error(f"--styles takes {', '.join(ALL_STYLES)}")
     import logging
 
     import structlog
@@ -301,9 +361,10 @@ async def _main(argv: list[str] | None = None) -> int:
     structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))  # no per-pass lines
     m = shared_model()
     ocr = None if args.no_windows_ocr else await _windows_ocr()
-    scores = await evaluate(samples(args.per_style), model=m.read if m else None, ocr=ocr)
-    text = (f"Captcha benchmark: {args.per_style} per style, {len(STYLES)} styles. Captcha model: "
-            f"{'yes' if m else 'not installed'}. Windows OCR: {'yes' if ocr else 'not available'}.\n\n" + table(scores))
+    scores = await evaluate(samples(args.per_style, styles=styles), model=m.read if m else None, ocr=ocr)
+    text = (f"Captcha benchmark: {args.per_style} per style, styles {', '.join(styles)}. Captcha model: "
+            f"{'yes' if m else 'not installed'}. Windows OCR: {'yes' if ocr else 'not available'}.\n\n"
+            + table(scores, styles))
     print(text)
     if args.out:
         from pathlib import Path
@@ -325,5 +386,5 @@ if __name__ == "__main__":
     sys.exit(asyncio.run(_main()))
 
 
-__all__ = ["DIGITS", "MIXED", "RETRY_SEEDS", "STYLES", "UPPER_DIGITS", "Sample", "Score", "evaluate", "matches",
-           "sample", "samples", "table"]
+__all__ = ["ALL_STYLES", "DIGITS", "EXTRA_STYLES", "KL_LETTERS", "MIXED", "RETRY_SEEDS", "STYLES", "UPPER_DIGITS",
+           "Sample", "Score", "evaluate", "matches", "sample", "samples", "table"]

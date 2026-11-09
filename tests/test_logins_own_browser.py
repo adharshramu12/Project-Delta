@@ -490,7 +490,7 @@ def test_field_kinds_from_names():
 # --- the extra browser tools exist in both browsers -----------------------------------------------------------------
 
 EXTRA = ("browser_select", "browser_check", "browser_upload", "browser_hover", "browser_wait", "browser_tabs",
-         "browser_dialog")
+         "browser_dialog", "browser_menu")
 
 
 class FakeCtl:
@@ -523,7 +523,7 @@ def test_extra_tools_exist_for_the_users_own_browser_with_the_same_args():
     assert set(tools) == set(EXTRA) and set(EXTRA) <= set(BROWSER_NAMES)
     same = {"browser_select": private.SelectArgs, "browser_check": private.CheckArgs,
             "browser_upload": private.UploadArgs, "browser_wait": private.WaitArgs, "browser_tabs": private.TabsArgs,
-            "browser_dialog": private.DialogArgs}
+            "browser_dialog": private.DialogArgs, "browser_menu": private.MenuArgs}
     for name, args in same.items():
         assert tools[name].Args is args
     assert tools["browser_upload"].risk == Risk.EXTERNAL and tools["browser_upload"].paths(

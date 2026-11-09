@@ -326,8 +326,10 @@ class CaptchaSolver:
 
     def __post_init__(self) -> None:
         self._attempts: dict[str, tuple[int, float]] = {}  # host -> (auto attempts, first attempt time)
+        self._last_shot: dict[str, bytes] = {}  # host -> the picture of the last answer typed (kept in memory only)
         self.vision_calls = 0  # pictures sent to a model (each one small); OCR reads are free
         self.last_via = ""  # how the last answer was read: model | model+ocr | ocr | vision | ""
+        self._shape_case = False  # the model's last reading measured letter case from the picture
 
     def _used(self, host: str) -> int:
         count, since = self._attempts.get(host, (0, 0.0))
@@ -366,10 +368,14 @@ class CaptchaSolver:
         and agreement only; the readings themselves only with DELTA_CAPTCHA_DEBUG=1."""
         readings: list[str] = []
         doubt = False
+        if name == "model":
+            self._shape_case = False
         with contextlib.suppress(Exception):  # an engine missing or failing: the next one still reads
             got = await (reader(shot, hints) if name == "model" else reader(shot))
             readings = [str(r or "") for r in got] if isinstance(got, list) else [str(got or "")]
             doubt = bool(getattr(got, "case_doubt", False))
+            if name == "model":
+                self._shape_case = bool(getattr(got, "case_from_shape", False))
         answer = pick(readings, hints) if readings else None
         fitted = [fit(r, hints) for r in readings]
         _log_read(name, readings, fitted, answer, doubt)
@@ -400,9 +406,10 @@ class CaptchaSolver:
             ocr_answer, _fits, _sure = await self._engine("ocr", self.ocr, shot, hints)
         if model_answer and ocr_answer and (ocr_answer == model_answer or ocr_answer in model_fits
                                             or ocr_answer.lower() == model_answer.lower()):
-            # the same characters: Windows OCR, a general text reader, also settles their case
+            # the same characters: Windows OCR, a general text reader, also settles their case, unless the model
+            # measured each letter's case from the picture itself (a bright coloured captcha)
             self.last_via = "model+ocr"
-            return ocr_answer
+            return model_answer if self._shape_case and ocr_answer.lower() == model_answer.lower() else ocr_answer
         if ocr_answer and self.model is None:  # Windows OCR is the only engine here: its vote is the answer
             self.last_via = "ocr"
             return ocr_answer
@@ -456,6 +463,12 @@ class CaptchaSolver:
                            "takes pictures is set up)"), shot
         hints = await self._hints(page)
         tried = False
+        if self._last_shot.get(host) == shot and self._used(host):
+            # the site turned the last answer down but still shows the same picture (it checks the captcha without
+            # reloading): the same picture would be read the same way, so ask for a new one first
+            with contextlib.suppress(Exception):
+                if await page.refresh("") and (new := await page.screenshot("")):
+                    shot = new
         while self._used(host) < MAX_AUTO_ATTEMPTS:
             attempt = self._count(host)
             if tried:  # this picture could not be read: ask the site for a new one first
@@ -466,6 +479,7 @@ class CaptchaSolver:
             answer = await self._read(shot, hints)
             if answer:
                 await page.fill("", answer)
+                self._last_shot[host] = shot
             self._audit(host, "auto", bool(answer), attempt=attempt, via=self.last_via or "none")
             if answer:
                 how = "by the AI model (one small picture)" if self.last_via == "vision" else "on this PC"
@@ -558,7 +572,8 @@ def router_vision(router: Any) -> Vision:
         want = f" It has {hint}." if hint else ""
         resp = await router.complete([{"role": "user", "content": [
             {"type": "text", "text": "This image is a text captcha." + want + " Reply with ONLY its characters, "
-                                     "exactly as shown, no spaces, no other words."},
+                                     "exactly as shown (capital and small letters matter), no spaces, no other "
+                                     "words."},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"}}]}],
             task="vision")
         return str(resp.content)
@@ -668,14 +683,28 @@ def make_solver(settings: Any, router: Any, approvals: ApprovalBroker, audit: Au
                 proof: Any = None) -> CaptchaSolver:
     """The captcha solver wired to Delta's settings: the captcha model, then Windows OCR, then (only when they are not
     sure and pictures are on) one small vision call."""
+    seer = seeing_router(settings, router)
     return CaptchaSolver(
         model=captcha_model_reader(),
         allowed_sites=live_allowlist(settings.data_dir, settings.captcha.allowed_sites),
-        vision=router_vision(router) if pictures_allowed(settings) else None,
+        vision=router_vision(seer) if pictures_allowed(settings) else None,
         ask_human=approval_handoff(approvals), audit=audit,
         save_image=proof.save_image if proof else (lambda b64, label: None),
         ocr=local_ocr(getattr(getattr(settings, "perception", None), "ocr", "auto")),
-        vision_ready=router_sees(router))
+        vision_ready=router_sees(seer))
+
+
+def seeing_router(settings: Any, router: Any) -> Any:
+    """The model that reads a captcha picture: the pictures-only model when the user named one in Settings > Pictures
+    (attachments.vision + vision_model, e.g. a Groq or NVIDIA vision model), else Delta's normal vision route (any
+    configured provider that takes images, the Codex CLI included). The default model and routing are not changed."""
+    with contextlib.suppress(Exception):
+        from delta.bootstrap import pictures_router
+        from delta.config import Settings
+
+        if isinstance(settings, Settings) and (only := pictures_router(settings)) is not None:
+            return only
+    return router
 
 
 def captcha_tool(mgr: BrowserManager, settings: Any, router: Any, approvals: ApprovalBroker, audit: AuditLog,

@@ -527,6 +527,9 @@ def build(settings: Settings) -> Container:
         closers.append(("browser", browser.close))
     for t in browsers.tools():
         registry.register(t)
+    from delta.tools.academic import AcademicContextTool
+
+    registry.register(AcademicContextTool(settings))  # the student's academic year and semester, for portals
     from delta.logins.setup import attach as attach_logins
 
     # Saved site logins (delta.logins): sign_in / list_logins, typed only on the exact saved site

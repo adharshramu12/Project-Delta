@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -112,19 +113,7 @@ class BrowserSelect(_TargetTool[SelectArgs]):
             before = await page_state(page)
             tag = str(await box.evaluate("e => e.tagName.toLowerCase()"))
             if tag == "select":
-                try:
-                    await box.select_option(label=args.option, timeout=5000)
-                except Exception:
-                    try:
-                        await box.select_option(value=args.option, timeout=3000)
-                    except Exception as e:
-                        options = await box.evaluate("e => Array.from(e.options).map(o => o.text.trim()).slice(0, 15)")
-                        raise ActionFailed(f"'{name}' has no option '{args.option}'. Its options: "
-                                           f"{', '.join(map(str, options))}") from e
-                chosen = str(await box.evaluate("e => (e.options[e.selectedIndex] || {text: ''}).text.trim()"))
-                value = str(await box.evaluate("e => e.value"))
-                if args.option.strip().lower() not in (chosen.lower(), value.lower()):
-                    raise ActionFailed(f"tried to choose '{args.option}' in '{name}' but it shows '{chosen}'")
+                chosen = await _choose_in_select(page, box, name, args.option)
             else:  # a custom list box: open it, then click the option
                 from delta.tools.browser import robust_click
 
@@ -139,6 +128,181 @@ class BrowserSelect(_TargetTool[SelectArgs]):
             return await _observed(page, self.mgr, f"chose '{chosen}' in '{name}'", before=before)
 
         return await self._guarded(go)
+
+
+OPTIONS_JS = "e => Array.from(e.options).map(o => [o.text.replace(/\\s+/g, ' ').trim(), o.value, o.disabled])"
+OPTIONS_WAIT_S = 4.0  # a dropdown filled in by the page after another choice (semesters after a year) gets this long
+
+
+async def _choose_in_select(page: Any, box: Any, name: str, option: str) -> str:
+    """Choose `option` in a <select> by its text (delta.tools.option_match: '2026-27' finds '2026 - 2027', 'odd
+    semester' finds 'Odd Sem'), never by its position: portals list years unsorted. Waits a moment for a dropdown the
+    page fills in after another choice. Checks the choice took and says which options there are when none fits."""
+    from delta.tools.option_match import match_option, norm
+
+    deadline = time.monotonic() + OPTIONS_WAIT_S
+    while True:
+        raw = await box.evaluate(OPTIONS_JS)
+        options = [(str(t), str(v), bool(d)) for t, v, d in raw] if isinstance(raw, list) else []
+        texts = [t for t, _v, _d in options]
+        idx, hits = match_option(texts, option)
+        if idx is None and not hits:  # the text did not match: maybe the value does ("2026" -> value "2026")
+            vals = [i for i, (_t, v, _d) in enumerate(options) if v and norm(v) == norm(option)]
+            idx, hits = (vals[0], vals) if len(vals) == 1 else (None, vals)
+        if idx is not None or hits or len(options) > 1 or time.monotonic() > deadline:
+            break
+        await asyncio.sleep(0.4)  # an empty or one-option list: the page may still be filling it in
+    if idx is None:
+        shown = [texts[i] for i in hits] if hits else [t for t in texts if t][:20]
+        what = "fits more than one option" if hits else "matches no option"
+        raise ActionFailed(f"'{option}' {what} in '{name}'. Its options: {', '.join(shown)}. Choose by the exact "
+                           "text of one of them.")
+    text, _value, disabled = options[idx]
+    if disabled:
+        raise ActionFailed(f"'{text}' in '{name}' cannot be chosen right now (the page has it switched off)")
+    await box.select_option(index=idx, timeout=5000)  # the option the TEXT matched; index is only its handle
+    chosen = str(await box.evaluate("e => (e.options[e.selectedIndex] || {text: ''}).text.trim()"))
+    if norm(chosen) != norm(text):
+        raise ActionFailed(f"tried to choose '{text}' in '{name}' but it shows '{chosen}'")
+    return chosen
+
+
+# ---------------------------------------------------------------- menus and sidebars
+
+MENU_SPLIT = re.compile(r"\s*(?:>|›|»|→)\s*")
+# Finds the menu entry for one step of a path, anywhere in the page (a long sidebar, a closed group): its own visible
+# text equal to what is asked (then starting with it, then containing it), the most clickable element of the best
+# ones (a link or button over the <li> around it), inside a nav / sidebar / menu when there is one. Marks it with
+# data-delta-menu and says whether it is shown. A hidden one also gets its closed group's header marked
+# (data-delta-menu-open): the visible element just before the hidden list that holds it.
+MENU_FIND_JS = """([want, mark]) => {
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const w = norm(want);
+  const shown = el => { const st = getComputedStyle(el);
+    return st.display !== 'none' && st.visibility !== 'hidden' && el.getClientRects().length > 0; };
+  const sel = 'a,button,summary,[role=menuitem],[role=treeitem],[role=tab],[role=button],li,span,div,label,p';
+  let best = null, bestScore = 0, bestLen = 1e9;
+  for (const el of document.querySelectorAll(sel)) {
+    const t = norm(el.innerText !== undefined && shown(el) ? el.innerText : el.textContent);
+    if (!t || t.length > 80) continue;
+    let s = t === w ? 3 : (t.startsWith(w) ? 2 : (t.includes(w) ? 1 : 0));
+    if (!s) continue;
+    const tag = el.tagName.toLowerCase();
+    if (['a', 'button', 'summary'].includes(tag) || el.getAttribute('role') || el.onclick) s += 0.5;
+    if (el.closest('nav,aside,[role=navigation],[role=menu],[role=tree],[class*=sidebar i],[class*=side-bar i],'
+                   + '[class*=menu i],[id*=sidebar i],[id*=menu i]')) s += 0.3;
+    if (!shown(el)) s -= 0.2;
+    if (s > bestScore || (s === bestScore && t.length < bestLen)) { best = el; bestScore = s; bestLen = t.length; }
+  }
+  if (!best) return {found: false};
+  best.setAttribute('data-delta-menu', mark);
+  let header = null;
+  if (!shown(best)) {
+    for (let p = best.parentElement; p && p !== document.body; p = p.parentElement) {
+      if (shown(p)) break;
+      let prev = p.previousElementSibling;
+      while (prev && !shown(prev)) prev = prev.previousElementSibling;
+      if (prev && !shown(p)) { header = prev.querySelector('a,button,summary,[role=button]') || prev; }
+    }
+    if (header) header.setAttribute('data-delta-menu-open', mark);
+  }
+  return {found: true, shown: shown(best), header: !!header, text: (best.innerText || best.textContent || '').trim()};
+}"""
+MENU_NAMES_JS = """() => {
+  const out = [];
+  const sel = 'nav a, aside a, [class*=sidebar i] a, [class*=menu i] a, [role=menuitem]';
+  for (const el of document.querySelectorAll(sel)) {
+    const t = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (t && t.length <= 40 && !out.includes(t)) out.push(t);
+    if (out.length >= 25) break;
+  }
+  return out;
+}"""
+MENU_SHOW_S = 3.0  # a group that opens with an animation gets this long to show its entries
+
+
+def menu_risk(path: str) -> Risk:
+    """The riskiest click of the path ('Settings > Delete account' asks like clicking Delete)."""
+    risks = [click_risk(p) for p in MENU_SPLIT.split(path.strip()) if p] or [Risk.ACT]
+    order = list(Risk)
+    return max(risks, key=order.index)
+
+
+class MenuArgs(BaseModel):
+    path: str = Field(description="The menu entries to click in order, by their visible text, separated by '>', "
+                                  "e.g. 'Time Tables > My Timetable'. One entry is fine too; a closed group around "
+                                  "it is opened first.")
+
+
+class BrowserMenu(_BrowserTool[MenuArgs]):
+    name = "browser_menu"
+    description = ("Go through a site's menu or sidebar by the entries' visible text, e.g. path='Time Tables > My "
+                   "Timetable': finds each entry however far down a long sidebar it is (scrolling the sidebar, not "
+                   "just the page), opens closed groups, clicks it, and checks the page changed. Use it for portal "
+                   "menus instead of guessing scroll amounts.")
+    risk = Risk.ACT
+    Args = MenuArgs
+
+    def risk_for(self, args: MenuArgs) -> Risk:
+        return menu_risk(args.path)
+
+    def summary(self, args: MenuArgs) -> str:
+        return f"open '{args.path}' in the menu on {self.mgr.current_url or 'the page'}"
+
+    async def run(self, args: MenuArgs) -> ToolResult:
+        async def go() -> ToolResult:
+            steps = [p for p in MENU_SPLIT.split(args.path.strip()) if p]
+            if not steps:
+                return ToolResult(False, "give the menu entries, e.g. 'Time Tables > My Timetable'")
+            page = await self.mgr.page()
+            before = await page_state(page)
+            done: list[str] = []
+            for n, step in enumerate(steps):
+                target = await self._entry(page, step, f"m{n}")
+                if isinstance(target, str):
+                    names = await page.evaluate(MENU_NAMES_JS)
+                    seen = f" Menu entries on the page: {', '.join(map(str, names))}." if names else ""
+                    where = f" after {' > '.join(done)}" if done else ""
+                    return ToolResult(False, f"{target}{where}.{seen} Use browser_read to see the page.")
+                from delta.tools.browser import robust_click
+
+                await robust_click(page, target, what=f"'{step}'")
+                await settle(page, idle_ms=900)
+                done.append(step)
+            return await _observed(page, self.mgr, f"opened {' > '.join(done)} (now at {page.url})", before=before)
+
+        return await self._guarded(go)
+
+    async def _entry(self, page: Any, step: str, mark: str) -> Any:
+        """The live element for one step, scrolled into view inside its own sidebar and shown; or why not (str)."""
+        deadline = time.monotonic() + MENU_SHOW_S
+        opened = False
+        while True:
+            found = await page.evaluate(MENU_FIND_JS, [step, mark])
+            if not isinstance(found, dict) or not found.get("found"):
+                if time.monotonic() > deadline:
+                    return f"no menu entry called '{step}'"
+                await asyncio.sleep(0.4)
+                continue
+            loc = page.locator(f'[data-delta-menu="{mark}"]').first
+            if found.get("shown"):
+                with contextlib.suppress(Exception):
+                    # scrolls every scrollable box around it (a long sidebar), not only the page
+                    await loc.scroll_into_view_if_needed(timeout=3000)
+                return loc
+            if found.get("header") and not opened:  # a closed group: open it once, then look again
+                header = page.locator(f'[data-delta-menu-open="{mark}"]').first
+                from delta.tools.browser import robust_click
+
+                with contextlib.suppress(Exception):
+                    await robust_click(page, header, what=f"the group around '{step}'")
+                    opened = True
+                await settle(page, idle_ms=600)
+                continue
+            if time.monotonic() > deadline:
+                return (f"'{step}' is in the page but stays hidden (a closed menu); give its group first, "
+                        f"e.g. 'Group > {step}'")
+            await asyncio.sleep(0.4)
 
 
 # ---------------------------------------------------------------- checkbox / radio / switch
@@ -396,4 +560,4 @@ class BrowserDialog(_BrowserTool[DialogArgs]):
 
 def more_browser_tools(mgr: BrowserManager) -> list[Tool[Any]]:
     return [BrowserSelect(mgr), BrowserCheck(mgr), BrowserUpload(mgr), BrowserHover(mgr), BrowserWait(mgr),
-            BrowserTabs(mgr), BrowserDialog(mgr)]
+            BrowserTabs(mgr), BrowserDialog(mgr), BrowserMenu(mgr)]

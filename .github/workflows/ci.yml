@@ -28,11 +28,19 @@ jobs:
         run: |
           uv run --locked python -m delta.evals.captcha_bench --per-style 40 --out captcha-bench.md --min-combined 0.75 --min-three 0.9
           Get-Content captcha-bench.md | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+      # The fat, rounded, hot-pink both-case captcha some college ERPs draw (style kl_bubbly, measured on its own;
+      # first try and within three pictures, no vision call). Floors well under the measured rates, to catch a
+      # regression, not to chase a number.
+      - name: captcha benchmark (bright coloured, KL style)
+        shell: pwsh
+        run: |
+          uv run --locked python -m delta.evals.captcha_bench --styles kl_bubbly --per-style 100 --out captcha-bench-kl.md --min-combined 0.3 --min-three 0.65
+          Get-Content captcha-bench-kl.md | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: captcha-bench
-          path: captcha-bench.md
+          path: captcha-bench*.md
           if-no-files-found: ignore
 
   # What a user gets from a plain `uv sync`: core must work, optional tests skip cleanly.

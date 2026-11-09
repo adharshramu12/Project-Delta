@@ -96,6 +96,9 @@
       ...(a.providers || []).map(p => [p, "Only " + p + ", for pictures"])].map(([v, t]) => h("option", {value: v, text: t, selected: v === (a.vision || "auto")})));
     $("s_vmodel").value = a.vision_model || "";
     $("s_vnote").textContent = a.can_see_pictures ? "An AI that can see pictures is ready." : "No AI here can see pictures, so Delta uses the text in them and says so.";
+    const st = s.student || {};
+    $("s_joinyear").value = st.join_year || ""; $("s_yos").value = st.year_of_study || "";
+    $("s_academic").textContent = st.now ? "Now: " + st.now + "." : "";
     $("s_mem").checked = s.memory.enabled; $("s_extract").checked = s.memory.auto_extract; $("s_skills").checked = s.memory.learn_skills;
     $("s_addons").replaceChildren(...(s.addons.available.length ? s.addons.available.map(a => h("label", {class: "check"},
       h("input", {type: "checkbox", dataset: {addon: a}, checked: s.addons.enabled.includes(a)}), " ", a))
@@ -153,6 +156,7 @@
       save_dir: $("s_savedir").value || "auto",
       addons_enabled: [...document.querySelectorAll("[data-addon]")].filter(i => i.checked).map(i => i.dataset.addon),
       attachments: {vision: $("s_vision").value || "auto", vision_model: $("s_vmodel").value.trim()},
+      student: {join_year: parseInt($("s_joinyear").value, 10) || 0, year_of_study: parseInt($("s_yos").value, 10) || 0},
     };
     $("s_save").disabled = true;
     const r = await api("/api/settings", {method: "PUT", body: JSON.stringify(body)}).catch(e => ({detail: D.plain(e)}));

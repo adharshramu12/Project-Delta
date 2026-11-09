@@ -1,0 +1,41 @@
+<!doctype html><html><head><meta charset='utf-8'><title>My Timetable</title><style>body{margin:0;font-family:sans-serif;display:flex}
+.sidebar{width:220px;height:100vh;overflow-y:auto;background:#223;color:#fff;flex:none}
+.sidebar a{color:#fff;display:block;padding:8px 12px;text-decoration:none}.sub a{padding-left:28px}
+main{padding:16px;flex:1}.err{color:#b00}table{border-collapse:collapse}td,th{border:1px solid #999;padding:4px}</style></head><body>
+<aside class='sidebar' id='sidebar'><ul class='menu'>
+<li><a href='portal_home.html'>Dashboard</a></li>
+<li><a href='#' onclick='return false'>Section 01</a></li><li><a href='#' onclick='return false'>Section 02</a></li><li><a href='#' onclick='return false'>Section 03</a></li><li><a href='#' onclick='return false'>Section 04</a></li><li><a href='#' onclick='return false'>Section 05</a></li><li><a href='#' onclick='return false'>Section 06</a></li><li><a href='#' onclick='return false'>Section 07</a></li><li><a href='#' onclick='return false'>Section 08</a></li><li><a href='#' onclick='return false'>Section 09</a></li><li><a href='#' onclick='return false'>Section 10</a></li><li><a href='#' onclick='return false'>Section 11</a></li><li><a href='#' onclick='return false'>Section 12</a></li><li><a href='#' onclick='return false'>Section 13</a></li><li><a href='#' onclick='return false'>Section 14</a></li><li><a href='#' onclick='return false'>Section 15</a></li><li><a href='#' onclick='return false'>Section 16</a></li><li><a href='#' onclick='return false'>Section 17</a></li><li><a href='#' onclick='return false'>Section 18</a></li><li><a href='#' onclick='return false'>Section 19</a></li><li><a href='#' onclick='return false'>Section 20</a></li><li><a href='#' onclick='return false'>Section 21</a></li><li><a href='#' onclick='return false'>Section 22</a></li><li><a href='#' onclick='return false'>Section 23</a></li><li><a href='#' onclick='return false'>Section 24</a></li><li><a href='#' onclick='return false'>Section 25</a></li><li><a href='#' onclick='return false'>Section 26</a></li><li><a href='#' onclick='return false'>Section 27</a></li><li><a href='#' onclick='return false'>Section 28</a></li><li><a href='#' onclick='return false'>Section 29</a></li><li><a href='#' onclick='return false'>Section 30</a></li><li><a href='#' onclick='return false'>Section 31</a></li><li><a href='#' onclick='return false'>Section 32</a></li><li><a href='#' onclick='return false'>Section 33</a></li><li><a href='#' onclick='return false'>Section 34</a></li><li><a href='#' onclick='return false'>Section 35</a></li><li><a href='#' onclick='return false'>Section 36</a></li><li><a href='#' onclick='return false'>Section 37</a></li><li><a href='#' onclick='return false'>Section 38</a></li><li><a href='#' onclick='return false'>Section 39</a></li><li><a href='#' onclick='return false'>Section 40</a></li>
+<li class='group'><a href='#' class='group-head' onclick="const u=this.nextElementSibling;u.style.display=u.style.display==='block'?'none':'block';return false">Time Tables</a>
+<ul class='sub' style='display:none'><li><a href='portal_timetable.html'>My Timetable</a></li><li><a href='#' onclick='return false'>Exam Timetable</a></li></ul></li>
+<li><a href='#' onclick='return false'>Attendance Register</a></li>
+<li><a href='portal_home.html'>Log out</a></li>
+</ul></aside><main><h1>My Timetable</h1>
+<form id='ttform' onsubmit='return search()'>
+<label for='ay'>Academic Year *</label> <select id='ay' name='ay' onchange='fillSem()'><option value=''>--Select--</option><option value='2027-2028'>2027-2028</option><option value='2008-2009'>2008-2009</option><option value='2019-2020'>2019-2020</option><option value='2026-2027'>2026 - 2027</option><option value='2025-2026'>2025-2026</option><option value='2012-2013'>2012-2013</option></select>
+<label for='sem'>Semester *</label> <select id='sem' name='sem'><option value=''>--Select--</option></select>
+<button type='submit' id='search'>Search</button></form>
+<div id='msg' class='err' role='alert'></div><div id='out'></div></main>
+<script>
+function fillSem() {
+  const s = document.getElementById('sem');
+  s.innerHTML = "<option value=''>--Select--</option>";
+  if (!document.getElementById('ay').value) return;
+  setTimeout(() => {  // the semesters come a moment later, like a portal asking its server
+    for (const [v, t] of [['2', 'Even Sem'], ['1', 'Odd Sem'], ['3', 'Summer Term']]) {
+      const o = document.createElement('option'); o.value = v; o.text = t; s.appendChild(o);
+    }
+  }, 400);
+}
+function search() {
+  const ay = document.getElementById('ay'), sem = document.getElementById('sem');
+  const msg = document.getElementById('msg'), out = document.getElementById('out');
+  out.innerHTML = '';
+  if (!ay.value) { msg.textContent = 'Academic Year cannot be blank.'; return false; }
+  if (!sem.value) { msg.textContent = 'Semester cannot be blank.'; return false; }
+  msg.textContent = '';
+  const label = ay.options[ay.selectedIndex].text + ' ' + sem.options[sem.selectedIndex].text;
+  out.innerHTML = "<h2 id='result'>Timetable for " + label + "</h2><table><tr><th>Day</th><th>Course</th></tr>"
+    + "<tr><td>Monday</td><td>CS401 Made-up Course</td></tr></table>";
+  return false;
+}
+</script></body></html>

@@ -314,8 +314,7 @@ class SignInEngine:
                 return SignInResult("failed", f"could not submit the form ({type(e).__name__})", page.url)
             await self._settle(page)
             result = await self._after(page, login, saved, before)
-            if not (had_captcha and result.outcome in ("wrong_password", "failed")
-                    and captcha_rejected(await _text(page))):
+            if not (had_captcha and await self._captcha_wrong(page, result)):
                 return result
             # the site rejected the captcha, not the password: the form comes back, fill it again (bounded)
             frame, user, pw, refusal = await self._form_soon(page, saved)
@@ -323,6 +322,19 @@ class SignInEngine:
                 return SignInResult("refused", "REFUSED: " + refusal, page.url) if refusal else result
         return SignInResult("needs_user", f"NEEDS HUMAN: {saved.host} kept rejecting the captcha; Delta stopped "
                                           f"after {CAPTCHA_SUBMITS} tries.", page.url)
+
+    async def _captcha_wrong(self, page: Any, result: SignInResult) -> bool:
+        """After submitting with a captcha Delta read: the site turned the CAPTCHA down. Either it says so (and says
+        nothing about the password or user name, see captcha_rejected), or it just showed the sign-in form again
+        with no error at all, which captcha-only sites do (a new picture, the boxes emptied). A wrong password is
+        never taken for a wrong captcha: that page names the password or says the details are wrong, and is never
+        retried (no account lockouts)."""
+        if result.outcome not in ("wrong_password", "failed"):
+            return False
+        text = await _text(page)
+        if captcha_rejected(text):
+            return True
+        return result.outcome == "failed" and not ERROR_WORDS.search(text) and await _simple_captcha(page)
 
     async def answer_captcha(self, page: Any, login: Login, answer: str) -> SignInResult:
         """Finish a sign-in that waited for the user to read the captcha: the same checks as sign_in (the tab and

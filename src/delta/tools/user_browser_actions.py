@@ -25,7 +25,18 @@ from pathlib import Path
 from typing import Any
 
 from delta.tools.base import Risk, Tool, ToolResult
-from delta.tools.browser_actions import CheckArgs, DialogArgs, SelectArgs, TabsArgs, UploadArgs, WaitArgs, _Target
+from delta.tools.browser_actions import (
+    MENU_SPLIT,
+    CheckArgs,
+    DialogArgs,
+    MenuArgs,
+    SelectArgs,
+    TabsArgs,
+    UploadArgs,
+    WaitArgs,
+    _Target,
+    menu_risk,
+)
 from delta.tools.desktop import _pg, click_risk
 from delta.tools.user_browser import CLICKABLE, UserBrowser, _UBTool
 
@@ -80,6 +91,7 @@ class MoreActions:
     # --- select ------------------------------------------------------------------------------------------
     def select(self, label: str, option: str) -> str:
         box = self._el(label, {"ComboBox", "List"})
+        option = self._option_text(box, option)  # by its text, whatever the list's order (delta.tools.option_match)
         want = option.strip().lower()
         try:
             box.select(option)
@@ -103,6 +115,34 @@ class MoreActions:
         if want not in shown.lower():
             raise ActionError(f"tried to choose '{option}' in '{label}' but it shows '{shown or 'nothing'}'")
         return f"chose '{shown}' in '{label}'"
+
+    @staticmethod
+    def _option_text(box: Any, option: str) -> str:
+        """The dropdown's own text for the option asked ('2026-27' -> '2026 - 2027'), when its items can be listed and
+        exactly one matches; otherwise what was asked, as before."""
+        from delta.tools.option_match import match_option
+
+        texts: list[str] = []
+        with contextlib.suppress(Exception):
+            texts = [str(t) for t in box.texts() if str(t).strip()]
+        if not texts:
+            return option
+        idx, _hits = match_option(texts, option)
+        return texts[idx] if idx is not None else option
+
+    def menu(self, steps: list[str]) -> str:
+        """Click each menu entry in turn by its text: UI Automation finds an entry however far down a long sidebar it
+        is; a closed group's entries appear once the group is clicked."""
+        done: list[str] = []
+        for step in steps:
+            try:
+                self.ub.click(step)
+            except LookupError:
+                where = f" after {' > '.join(done)}" if done else ""
+                raise ActionError(f"no menu entry called '{step}'{where}; use browser_read to see the page") from None
+            time.sleep(0.5)  # a group opening with an animation
+            done.append(step)
+        return f"opened {' > '.join(done)}"
 
     # --- check -------------------------------------------------------------------------------------------
     def check(self, label: str, checked: bool) -> str:
@@ -312,6 +352,26 @@ class UBSelect(_MoreTool):
         return await self._label_call(self.more.select, args, args.option)
 
 
+class UBMenu(_MoreTool):
+    name = "browser_menu"
+    description = ("Go through a site's menu or sidebar in the user's browser by the entries' visible text, e.g. "
+                   "path='Time Tables > My Timetable' (each entry clicked in turn, however far down the sidebar).")
+    risk = Risk.ACT
+    Args = MenuArgs
+
+    def risk_for(self, args: MenuArgs) -> Risk:
+        return menu_risk(args.path)
+
+    def summary(self, args: MenuArgs) -> str:
+        return f"open '{args.path}' in the menu in your browser on {self.ub.current_url or 'the page'}"
+
+    async def run(self, args: MenuArgs) -> ToolResult:
+        steps = [p for p in MENU_SPLIT.split(args.path.strip()) if p]
+        if not steps:
+            return ToolResult(False, "give the menu entries, e.g. 'Time Tables > My Timetable'")
+        return await self._do(self.more.menu, steps)
+
+
 class UBCheck(_MoreTool):
     name = "browser_check"
     description = "Tick or untick a checkbox, or pick a radio button, in the user's browser by its label."
@@ -411,7 +471,7 @@ class UBDialog(_MoreTool):
 def user_browser_more_tools(ub: UserBrowser) -> list[Tool[Any]]:
     more = MoreActions(ub)
     return [UBSelect(ub, more), UBCheck(ub, more), UBUpload(ub, more), UBHover(ub, more), UBWait(ub, more),
-            UBTabs(ub, more), UBDialog(ub, more)]
+            UBTabs(ub, more), UBDialog(ub, more), UBMenu(ub, more)]
 
 
 __all__ = ["MoreActions", "user_browser_more_tools"]

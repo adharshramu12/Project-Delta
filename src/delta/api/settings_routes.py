@@ -63,6 +63,11 @@ class AttachmentsIn(BaseModel):
     retention_days: float | None = Field(default=None, ge=0, le=3650)
 
 
+class StudentIn(BaseModel):
+    join_year: int | None = Field(default=None, ge=0, le=2100)
+    year_of_study: int | None = Field(default=None, ge=0, le=8)
+
+
 class SigninIn(BaseModel):
     url: str = Field(default="", max_length=2000)
 
@@ -78,6 +83,7 @@ class SettingsIn(BaseModel):
     save_dir: str | None = Field(default=None, max_length=300)
     addons_enabled: list[str] | None = None
     attachments: AttachmentsIn | None = None
+    student: StudentIn | None = None
 
 
 def _clean(items: list[str]) -> list[str]:
@@ -113,7 +119,13 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
             "always_protected": [*ALWAYS_DENIED, str(s.data_dir)],
             "attachments": {**s.attachments.model_dump(), "providers": sorted(s.llm.providers),
                             "can_see_pictures": _can_see()},
+            "student": {**s.student.model_dump(), "now": _academic_now()},
         }
+
+    def _academic_now() -> str:
+        from delta.tools.academic import from_settings
+
+        return from_settings(c.settings).line()
 
     def _can_see() -> bool:
         svc = getattr(c.orchestrator, "attachments", None)
@@ -197,6 +209,21 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
                 att["vision_model"] = att["vision_model"].strip()
             if att != {k: getattr(s.attachments, k) for k in att}:
                 changes["attachments"] = att
+        if body.student:
+            st = body.student.model_dump(exclude_none=True)
+            if st.get("join_year") and not 1990 <= st["join_year"] <= 2100:
+                raise HTTPException(400, "Year you joined: a year such as 2023, or leave it empty.")
+            if "year_of_study" in st:
+                from datetime import date
+
+                from delta.tools.academic import year_label, year_start
+
+                # remembered with the academic year it was said in, so it moves on by itself next year
+                st["year_of_study_in"] = year_label(year_start(date.today())) if st["year_of_study"] else ""
+                if st["year_of_study"] == s.student.year_of_study and s.student.year_of_study_in:
+                    st["year_of_study_in"] = s.student.year_of_study_in  # unchanged: keep when it was said
+            if st != {k: getattr(s.student, k) for k in st}:
+                changes["student"] = st
         if not changes:
             return {"ok": True, "restart_needed": False, **({"browser_note": browser_note} if browser_note else {})}
 
@@ -223,6 +250,8 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
             cursor = getattr(getattr(c.registry.get("click_at"), "ctl", None), "cursor", None)
             if cursor is not None:  # the "Delta is in control" ring and border (the stop hotkeys stay on)
                 cursor.set_enabled(s.browser.orange_cursor)
+        for k, v in changes.get("student", {}).items():
+            setattr(s.student, k, v)
         if "attachments" in changes:
             for k, v in changes["attachments"].items():
                 setattr(s.attachments, k, v)
