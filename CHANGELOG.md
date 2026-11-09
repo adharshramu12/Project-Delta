@@ -18,6 +18,12 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ### Changed
 - **A task never runs for ever.** After `agent.task_timeout_s` (20 minutes by default, 0 turns it off) it is stopped
   and you are told the last thing it was doing.
+- **Delta stays small on disk.** Its two browser profiles (the dashboard window and the private browser) start with a
+  capped disk cache (32 MB and 100 MB), and a minute after start Delta removes their regenerable leftovers: Edge and
+  Chrome components, provenance data, metrics, crash dumps, shader and web caches, and the window's built-in
+  extensions. Only profiles no browser is using are touched, and sign-ins, cookies, settings and Local Storage are
+  never removed. On a real PC the window's profile had grown to 737 MB for a dashboard page. The installer also
+  deletes its 130 MB download cache when it is done.
 
 ## 0.3.0 - 2026-11-09
 

@@ -454,6 +454,7 @@ try {
     # `irm ... | iex` runs in the user's own PowerShell window: uv's settings for this one install are put back
     # afterwards, so a later `uv sync` of the user's own project in that window does not go into Delta's folder.
     $uvSaved = @{}
+    $ownCache = -not "$env:UV_CACHE_DIR".Trim()
     foreach ($k in "UV_PROJECT_ENVIRONMENT", "UV_CACHE_DIR", "UV_NATIVE_TLS") { $uvSaved[$k] = [Environment]::GetEnvironmentVariable($k) }
     try {
         $env:UV_PROJECT_ENVIRONMENT = Join-Path $InstallDir ".venv"
@@ -470,6 +471,9 @@ try {
         Pop-Location
         foreach ($k in $uvSaved.Keys) { [Environment]::SetEnvironmentVariable($k, $uvSaved[$k]) }
     }
+    # The download cache is only needed while installing: about 130 MB freed. An update installs only the packages
+    # that changed into the existing .venv, so it downloads little without it. A cache the user chose stays.
+    if ($ownCache) { Remove-Item -LiteralPath (Join-Path $InstallDir ".uv-cache") -Recurse -Force -ErrorAction SilentlyContinue }
     Done "packages installed"
 
     # 4. Check ---------------------------------------------------------------------------------------

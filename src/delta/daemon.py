@@ -32,7 +32,8 @@ EDGE_PATHS = [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
 # ~900 MB alive after the window is closed), no extensions, sync or update checks, few renderers.
 LEAN_WINDOW_FLAGS = ["--no-first-run", "--no-default-browser-check", "--disable-background-mode",
                      "--disable-gpu", "--disable-extensions", "--disable-sync", "--disable-component-update",
-                     "--renderer-process-limit=2", "--disable-features=Translate,msEdgeStartupBoost"]
+                     "--renderer-process-limit=2", "--disable-features=Translate,msEdgeStartupBoost",
+                     "--disk-cache-size=33554432", "--disable-breakpad"]  # 32 MB cache cap, no crash dumps
 REAP_EVERY_S = 60  # how often the service looks for a closed window's leftover processes
 ALREADY_RUNNING = "Delta is already running"  # what `delta run` prints when another copy won the race
 
@@ -419,6 +420,18 @@ def _quiet_connection_resets() -> None:
     loop.set_exception_handler(handler)
 
 
+_BACKGROUND: set[asyncio.Task[None]] = set()  # one-off jobs kept referenced until they finish
+
+
+async def _tidy_storage(data_dir: Path) -> None:
+    """Trim the browser profiles' leftovers (delta.system.storage) in the background, never slowing the start."""
+    from delta.system.storage import tidy
+
+    with contextlib.suppress(Exception):
+        await asyncio.sleep(20)  # after the window has opened and the first request is in
+        await asyncio.to_thread(tidy, data_dir)
+
+
 async def run(open_ui: bool = False) -> int:
     import uvicorn
 
@@ -459,6 +472,9 @@ async def run(open_ui: bool = False) -> int:
                                            log_level="warning", access_log=False, lifespan="off",
                                            log_config=None))
     serve = asyncio.create_task(server.serve(), name="api")
+    tidying = asyncio.create_task(_tidy_storage(settings.data_dir), name="storage-tidy")
+    _BACKGROUND.add(tidying)
+    tidying.add_done_callback(_BACKGROUND.discard)
     channels = await _start_channels(c)
     if "telegram" in c.live_channels and c.engine is not None:  # tasks a crash cut off: ask, never auto-resume
         from delta.channels.telegram_tasks import announce_interrupted
