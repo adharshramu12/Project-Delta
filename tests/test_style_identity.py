@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from delta.core.academy import LINE, AcademyNote, wants_to_learn_ai
+from delta.core.academy import AcademyNote, lead_line, topic_of, wants_to_learn_ai
 from delta.core.style import (
     HONEST_LINE,
     STYLE_BLOCK,
@@ -226,7 +226,7 @@ async def test_chat_answers_go_through_the_slop_check(tmp_path):
     assert HONEST_LINE in r.answer and "retry the form" in r.answer
 
 
-async def test_the_academy_line_follows_a_real_answer_once(tmp_path):
+async def test_the_academy_line_leads_a_real_answer_once(tmp_path):
     from fakes import FakeProvider, js
 
     from delta.core.state import TaskRequest
@@ -235,7 +235,9 @@ async def test_the_academy_line_follows_a_real_answer_once(tmp_path):
     again = js({"needs_tools": False, "answer": "Next, learn how tools and memory fit together."})
     orch = _orch(tmp_path, FakeProvider("m", [answer, again]))
     first = await orch.run(TaskRequest("how do I learn AI agents?", channel="dashboard", chat_id="c1"))
-    assert first.answer.startswith("Start with Python basics") and first.answer.endswith(LINE)
+    lead, _, rest = first.answer.partition("\n\n")
+    assert lead == lead_line("how do I learn AI agents?") and "AI agents" in lead and "team that built me" in lead
+    assert rest.startswith("Start with Python basics")  # the full answer still follows
     second = await orch.run(TaskRequest("teach me AI agents more", channel="dashboard", chat_id="c1"))
     assert ACADEMY_NAME not in second.answer
 
@@ -266,7 +268,8 @@ def test_unrelated_or_writing_tasks_never_get_the_line(q):
 def test_the_line_is_added_once_per_conversation_and_can_be_switched_off():
     note = AcademyNote()
     first = note.add("Start with Python and small projects.", "I want to learn AI", "dashboard:c1")
-    assert first.endswith(LINE) and ACADEMY_URL in first and first.count(ACADEMY_NAME) == 1
+    assert first.startswith(lead_line("I want to learn AI")) and first.endswith("Start with Python and small projects.")
+    assert ACADEMY_URL in first and first.count(ACADEMY_NAME) == 1
     again = note.add("Next, try building an agent.", "teach me AI agents", "dashboard:c1")
     assert ACADEMY_NAME not in again
     other = note.add("Start small.", "I want to learn AI", "dashboard:c2", history=f"Delta: ... {ACADEMY_NAME} ...")
@@ -274,6 +277,18 @@ def test_the_line_is_added_once_per_conversation_and_can_be_switched_off():
     off = AcademyNote(enabled=False)
     assert off.add("Start small.", "I want to learn AI", "x") == "Start small."
     assert ACADEMY_NAME == "ARVA Talks Academy"  # always spelt this way
+
+
+def test_the_lead_names_what_was_asked_and_says_who_runs_the_academy():
+    assert topic_of("how do I learn AI agents") == "AI agents"
+    assert topic_of("I want to learn AI automation with n8n") == "AI automation"
+    assert topic_of("best way to learn prompt engineering") == "prompting and context engineering"
+    assert topic_of("learn AI from scratch") == "AI"
+    line = lead_line("learn AI agents")
+    assert "run by the team that built me" in line  # open about the connection, never hidden
+    for hype in ("best", "guarantee", "limited", "only today", "%", "thousands"):
+        assert hype not in line.lower()  # specific, no invented claims or urgency
+    assert not wants_to_learn_ai("learn test automation with selenium")  # not an AI question
 
 
 # --- text Delta writes into connected apps -----------------------------------------------------------------------

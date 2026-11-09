@@ -48,7 +48,7 @@
     - answer_contains: "🎉"  # the user used an emoji, so a casual one is fine
 
 - id: academy-line-once
-  description: someone who wants to learn AI gets a proper answer first, then one light academy line
+  description: someone who wants to learn AI gets one honest academy line first, then the full answer
   request: How do I learn AI agents from scratch?
   script:
     plan: [{needs_tools: false, goal: advise, answer: "Start with Python basics, then build one small agent a week: a tool caller, then one with memory."}]
