@@ -33,7 +33,7 @@ WINDOW_JUNK = CACHES + COMPONENTS
 # The private browser keeps the user's site sign-ins: only caches and components, never Default/Extensions
 # (an extension the user added there stays).
 BROWSER_JUNK = CACHES + tuple(c for c in COMPONENTS if c != "Default/Extensions")
-BROWSER_TRIM_OVER_MB = 150  # the private browser is trimmed only when it has grown past this
+BROWSER_TRIM_OVER_MB = 150.0  # the private browser is trimmed only when it has grown past this
 
 
 @dataclass
@@ -83,7 +83,7 @@ def trim(profile: Path, junk: tuple[str, ...]) -> float:
 def tidy(data_dir: Path) -> list[Tidied]:
     """Trim Delta's own browser profiles. Safe to call any time: a profile in use is skipped."""
     out: list[Tidied] = []
-    plans = [(data_dir / "app-window", WINDOW_JUNK, 0.0)]
+    plans: list[tuple[Path, tuple[str, ...], float]] = [(data_dir / "app-window", WINDOW_JUNK, 0.0)]
     plans += [(p, BROWSER_JUNK, BROWSER_TRIM_OVER_MB) for p in sorted(data_dir.glob("*-profile")) if p.is_dir()]
     for profile, junk, over in plans:
         if not profile.is_dir():
