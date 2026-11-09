@@ -7,6 +7,10 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Volume, mute, brightness and dark mode answer instantly, with no AI call.** "increase the volume",
+  "volume 30", "make it louder", "mute", "brightness up", "turn on dark mode" and common typos ("colume",
+  "brigtness") go straight to the control. From a first-day user: these went through the AI, were slow and
+  sometimes ended in "sorry".
 - **Live progress, so Delta never looks stuck.** While a task runs, the chat shows what Delta is doing now in plain
   words ("Working in Notion: search", "Opening youtube.com") with a timer and a soft shimmer, and "Still waiting"
   when one step takes long. On Telegram, a task that takes more than a few seconds gets one status message that is
