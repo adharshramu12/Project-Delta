@@ -201,7 +201,7 @@ class Container:
                 capped = self._cap_autonomy(autonomy_cap)
                 try:
                     arm_stop(self)
-                    return await Container._run_within_limit(self, req)  # type: ignore[arg-type]
+                    return await Container._run_within_limit(self, req)
                 finally:
                     self.running = None
                     if (signal := getattr(self, "signal", None)) is not None:

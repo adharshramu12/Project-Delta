@@ -764,7 +764,7 @@ class TelegramChannel(PCMenu):
         req = TaskRequest(text, channel=self.name, user=uid, chat_id=chat_id, history=history,
                           attachments=[a.id for a in files])
         # One live status message (after a few seconds) that says what Delta is doing now, so it never looks stuck.
-        bus = getattr(self.c, "events", None)
+        bus: Any = getattr(self.c, "events", None)
         live = LiveStatus(req.id, lambda t: message.reply_text(t), lambda m, t: m.edit_text(t)) if bus else None
         if live is not None:
             bus.subscribe(live.on_event)
