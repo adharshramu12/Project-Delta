@@ -4,47 +4,15 @@ All notable changes to Delta are listed here. The format follows [Keep a Changel
 and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The version lives in one place,
 `pyproject.toml`; `delta --version` reads it from there.
 
-## Unreleased
-
-### Changed
-
-- **The AI you pick is the AI that answers.** With a main AI chosen in Apps > AI models (Groq, NVIDIA, Cline, Codex,
-  ...), every planning, doing and checking step uses it. Before, any failure of it (for example an expired Groq key)
-  quietly handed the task to the next AI on the route, usually Codex, which then used your Codex plan. A new switch,
-  "If my main AI fails, let my other AIs answer" (`llm.fallback`, off by default), brings that back when you want it.
-  "Automatic" still follows the route as before, and a job your main AI cannot do at all (reading a screenshot with
-  a text-only AI) still uses the route.
-- **Refused keys are named.** A Groq, NVIDIA or DeepSeek key that is expired, revoked or mistyped now says "Groq key
-  expired or invalid. Add a new one in Settings > Keys" instead of a bare HTTP 401, and is not retried on every
-  message until you save a new one. NVIDIA "no credits left" (HTTP 402) is reported as used-up credits.
-- **Each answer and task says which AI and model ran it**: "via groq (openai/gpt-oss-120b)" under the answer and in
-  the Tasks list, counted from this task's own calls.
-- **Cline on Windows**: `cline.cmd` from npm is run through node directly, so Cline gets the whole prompt (cmd.exe cut
-  it at the first line break and would read `&` or `|` in a web page as commands); the command-line limit now counts
-  Windows quoting, so an over-long prompt is shortened and retried instead of Cline failing to start.
-- **Fewer tokens per step**: tools are described to Codex, Claude Code, Cline and local models as short signatures
-  instead of JSON schemas, API providers get lean schemas, and rules about tools a task is not given are left out.
-  `evals/token_bench.py`: 44,766 to 39,729 estimated input tokens over its six tasks (-11%), and 177,019 to 145,443
-  characters of CLI prompt (-18%).
-
-### Fixed
-
-- **Pictures are recognised**: a picture from the dashboard or Telegram is looked at unless only its text is wanted;
-  transparent PNG/WebP/GIF no longer reach the model as black squares; pictures are kept under a size every vision
-  API takes; a model that says it cannot see images is not taken as an answer (the next one is asked); the user
-  hears why a picture was not seen, with models that can see it. iPhone HEIC photos open with `pillow-heif`.
-- **Writing an email in Gmail**: the compose window is filled and read back field by field (recipients picked by
-  exact address, Subject, body as plain text) before anything is saved or sent; new `save_email_draft` keeps it in
-  Gmail Drafts without sending; typing into Gmail's compose fields with browser_fill points to the email tools.
-- **Telegram keeps working on slow networks**: timeouts fit slow links (were 5 s), replies are retried, "typing..."
-  never stops a request, a long task says "Still working on it", the poll loop is watched and restarted, and the
-  dashboard shows a plain line only for a sustained outage (two copies on one bot and a bad token have their own).
-
-## 0.3.0 - not tagged yet
+## 0.3.0 - 2026-11-09
 
 The first version under AGPL-3.0-or-later, and the first that tells you when a newer one is out. In short:
 
-- **First-run tour and update notifications** (this release's last pull request): a short, skippable tour of the
+- **The AI you pick answers** (#50): Groq, NVIDIA, Cline and the others are used when you choose them,
+  refused keys are named, Cline works on Windows, and prompts are smaller.
+- **Pictures, Gmail and Telegram** (#49, #52): pictures are really seen, Gmail is filled field by field
+  with Save as draft, Telegram survives slow networks; steadier Stop overlay and CI.
+- **First-run tour and update notifications** (#48): a short, skippable tour of the
   dashboard after setup, and a banner when a newer Delta is out, with Update now that installs exactly the checked
   release and opens Delta again. Details below and in [docs/UPDATES.md](docs/UPDATES.md).
 - **Fresh-user fixes** (#46, #47): a CI journey that installs, uses, updates and uninstalls Delta as a new Windows
@@ -68,6 +36,45 @@ The first version under AGPL-3.0-or-later, and the first that tells you when a n
   (#29), attachments in chat and Telegram (#30), the delta command and Update Delta in the Start menu (#31), site
   logins, safer browser actions and portal watchers (#32), saved logins in your own browser (#34), the installer
   under the Restricted policy (#35), and dependency updates (#26, #27).
+
+
+### Changed (#50)
+
+- **The AI you pick is the AI that answers.** With a main AI chosen in Apps > AI models (Groq, NVIDIA, Cline, Codex,
+  ...), every planning, doing and checking step uses it. Before, any failure of it (for example an expired Groq key)
+  quietly handed the task to the next AI on the route, usually Codex, which then used your Codex plan. A new switch,
+  "If my main AI fails, let my other AIs answer" (`llm.fallback`, off by default), brings that back when you want it.
+  "Automatic" still follows the route as before, and a job your main AI cannot do at all (reading a screenshot with
+  a text-only AI) still uses the route.
+- **Refused keys are named.** A Groq, NVIDIA or DeepSeek key that is expired, revoked or mistyped now says "Groq key
+  expired or invalid. Add a new one in Settings > Keys" instead of a bare HTTP 401, and is not retried on every
+  message until you save a new one. NVIDIA "no credits left" (HTTP 402) is reported as used-up credits.
+- **Each answer and task says which AI and model ran it**: "via groq (openai/gpt-oss-120b)" under the answer and in
+  the Tasks list, counted from this task's own calls.
+- **Cline on Windows**: `cline.cmd` from npm is run through node directly, so Cline gets the whole prompt (cmd.exe cut
+  it at the first line break and would read `&` or `|` in a web page as commands); the command-line limit now counts
+  Windows quoting, so an over-long prompt is shortened and retried instead of Cline failing to start.
+- **Fewer tokens per step**: tools are described to Codex, Claude Code, Cline and local models as short signatures
+  instead of JSON schemas, API providers get lean schemas, and rules about tools a task is not given are left out.
+  `evals/token_bench.py`: 44,766 to 39,729 estimated input tokens over its six tasks (-11%), and 177,019 to 145,443
+  characters of CLI prompt (-18%).
+
+### Fixed (#49, #52)
+
+- **Pictures are recognised**: a picture from the dashboard or Telegram is looked at unless only its text is wanted;
+  transparent PNG/WebP/GIF no longer reach the model as black squares; pictures are kept under a size every vision
+  API takes; a model that says it cannot see images is not taken as an answer (the next one is asked); the user
+  hears why a picture was not seen, with models that can see it. iPhone HEIC photos open with `pillow-heif`.
+- **Writing an email in Gmail**: the compose window is filled and read back field by field (recipients picked by
+  exact address, Subject, body as plain text) before anything is saved or sent; new `save_email_draft` keeps it in
+  Gmail Drafts without sending; typing into Gmail's compose fields with browser_fill points to the email tools.
+- **Telegram keeps working on slow networks**: timeouts fit slow links (were 5 s), replies are retried, "typing..."
+  never stops a request, a long task says "Still working on it", the poll loop is watched and restarted, and the
+  dashboard shows a plain line only for a sustained outage (two copies on one bot and a bad token have their own).
+- **CI and Delta's on-screen control**: the control overlay gets a new window-class name each time (the old
+  name could be reused and Windows refused it, error 1410, so the Stop overlay could fail to start); a browser
+  closing its connection mid-request is no longer logged as a crash; the dashboard's first load in the e2e
+  tests gets 45 s on a cold runner.
 
 ### Added
 - **First-run tour.** After setup, a short tour (nine steps, about a minute) points at the real dashboard: what Delta
