@@ -986,6 +986,11 @@ class BrowserFill(_BrowserTool[RefFillArgs]):
         return f"{what} {field} on {self.mgr.current_url or 'the page'}"
 
     async def run(self, args: FillArgs) -> ToolResult:
+        from delta.tools.gmail_compose import gmail_fill_hint
+
+        if hint := gmail_fill_hint(self.mgr.current_url, _fill_label(self.mgr, args) or args.field):
+            return ToolResult(False, hint)
+
         async def go() -> ToolResult:
             page = await self.mgr.page()
             ref = getattr(args, "ref", None)

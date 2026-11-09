@@ -6,6 +6,8 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Changed
+
 - **The AI you pick is the AI that answers.** With a main AI chosen in Apps > AI models (Groq, NVIDIA, Cline, Codex,
   ...), every planning, doing and checking step uses it. Before, any failure of it (for example an expired Groq key)
   quietly handed the task to the next AI on the route, usually Codex, which then used your Codex plan. A new switch,
@@ -24,6 +26,19 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   instead of JSON schemas, API providers get lean schemas, and rules about tools a task is not given are left out.
   `evals/token_bench.py`: 44,766 to 39,729 estimated input tokens over its six tasks (-11%), and 177,019 to 145,443
   characters of CLI prompt (-18%).
+
+### Fixed
+
+- **Pictures are recognised**: a picture from the dashboard or Telegram is looked at unless only its text is wanted;
+  transparent PNG/WebP/GIF no longer reach the model as black squares; pictures are kept under a size every vision
+  API takes; a model that says it cannot see images is not taken as an answer (the next one is asked); the user
+  hears why a picture was not seen, with models that can see it. iPhone HEIC photos open with `pillow-heif`.
+- **Writing an email in Gmail**: the compose window is filled and read back field by field (recipients picked by
+  exact address, Subject, body as plain text) before anything is saved or sent; new `save_email_draft` keeps it in
+  Gmail Drafts without sending; typing into Gmail's compose fields with browser_fill points to the email tools.
+- **Telegram keeps working on slow networks**: timeouts fit slow links (were 5 s), replies are retried, "typing..."
+  never stops a request, a long task says "Still working on it", the poll loop is watched and restarted, and the
+  dashboard shows a plain line only for a sustained outage (two copies on one bot and a bad token have their own).
 
 ## 0.3.0 - not tagged yet
 
