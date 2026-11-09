@@ -17,3 +17,11 @@ def test_trading_order_tools_are_off_by_default():
 def test_no_app_asks_for_ads_scopes():
     for app in load_catalog(REPO / "config" / "mcp_catalog.yaml").apps.values():
         assert not any(str(s).startswith("ads:") for s in (getattr(app.auth, "scopes", None) or []))
+
+
+def test_every_app_has_a_known_category():
+    from delta.connectors.catalog import CATEGORIES
+
+    apps = load_catalog(REPO / "config" / "mcp_catalog.yaml").apps
+    assert all(a.category in CATEGORIES and a.category != "Custom" for a in apps.values())
+    assert {a["category"] for a in [a.summary() for a in apps.values()]} <= set(CATEGORIES)

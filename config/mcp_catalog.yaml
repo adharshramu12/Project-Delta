@@ -15,6 +15,7 @@
 #                     client: user = you create an OAuth app at the vendor and paste its client id (and secret)
 #            token  = paste a personal access token or API key (stored encrypted with Windows DPAPI)
 #            none   = no sign-in
+# category: the section the Apps page shows the app in (one of delta.connectors.catalog.CATEGORIES).
 # tools: Delta's own default risk for tool names it verified in the vendor's docs (read = never asks;
 #        destructive = off until you switch it on). Every other tool is "external": it asks first, except
 #        in Autopilot. You can change any tool on the Apps page. A server's own readOnlyHint is used only
@@ -26,6 +27,7 @@ checked: "2026-11-09"
 apps:
   notion:
     name: Notion
+    category: Productivity
     publisher: Notion
     status: official
     description: Search, read and write pages and databases in your Notion workspace.
@@ -39,6 +41,7 @@ apps:
 
   github:
     name: GitHub
+    category: Developer tools
     publisher: GitHub
     status: official
     description: Repositories, issues, pull requests, Actions and code search on GitHub.
@@ -57,6 +60,7 @@ apps:
 
   atlassian:
     name: Atlassian (Jira, Confluence)
+    category: Productivity
     publisher: Atlassian
     status: official
     description: Jira work items, Confluence pages, Jira Service Management and more.
@@ -69,6 +73,7 @@ apps:
 
   linear:
     name: Linear
+    category: Productivity
     publisher: Linear
     status: official
     description: Find, create and update Linear issues, projects and comments.
@@ -81,6 +86,7 @@ apps:
 
   slack:
     name: Slack
+    category: Email and chat
     publisher: Slack
     status: official
     description: Search and read messages, channels and users, and post messages in Slack.
@@ -101,6 +107,7 @@ apps:
 
   sentry:
     name: Sentry
+    category: Developer tools
     publisher: Sentry
     status: official
     description: Search errors and issues, look at performance and triage problems in Sentry.
@@ -112,6 +119,7 @@ apps:
 
   stripe:
     name: Stripe
+    category: Finance and markets
     publisher: Stripe
     status: official
     description: Customers, payments, invoices, products and Stripe's docs.
@@ -126,6 +134,7 @@ apps:
 
   gmail:
     name: Gmail
+    category: Email and chat
     publisher: Google
     status: official-preview
     description: Search and read your mail, list labels and create drafts (Gmail never sends from these tools).
@@ -151,6 +160,7 @@ apps:
 
   google_drive:
     name: Google Drive
+    category: Files
     publisher: Google
     status: official-preview
     description: Search, read and create files in Google Drive.
@@ -173,6 +183,7 @@ apps:
 
   google_calendar:
     name: Google Calendar
+    category: Email and chat
     publisher: Google
     status: official-preview
     description: Find free time, list and create events in Google Calendar.
@@ -197,6 +208,7 @@ apps:
 
   asana:
     name: Asana
+    category: Productivity
     publisher: Asana
     status: official
     description: Tasks, projects and goals in Asana.
@@ -213,6 +225,7 @@ apps:
 
   vercel:
     name: Vercel
+    category: Developer tools
     publisher: Vercel
     status: official
     description: Projects, deployments and logs on Vercel.
@@ -224,6 +237,7 @@ apps:
 
   supabase:
     name: Supabase
+    category: Databases
     publisher: Supabase
     status: official
     description: Supabase projects, databases, edge functions and logs.
@@ -236,6 +250,7 @@ apps:
 
   huggingface:
     name: Hugging Face
+    category: Docs and AI
     publisher: Hugging Face
     status: official
     description: Search models, datasets, Spaces and papers on the Hugging Face Hub.
@@ -248,6 +263,7 @@ apps:
 
   producthunt:
     name: Product Hunt
+    category: Marketing and launches
     publisher: Product Hunt
     status: official
     description: Research products, launches and leaderboards, and draft, check and submit your own launch.
@@ -268,6 +284,7 @@ apps:
 
   todoist:
     name: Todoist
+    category: Productivity
     publisher: Doist
     status: official
     description: Read, add and complete your Todoist tasks and projects.
@@ -280,6 +297,7 @@ apps:
 
   clickup:
     name: ClickUp
+    category: Productivity
     publisher: ClickUp
     status: official
     description: Tasks, lists, docs and comments in your ClickUp workspace.
@@ -292,6 +310,7 @@ apps:
 
   monday:
     name: monday.com
+    category: Productivity
     publisher: monday.com
     status: official
     description: Boards, items and updates in your monday.com account.
@@ -304,6 +323,7 @@ apps:
 
   airtable:
     name: Airtable
+    category: Productivity
     publisher: Airtable
     status: official
     description: Read and update records in your Airtable bases.
@@ -316,6 +336,7 @@ apps:
 
   canva:
     name: Canva
+    category: Design
     publisher: Canva
     status: official
     description: Find, create and edit Canva designs, and export them.
@@ -328,6 +349,7 @@ apps:
 
   mermaid_chart:
     name: Mermaid Chart
+    category: Design
     publisher: Mermaid Chart
     status: official
     description: Draw and check diagrams (flowcharts, sequence, timelines) with Mermaid.
@@ -340,6 +362,7 @@ apps:
 
   webflow:
     name: Webflow
+    category: Websites
     publisher: Webflow
     status: official
     description: Pages, CMS collections and items on your Webflow sites.
@@ -352,6 +375,7 @@ apps:
 
   wix:
     name: Wix
+    category: Websites
     publisher: Wix
     status: official
     description: Manage your Wix site, its content and its business apps.
@@ -364,6 +388,7 @@ apps:
 
   netlify:
     name: Netlify
+    category: Developer tools
     publisher: Netlify
     status: official
     description: Create, deploy and manage your Netlify sites.
@@ -376,6 +401,7 @@ apps:
 
   neon:
     name: Neon
+    category: Databases
     publisher: Neon
     status: official
     description: Neon Postgres projects, branches and SQL.
@@ -388,6 +414,7 @@ apps:
 
   prisma:
     name: Prisma Postgres
+    category: Databases
     publisher: Prisma
     status: official
     description: Create and manage Prisma Postgres databases and run migrations.
@@ -400,6 +427,7 @@ apps:
 
   semgrep:
     name: Semgrep
+    category: Developer tools
     publisher: Semgrep
     status: official
     description: Scan code for security issues and bugs with Semgrep.
@@ -412,6 +440,7 @@ apps:
 
   jam:
     name: Jam
+    category: Developer tools
     publisher: Jam
     status: official
     description: Read Jam bug reports (screen recordings, console logs and network requests).
@@ -424,6 +453,7 @@ apps:
 
   apify:
     name: Apify
+    category: Automation and web data
     publisher: Apify
     status: official
     description: Run Apify Actors to scrape websites and collect data.
@@ -436,6 +466,7 @@ apps:
 
   globalping:
     name: Globalping
+    category: Developer tools
     publisher: jsDelivr
     status: official
     description: Ping, traceroute, DNS and HTTP checks from probes around the world.
@@ -448,6 +479,7 @@ apps:
 
   zapier:
     name: Zapier
+    category: Automation and web data
     publisher: Zapier
     status: official
     description: Use the apps and actions you enabled in Zapier (thousands of apps through one connection).
@@ -460,6 +492,7 @@ apps:
 
   intercom:
     name: Intercom
+    category: Email and chat
     publisher: Intercom
     status: official
     description: Search and read Intercom conversations and contacts.
@@ -472,6 +505,7 @@ apps:
 
   deepwiki:
     name: DeepWiki
+    category: Docs and AI
     publisher: Cognition
     status: official
     description: Ask questions about any public GitHub repository and read its generated docs.
@@ -484,6 +518,7 @@ apps:
 
   context7:
     name: Context7
+    category: Docs and AI
     publisher: Upstash
     status: official
     description: Up-to-date documentation and code examples for programming libraries.
@@ -496,6 +531,7 @@ apps:
 
   microsoft_learn:
     name: Microsoft Learn
+    category: Docs and AI
     publisher: Microsoft
     status: official
     description: Search official Microsoft documentation (Windows, Azure, .NET, Microsoft 365).
@@ -508,6 +544,7 @@ apps:
 
   aws_knowledge:
     name: AWS Knowledge
+    category: Docs and AI
     publisher: Amazon Web Services
     status: official
     description: Search AWS documentation, guidance and regional availability.
@@ -520,6 +557,7 @@ apps:
 
   excalidraw:
     name: Excalidraw
+    category: Design
     publisher: Excalidraw
     status: official
     description: Draw hand-drawn style diagrams and sketches.
@@ -532,6 +570,7 @@ apps:
 
   kite:
     name: Zerodha Kite
+    category: Finance and markets
     publisher: Zerodha
     status: official
     description: Your Zerodha holdings, positions, orders, margins, quotes and charts data.
@@ -552,6 +591,7 @@ apps:
 
   alpaca_data:
     name: Alpaca market data
+    category: Finance and markets
     publisher: Alpaca
     status: official
     description: US stock, options and crypto prices, bars, quotes and market calendar (data only).
@@ -570,6 +610,7 @@ apps:
 
   coingecko:
     name: CoinGecko
+    category: Finance and markets
     publisher: CoinGecko
     status: official
     description: Crypto prices, market data, coins and exchanges (data only).
@@ -584,6 +625,7 @@ apps:
 
   figma_desktop:
     name: Figma (desktop app)
+    category: Design
     publisher: Figma
     status: official
     description: Design context from the Figma desktop app running on this PC.
@@ -598,6 +640,7 @@ apps:
 
   filesystem:
     name: Files (MCP reference server)
+    category: Files
     publisher: Model Context Protocol
     status: reference
     description: Read and write files in one folder you choose, through the MCP reference file server.
@@ -614,6 +657,7 @@ apps:
 
   fetch:
     name: Web fetch (MCP reference server)
+    category: Automation and web data
     publisher: Model Context Protocol
     status: reference
     description: Fetch a web page and turn it into text, through the MCP reference fetch server.
