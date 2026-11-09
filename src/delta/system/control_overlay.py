@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import itertools
 import queue
 import sys
 import threading
@@ -49,6 +50,9 @@ HEARTBEAT_TIMEOUT_S = 5.0
 TICK_MS = 16                   # pointer follow rate (about 60 per second)
 TOPMOST_EVERY_TICKS = 60       # re-assert "always on top" about once a second
 CLASS_NAME = "DeltaControlOverlay"
+# One window class per overlay, never reused: id(self) was, once an old overlay was freed, and Windows then
+# refused the name (RegisterClassExW error 1410, class already exists) in the e2e run of 9 Nov.
+_CLASS_IDS = itertools.count(1)
 
 # Win32 constants
 WS_POPUP = 0x80000000
@@ -291,7 +295,7 @@ class Win32Overlay:
         wc.cbSize = ctypes.sizeof(w.WNDCLASSEXW)
         wc.lpfnWndProc = self._wndproc
         wc.hInstance = w.kernel32.GetModuleHandleW(None)
-        wc.lpszClassName = f"{CLASS_NAME}{id(self)}"
+        wc.lpszClassName = f"{CLASS_NAME}{next(_CLASS_IDS)}"
         if not w.user32.RegisterClassExW(ctypes.byref(wc)):
             raise OSError(f"RegisterClassExW failed ({ctypes.get_last_error()})")
         self._class = wc.lpszClassName
