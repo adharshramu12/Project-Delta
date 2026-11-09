@@ -112,9 +112,14 @@ async def shot(page: Any, name: str) -> None:
         await page.screenshot(path=str(Path(folder) / name))
 
 
+# The first load on a fresh CI runner includes Chrome's cold start and the first fetches; 15 s was not always
+# enough there (main, 9 Nov: same code passed an hour earlier). Later waits keep 15 s.
+FIRST_LOAD_MS = 45_000
+
+
 async def open_dashboard(page: Any, d: SimpleNamespace) -> None:
     await page.goto(f"{d.base}/#token={d.token}")
-    await page.wait_for_selector(".nav-item[data-go='chat'][aria-current='page']", timeout=15000)
+    await page.wait_for_selector(".nav-item[data-go='chat'][aria-current='page']", timeout=FIRST_LOAD_MS)
 
 
 async def tour_flow(page: Any, d: SimpleNamespace) -> None:

@@ -410,7 +410,9 @@ def _quiet_connection_resets() -> None:
     loop = asyncio.get_running_loop()
 
     def handler(lp: asyncio.AbstractEventLoop, ctx: dict) -> None:
-        if isinstance(ctx.get("exception"), ConnectionResetError):
+        from delta.system.crashguard import client_went_away
+
+        if client_went_away(ctx.get("exception")):
             return
         lp.default_exception_handler(ctx)
 
