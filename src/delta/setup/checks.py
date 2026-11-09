@@ -17,6 +17,7 @@ import psutil
 KEY_INFO = {
     "groq_api_key": "Groq (free, fast cloud models)",
     "nvidia_api_key": "NVIDIA NIM (free cloud models)",
+    "nebius_api_key": "Nebius Token Factory (your Nebius credits)",
     "tavily_api_key": "Tavily web search",
     "serpapi_api_key": "SerpAPI web search",
     "telegram_bot_token": "Telegram bot",
@@ -78,6 +79,9 @@ async def validate_key(name: str, value: str) -> tuple[bool, str]:
                 r = await c.get("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {value}"})
             elif name == "nvidia_api_key":
                 r = await c.get("https://integrate.api.nvidia.com/v1/models",
+                                headers={"Authorization": f"Bearer {value}"})
+            elif name == "nebius_api_key":
+                r = await c.get("https://api.tokenfactory.nebius.com/v1/models",
                                 headers={"Authorization": f"Bearer {value}"})
             elif name == "telegram_bot_token":
                 # The token becomes part of the address: only the exact shape BotFather gives (digits, a colon,

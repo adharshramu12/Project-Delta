@@ -186,6 +186,7 @@ back to the next when one is down, rate limited or out of credits.
 | Cline | Your Cline account, through cline-cli | Free models available |
 | NVIDIA NIM | API key | Free tier |
 | Groq | API key | Free tier |
+| Nebius Token Factory | API key | Your Nebius credits (pay as you go) |
 | DeepSeek | API key | Low cost |
 | LM Studio, Ollama | Local, on your PC | Free, works offline |
 

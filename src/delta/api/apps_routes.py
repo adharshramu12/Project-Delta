@@ -26,7 +26,8 @@ from delta.system.secrets import get_secret, set_secret
 LABELS = {"claude_code": "Claude Code (your Claude plan)", "codex": "Codex (your ChatGPT plan)",
           "cline": "Cline (your Cline account)", "deepseek": "DeepSeek (your API key)",
           "lmstudio": "LM Studio (on this PC)", "ollama": "Ollama (on this PC)",
-          "groq": "Groq (free cloud key)", "nim": "NVIDIA NIM (free cloud key)"}
+          "groq": "Groq (free cloud key)", "nim": "NVIDIA NIM (free cloud key)",
+          "nebius": "Nebius Token Factory (your Nebius credits)"}
 
 
 class PreferredIn(BaseModel):

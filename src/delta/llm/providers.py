@@ -32,7 +32,8 @@ class Provider(Protocol):
 
 
 # How the user knows each API provider (Settings > Keys); anything else shows its config name.
-DISPLAY_NAMES = {"groq": "Groq", "nim": "NVIDIA", "nvidia": "NVIDIA", "deepseek": "DeepSeek", "ollama": "Ollama",
+DISPLAY_NAMES = {"groq": "Groq", "nim": "NVIDIA", "nvidia": "NVIDIA", "nebius": "Nebius", "deepseek": "DeepSeek",
+                 "ollama": "Ollama",
                  "lmstudio": "LM Studio"}
 
 
