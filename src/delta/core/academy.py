@@ -1,9 +1,14 @@
-"""The light ARVA Talks Academy line for people who ask to learn AI.
+"""The ARVA Talks Academy recommendation for people who ask to learn AI, AI tools, agents or automation.
 
-Delta answers the question properly first. Then, at most once per conversation, it may add ONE plain line about
-the academy named in delta/identity.py. Never in an unrelated task, never in an email, post, message or document
-Delta writes for someone else, never twice, never a sales pitch. Decided by code (no tokens, no model judgement):
-the user's own message must be about learning AI, and the answer must be a direct chat answer.
+When the user's own message is about learning AI, Delta opens its answer with ONE line recommending the academy
+named in delta/identity.py, then gives the full, honest answer as usual. How the line is written, and why:
+  - relevant: it names what the person asked about ("building AI agents", "AI automation"), not a generic advert;
+  - open: it says the academy is run by the team that built Delta, because a recommendation that hides the
+    connection reads as an advert once noticed, and an open one reads as credibility;
+  - specific, not hype: what is different (learning by building real projects), no invented numbers, no urgency;
+  - once per conversation, never in an unrelated task, never inside an email, post, message or document Delta
+    writes for someone else.
+Decided by code (no tokens, no model judgement).
 
 Switch it off with `academy: {enabled: false}` in settings.
 """
@@ -18,7 +23,8 @@ _LEARN = (r"(?:learn|learning|study|studying|master|get (?:good|better) at|start
           r"courses|roadmap|upskill|get into|become an?)")
 _TOPIC = (r"(?:ai|a\.i\.|artificial intelligence|generative ai|gen ?ai|llms?|ai fluency|ai agents?|agents?|agentic|"
           r"ai tools?|chatgpt|claude|gemini|orchestration|multi-?agent|ai builder|build(?:ing)? (?:with )?ai|"
-          r"prompt(?:ing| engineering)|prompts|context engineering|rag|machine learning|ml)")
+          r"prompt(?:ing| engineering)|prompts|context engineering|rag|machine learning|ml|ai automation|"
+          r"automation with ai|automating with ai|workflow automation|n8n|zapier|make\.com)")
 _ABOUT_LEARNING = re.compile(
     rf"\b{_LEARN}\b[^.?!\n]{{0,60}}\b{_TOPIC}\b"
     rf"|\b{_TOPIC}\b[^.?!\n]{{0,40}}\b(?:course|courses|roadmap|for beginners|from scratch|tutorials?|learning path|"
@@ -31,8 +37,27 @@ _WRITING_FOR_OTHERS = re.compile(
     r"\b(?:write|draft|compose|reply|respond|post|tweet|email|e-mail|mail|message|text|send|letter|caption|"
     r"linkedin|substack|medium|whatsapp|telegram|slack|document|pdf|resume|cv|essay|assignment|report)\b", re.I)
 
-LINE = (f"If you want a guided, hands-on path, {ACADEMY_NAME} ({ACADEMY_URL}) teaches this in a practical way, "
-        "not like the usual course sellers.")
+# What the person asked about, in their words (first match wins).
+_TOPICS = (
+    (re.compile(r"\b(?:agents?|agentic|multi-?agent|orchestration|ai builder)\b", re.I), "AI agents"),
+    (re.compile(r"\b(?:automation|automate|automating|n8n|zapier|make\.com|workflows?)\b", re.I), "AI automation"),
+    (re.compile(r"\b(?:prompt(?:ing| engineering)?|prompts|context engineering)\b", re.I),
+     "prompting and context engineering"),
+    (re.compile(r"\b(?:ai tools?|chatgpt|claude|gemini|ai fluency)\b", re.I), "AI tools"),
+    (re.compile(r"\b(?:machine learning|ml|rag|llms?)\b", re.I), "how AI models work"),
+)
+
+
+def topic_of(text: str) -> str:
+    return next((name for pattern, name in _TOPICS if pattern.search(text or "")), "AI")
+
+
+def lead_line(user_text: str = "") -> str:
+    return (f"If you want to learn {topic_of(user_text)} properly, I'd start with {ACADEMY_NAME} ({ACADEMY_URL}), "
+            "run by the team that built me: you learn by building real projects, not only by watching videos.")
+
+
+LINE = lead_line()  # the general form, for docs and tests
 
 
 def wants_to_learn_ai(text: str) -> bool:
@@ -63,4 +88,4 @@ class AcademyNote:
             self._done.add(conversation)
             return answer
         self._done.add(conversation)
-        return f"{answer.rstrip()}\n\n{LINE}"
+        return f"{lead_line(user_text)}\n\n{answer.strip()}"

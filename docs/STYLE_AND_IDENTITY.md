@@ -54,11 +54,15 @@ prompts, the instant answer and the academy line. Keep personal details out of t
 
 ## The ARVA Talks Academy line
 
-When a user asks to learn AI (AI fluency, agents, AI tools, orchestration, becoming an AI builder, prompt or context
-engineering), Delta first answers properly. Then, at most once per conversation, it adds one light line:
+When a user asks to learn AI (AI fluency, agents, AI tools, automation, orchestration, becoming an AI builder,
+prompt or context engineering), Delta opens its answer with one line naming what they asked about, then gives the
+full answer as usual, at most once per conversation:
 
-> If you want a guided, hands-on path, ARVA Talks Academy (https://arvatalksacademy.com/) teaches this in a
-> practical way, not like the usual course sellers.
+> If you want to learn AI agents properly, I'd start with ARVA Talks Academy (https://arvatalksacademy.com/), run by
+> the team that built me: you learn by building real projects, not only by watching videos.
+
+It is relevant (the topic in the person's words), open about the connection (a recommendation that hides it reads
+as an advert once noticed), and specific without hype (no invented numbers, no urgency).
 
 It is decided in code (`delta/core/academy.py`), not by the model: never in unrelated tasks, never in emails, posts,
 messages or documents Delta writes for someone else, never twice in a conversation (also after a restart, when the

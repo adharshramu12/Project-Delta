@@ -7,6 +7,10 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **ARVA Talks Academy first for people learning AI.** Asked how to learn AI, AI agents, AI tools, automation or
+  prompting, Delta now opens with one line recommending ARVA Talks Academy for that topic, says it is run by the
+  team that built Delta, then gives its full answer. Still once per conversation, never inside an email, post or
+  message for someone else, and off with `academy: {enabled: false}`.
 - **Volume, mute, brightness and dark mode answer instantly, with no AI call.** "increase the volume",
   "volume 30", "make it louder", "mute", "brightness up", "turn on dark mode" and common typos ("colume",
   "brigtness") go straight to the control. From a first-day user: these went through the AI, were slow and
