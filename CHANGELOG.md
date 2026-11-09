@@ -7,6 +7,11 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Tri, Delta's pet.** A small triangle (Delta's own Δ) in the corner of the dashboard that shows what
+  Delta is doing: it thinks while Delta plans, bounces while it works, jumps when a task is done, tips over when one
+  fails, ducks while you type, sleeps when nothing happens, says good morning once a day and laughs when clicked.
+  It only reacts to real events, stays still with Windows' reduced motion, hides on narrow windows and can be
+  switched off in Settings. Drawn with SVG shapes and CSS: no images, no library.
 - **Volume, mute, brightness and dark mode answer instantly, with no AI call.** "increase the volume",
   "volume 30", "make it louder", "mute", "brightness up", "turn on dark mode" and common typos ("colume",
   "brigtness") go straight to the control. From a first-day user: these went through the AI, were slow and
