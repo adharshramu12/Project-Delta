@@ -22,6 +22,7 @@ from typing import Any
 from delta.bootstrap import Container
 from delta.channels import telegram_net as net
 from delta.channels.base import approval_text, chunks, is_allowed, result_text, to_html
+from delta.channels.live_status import LiveStatus
 from delta.channels.menu import help_text
 from delta.channels.pc_menu import PCMenu
 from delta.core.state import TaskRequest
@@ -760,9 +761,26 @@ class TelegramChannel(PCMenu):
         except VaultUnavailableError as e:  # never stored unencrypted: tell the owner why, do nothing else
             await message.reply_text(str(e))
             return
-        async with net.working(message):  # "typing..." throughout, and "Still working on it" for a long task
-            res = await self.c.submit(TaskRequest(text, channel=self.name, user=uid, chat_id=chat_id,
-                                                  history=history, attachments=[a.id for a in files]))
+        req = TaskRequest(text, channel=self.name, user=uid, chat_id=chat_id, history=history,
+                          attachments=[a.id for a in files])
+        # One live status message (after a few seconds) that says what Delta is doing now, so it never looks stuck.
+        bus = getattr(self.c, "events", None)
+        live = LiveStatus(req.id, lambda t: message.reply_text(t), lambda m, t: m.edit_text(t)) if bus else None
+        if live is not None:
+            bus.subscribe(live.on_event)
+            live.start()
+        try:
+            async with net.working(message, still_after=float("inf") if live else net.STILL_WORKING_S):
+                res = await self.c.submit(req)  # "typing..." throughout
+        except BaseException:
+            if live is not None:
+                await live.finish("cancelled")
+            raise
+        finally:
+            if live is not None:
+                bus.unsubscribe(live.on_event)
+        if live is not None:
+            await live.finish(res.status)
         if chats and chat_id:
             with contextlib.suppress(VaultUnavailableError):  # the answer is still sent below
                 chats.add(chat_id, "delta", res.answer, {"status": res.status, "provider": res.provider,

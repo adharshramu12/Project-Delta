@@ -6,6 +6,7 @@ Swap any piece (a fake router in tests, a different sensor) by constructing Cont
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.util
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -148,6 +149,36 @@ class Container:
             self.warnings.append(message)
         log.warning("delta.warning", message=message)
 
+    async def _run_within_limit(self, req: TaskRequest) -> TaskResult:
+        """A task never runs for ever: after agent.task_timeout_s it is stopped and the user is told where it was."""
+        from delta.core.activity import LAST
+
+        limit = getattr(getattr(getattr(self, "settings", None), "agent", None), "task_timeout_s", 0)
+        if not limit:
+            return await self.orchestrator.run(req)
+        work = asyncio.ensure_future(self.orchestrator.run(req))
+        try:
+            done, _ = await asyncio.wait({work}, timeout=limit)
+        except asyncio.CancelledError:  # Stop from the user: stop the work too, not only this wrapper
+            work.cancel()
+            with contextlib.suppress(BaseException):
+                await work
+            raise
+        if work in done:
+            return work.result()
+        work.cancel()
+        with contextlib.suppress(BaseException):
+            await work
+        where = LAST.get(req.id, "")
+        minutes = f"{limit / 60:g} minutes" if limit >= 60 else f"{limit:g} seconds"
+        answer = (f"I stopped this task after {minutes} because it was not finishing"
+                  + (f". The last thing I was doing: {where}" if where else "")
+                  + ". Nothing more runs for it. Try a smaller request, or ask me to carry on from there.")
+        self.audit.record("task.timeout", task=req.id, after_s=limit, last=where)
+        with contextlib.suppress(Exception):
+            await self.events.publish("task.finished", task_id=req.id, status="failed", answer=answer)
+        return TaskResult(req.id, "failed", answer)
+
     async def submit(self, req: TaskRequest, autonomy_cap: str | None = None) -> TaskResult:
         """One heavy task at a time keeps the laptop responsive. While remote control is locked, nothing
         asked from a remote channel (Telegram, Slack, any later one) runs at all.
@@ -157,6 +188,9 @@ class Container:
         if self.guard is not None and self.guard.locked and is_remote(req.channel):
             self.audit.record("guard.blocked", task=req.id, channel=req.channel, user=req.user, why="locked")
             return TaskResult(req.id, "failed", self.guard.locked_message())
+        if self._task_lock.locked():  # another task is running: say so instead of looking stuck
+            with contextlib.suppress(Exception):
+                await self.events.publish("task.queued", task_id=req.id, text=req.text)
         me = asyncio.current_task()
         active = getattr(self, "active", None)  # every task asked for, so "stop all" reaches waiting ones too
         if me is not None and active is not None:
@@ -167,7 +201,7 @@ class Container:
                 capped = self._cap_autonomy(autonomy_cap)
                 try:
                     arm_stop(self)
-                    return await self.orchestrator.run(req)
+                    return await Container._run_within_limit(self, req)  # type: ignore[arg-type]
                 finally:
                     self.running = None
                     if (signal := getattr(self, "signal", None)) is not None:
@@ -542,6 +576,9 @@ def build(settings: Settings) -> Container:
     connectors = attach_connectors(settings, registry, audit)  # connected apps; nothing connects at start-up
     if connectors is not None:
         closers.append(("connectors", connectors.manager.close))
+        from delta.core.activity import APP_NAMES
+
+        APP_NAMES.update({a.id: a.name for a in connectors.manager.catalog.list()})  # "Google Drive" in progress lines
     send_email.connectors = connectors  # send through the Gmail app when it is connected and can send
     executor = ToolExecutor(registry, make_policy(settings), approvals, audit, learning, on_learned)
     if (opener := registry.get("open_app")) is not None:  # blocked apps: also what a loose match would open
