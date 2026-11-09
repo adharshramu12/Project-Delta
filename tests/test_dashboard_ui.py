@@ -170,12 +170,14 @@ def test_the_payload_stays_small():
     notifications (updates.js: the new-version banner, Update now and its progress screen, What's new, Settings >
     Updates and help, about 6.8 KB), with their markup and styles (about 3 KB); the dashboard then ships about
     247.4 KB. Then to 249 KB for Apps > AI models' "If my main AI fails, let my other AIs answer" switch and the
-    model next to "via <AI>" under each answer (about 1.1 KB; the dashboard then ships about 248.5 KB). Then to 252 KB
-    for the live "now" line under a running task (what Delta is doing in plain words, a timer, "Still waiting" and the
-    queue notice, about 2.7 KB with its styles; the dashboard then ships about 251.2 KB). Lazy loading would not lower
-    this total: it counts every file the dashboard ships."""
+    model next to "via <AI>" under each answer (about 1.1 KB; the dashboard then ships about 248.5 KB). Then to 257 KB
+    for the Apps directory: search, category filters, sections of tiles and a details sheet for each app (about
+    7.1 KB with its styles; the dashboard then ships about 255.6 KB). Then to 260 KB for the live "now" line under a
+    running task (what Delta is doing in plain words, a timer, "Still waiting" and the queue notice, about 2.7 KB with
+    its styles; the dashboard then ships about 258.3 KB). Lazy loading would not lower this total: it counts every file
+    the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 252_000, total
+    assert total < 260_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 
