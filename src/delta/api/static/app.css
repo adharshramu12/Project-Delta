@@ -542,3 +542,41 @@ dialog::backdrop{background:var(--overlay)}
   .tour-card{border:2px solid CanvasText}
   .tour-spot{outline:3px solid Highlight}
 }
+
+/* Apps directory: search, category filters, sections of compact tiles; details open in the sheet */
+.app-toolbar{display:flex;flex-direction:column;gap:var(--s3);margin-bottom:var(--s2)}
+.app-toolbar .search{max-width:440px}
+.app-filters{flex-wrap:wrap;align-self:flex-start}
+.seg-btn[aria-pressed="true"]{background:var(--surface);color:var(--text);box-shadow:var(--shadow-1)}
+.seg-btn .n,.app-section h4 .n{margin-left:6px;color:var(--text-3);font-size:var(--fs-xs);font-weight:var(--fw-medium)}
+.app-section{margin-top:var(--s5)}
+.app-section h4{margin:0 0 var(--s2);font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-2)}
+.app-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:var(--s2)}
+.app-tile{display:flex;align-items:center;gap:var(--s3);width:100%;min-height:76px;padding:var(--s3);text-align:left;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);color:var(--text);cursor:pointer;transition:border-color var(--t-fast) var(--ease),box-shadow var(--t-fast) var(--ease)}
+.app-tile:hover{border-color:var(--border-strong);box-shadow:var(--shadow-1)}
+.app-tile:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.app-tile.connected{border-color:color-mix(in srgb,var(--ok) 35%,var(--border))}
+.app-ic[data-tone]{width:40px;height:40px;flex:none;border-radius:var(--r-md);display:grid;place-items:center;font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:#fff;letter-spacing:.02em}
+.app-ic[data-tone="0"]{background:#4f6bd8}.app-ic[data-tone="1"]{background:#0f8a7e}.app-ic[data-tone="2"]{background:#b4542c}
+.app-ic[data-tone="3"]{background:#7a4fc9}.app-ic[data-tone="4"]{background:#2a7fb8}.app-ic[data-tone="5"]{background:#a63d6b}
+.app-ic[data-tone="6"]{background:#5c7a2a}.app-ic[data-tone="7"]{background:#8a6a12}
+.app-meta{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.app-name{display:flex;align-items:baseline;gap:var(--s2);min-width:0}
+.app-name b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.app-desc{font-size:var(--fs-sm);color:var(--text-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.app-how{flex:none;font-size:var(--fs-xs);color:var(--text-3);white-space:nowrap}
+.app-sheet-head{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s2)}
+.app-sheet-head .pill{margin-top:4px}
+.app-facts{display:grid;grid-template-columns:max-content 1fr;gap:var(--s2) var(--s4);margin:var(--s3) 0;font-size:var(--fs-sm)}
+.app-facts dt{color:var(--text-3)}
+.app-facts dd{margin:0}
+.app-advanced{margin-top:var(--s6)}
+@media (max-width:640px){.app-how{display:none}}
+/* The live "now" line under a running task: plain words, a timer and a soft shimmer so it never looks frozen */
+.run-now{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);margin:var(--s1) 0 var(--s2);padding:6px 10px;border-radius:var(--r-md);background:var(--surface-2);font-size:var(--fs-sm);color:var(--text)}
+.run-now .now-text{background:linear-gradient(90deg,var(--text) 0%,var(--text-3) 50%,var(--text) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:now-sheen 2.4s linear infinite;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.run-now .now-time{flex:none;color:var(--text-3);font-size:var(--fs-xs);font-variant-numeric:tabular-nums}
+.run-now.slow{background:var(--warn-soft)}
+.run-now.slow .now-text{background:none;color:var(--warn);animation:none}
+@keyframes now-sheen{from{background-position:200% 0}to{background-position:0 0}}
+@media (prefers-reduced-motion:reduce){.run-now .now-text{animation:none;background:none;color:var(--text)}}

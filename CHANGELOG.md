@@ -6,7 +6,18 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Added
+- **Live progress, so Delta never looks stuck.** While a task runs, the chat shows what Delta is doing now in plain
+  words ("Working in Notion: search", "Opening youtube.com") with a timer and a soft shimmer, and "Still waiting"
+  when one step takes long. On Telegram, a task that takes more than a few seconds gets one status message that is
+  edited as it goes and ends with Finished, Stopped or Could not finish. The words are worked out on the PC from the
+  tool and its arguments, with no AI call.
+- **"Waiting for the task already running to finish"** in the chat and on Telegram when a request has to queue
+  (Delta runs one heavy task at a time), instead of silence.
+
 ### Changed
+- **A task never runs for ever.** After `agent.task_timeout_s` (20 minutes by default, 0 turns it off) it is stopped
+  and you are told the last thing it was doing.
 - **Delta stays small on disk.** Its two browser profiles (the dashboard window and the private browser) start with a
   capped disk cache (32 MB and 100 MB), and a minute after start Delta removes their regenerable leftovers: Edge and
   Chrome components, provenance data, metrics, crash dumps, shader and web caches, and the window's built-in
