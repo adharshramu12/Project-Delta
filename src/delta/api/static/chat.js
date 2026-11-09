@@ -49,7 +49,7 @@
     const parts = [];
     const a = u.attachments;
     if (a && a.attachments) parts.push(`${a.attachments} file(s): ~${D.k(a.attachment_tokens_est || 0)} tokens` + (a.attachment_images ? `, ${a.attachment_images} picture(s) seen` : ""));
-    if (r.provider) parts.push("via " + r.provider);
+    if (r.provider) parts.push("via " + r.provider + (r.model && r.model !== "default" ? " (" + r.model + ")" : ""));
     if (r.fallback) parts.push(r.fallback);
     if (r.attempts) parts.push(r.attempts + (r.attempts === 1 ? " attempt" : " attempts"));
     if (calls) parts.push(`${calls} AI ${calls === 1 ? "call" : "calls"}`, amount + (t.cached ? ` (+${D.k(t.cached)} cached)` : ""));

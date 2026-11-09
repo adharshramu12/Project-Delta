@@ -6,6 +6,8 @@
 No keys, no network, no cost: every model call goes to a recording scripted model that answers from a fixed
 script. What is measured is what Delta would SEND (system prompt, tool descriptions, history, tool results), as
 estimated input tokens (characters / 4, delta.llm.usage.estimate_tokens), per model job (plan, chat, verify).
+"CLI prompt chars" is the text a CLI provider (Codex, Claude Code, Cline) or a local model is sent for the same
+calls, summed, with the largest single call in brackets (Cline passes it on a command line of at most ~32k chars).
 "Stable prefix" is how many characters at the start of the planner and actor requests stay byte-identical
 between two tasks a minute apart: that part is what a provider's automatic prompt cache can reuse.
 
@@ -126,10 +128,20 @@ class Recorder:
 
     async def complete(self, task: str, messages: list[Any], tools: list[dict] | None,
                        json_mode: bool = False) -> Any:
+        from delta.llm.cli_providers import render_transcript
+        from delta.llm.providers import inject_tool_prompt
         from delta.llm.usage import estimate_tokens
 
+        try:  # the tool specs an API provider really sends (lean schemas); older Delta sent them as they are
+            from delta.llm.providers import wire_tools
+        except ImportError:
+            def wire_tools(t: Any) -> Any:
+                return t
         system = next((str(m.get("content")) for m in messages if m.get("role") == "system"), "")
-        self.sent.append({"job": task, "tokens": estimate_tokens(messages, tools), "tools": len(tools or []),
+        # What a CLI provider (Codex, Claude Code, Cline) or a local model on the JSON tool protocol is sent.
+        cli = len(render_transcript(inject_tool_prompt(messages, tools) if tools else list(messages)))
+        self.sent.append({"job": task, "tokens": estimate_tokens(messages, wire_tools(tools)), "cli_chars": cli,
+                          "tools": len(tools or []),
                           "tool_chars": len(json.dumps(tools)) if tools else 0, "system": system,
                           "prefix": json.dumps(tools or [], sort_keys=True) + system})
         return await self.inner.complete(task, messages, tools, json_mode)
@@ -259,13 +271,16 @@ async def _measure(base: Path) -> dict[str, Any]:
         out[name] = {"status": first[0]["status"] if first else "done (no model call)",
                      "calls": len(first), "tokens": sum(s["tokens"] for s in first), "jobs": jobs,
                      "stable_prefix": prefix,
+                     "cli_chars": sum(s["cli_chars"] for s in first),
+                     "cli_chars_max": max((s["cli_chars"] for s in first), default=0),
                      "tools_sent_max": max((s["tools"] for s in first), default=0)}
     return out
 
 
 def table(data: dict[str, Any]) -> str:
     lines = ["| task | status | model calls | est. input tokens | plan | chat | verify | tools sent | "
-             "stable prefix plan / chat (chars) |", "|---|---|---|---|---|---|---|---|---|"]
+             "stable prefix plan / chat (chars) | CLI prompt chars (largest call) |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
     for name, r in data.items():
         j = r["jobs"]
 
@@ -275,9 +290,11 @@ def table(data: dict[str, Any]) -> str:
         p = r["stable_prefix"]
         pre = " / ".join(f"{p[k]:,} of {p[k + '_total']:,}" if k in p else "-" for k in ("plan", "chat"))
         lines.append(f"| {name} | {r['status']} | {r['calls']} | {r['tokens']:,} | {cell('plan')} | {cell('chat')} | "
-                     f"{cell('verify')} | {r['tools_sent_max']} | {pre} |")
+                     f"{cell('verify')} | {r['tools_sent_max']} | {pre} | "
+                     f"{r['cli_chars']:,} ({r['cli_chars_max']:,}) |")
     total = sum(r["tokens"] for r in data.values())
-    lines.append(f"| **total** | | {sum(r['calls'] for r in data.values())} | {total:,} | | | | | |")
+    cli = sum(r["cli_chars"] for r in data.values())
+    lines.append(f"| **total** | | {sum(r['calls'] for r in data.values())} | {total:,} | | | | | | {cli:,} |")
     return "\n".join(lines)
 
 

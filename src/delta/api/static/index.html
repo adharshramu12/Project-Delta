@@ -119,7 +119,8 @@
     <div class="view-body">
     <section class="group" id="ai_models" aria-labelledby="h_ai">
     <div class="group-head"><h3 id="h_ai">AI models</h3><p class="muted">Use plans you already pay for, or a free cloud key. Each reply says which AI answered.</p></div>
-    <label class="field inline-field">Main AI <small>Used first for every step. Others only if it fails.</small><select id="s_main"></select></label>
+    <label class="field inline-field">Main AI <small>Does every step. If it fails, you are told why.</small><select id="s_main"></select></label>
+    <label class="check"><input type="checkbox" id="s_fallback"> If my main AI fails, let my other AIs answer <small class="muted">(off: only the main AI you picked is used)</small></label>
     <div id="s_appslist" class="cards"></div>
     <div class="row"><button class="btn" id="apps_keys">Add or check a model key</button></div>
     </section>

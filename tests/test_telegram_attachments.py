@@ -26,7 +26,7 @@ class FakeFile:
     def __init__(self, data: bytes) -> None:
         self.data = data
 
-    async def download_to_drive(self, custom_path: str) -> None:
+    async def download_to_drive(self, custom_path: str, **kw: Any) -> None:
         Path(custom_path).write_bytes(self.data)
 
 

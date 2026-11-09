@@ -545,6 +545,10 @@ class UBFill(_UBTool):
         return f"{'fill and submit' if args.submit else 'fill'} '{args.field}' on {self.ub.current_url or 'the page'}"
 
     async def run(self, args: FillArgs) -> ToolResult:
+        from delta.tools.gmail_compose import gmail_fill_hint
+
+        if hint := gmail_fill_hint(self.ub.current_url, args.field):
+            return ToolResult(False, hint)
         return await self._do(self.ub.fill, args.field, args.value, args.submit)
 
 

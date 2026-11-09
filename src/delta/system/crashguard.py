@@ -87,10 +87,10 @@ class CrashGuard:
 
     def install_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Errors the event loop would only print ("Task exception was never retrieved", a failing callback) are
-        reported. Windows' harmless ConnectionResetError (a browser tab closing a socket) stays quiet."""
+        reported. A browser closing its connection (see client_went_away) stays quiet."""
         def handler(lp: asyncio.AbstractEventLoop, ctx: dict[str, Any]) -> None:
             exc = ctx.get("exception")
-            if isinstance(exc, ConnectionResetError):
+            if client_went_away(exc):
                 return
             task = ctx.get("task") or ctx.get("future")
             name = task.get_name() if isinstance(task, asyncio.Task) else ""
@@ -98,6 +98,15 @@ class CrashGuard:
             self.report(where, exc if isinstance(exc, BaseException) else None, str(ctx.get("message", "")))
 
         loop.set_exception_handler(handler)
+
+
+def client_went_away(exc: object) -> bool:
+    """Noise from a browser leaving, not a Delta error: Windows' ConnectionResetError, and uvicorn answering a bad
+    request on a connection the browser already closed (h11 LocalProtocolError "... state=CLOSED", seen in the
+    fresh-user CI run on 9 Nov)."""
+    if isinstance(exc, ConnectionResetError):
+        return True
+    return type(exc).__name__ == "LocalProtocolError" and "state=CLOSED" in str(exc)
 
 
 def guard_of(c: Any) -> CrashGuard:

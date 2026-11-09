@@ -31,6 +31,7 @@ LABELS = {"claude_code": "Claude Code (your Claude plan)", "codex": "Codex (your
 
 class PreferredIn(BaseModel):
     name: str
+    fallback: bool | None = None  # llm.fallback: other AIs may answer when the main AI fails
 
 
 class GoogleClientIn(BaseModel):
@@ -101,16 +102,21 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
     @app.get("/api/apps/preferred", dependencies=[Depends(auth)])
     async def get_preferred() -> dict[str, Any]:
         ready = set(await asyncio.to_thread(c.router.usable))
-        return {"preferred": c.router.preferred,
+        return {"preferred": c.router.preferred, "fallback": c.router.fallback,
                 "options": [{"name": n, "label": LABELS.get(n, n), "ready": n in ready} for n in c.router.providers]}
 
     @app.put("/api/apps/preferred", dependencies=[Depends(auth)])
     async def set_preferred(body: PreferredIn) -> dict[str, Any]:
         if body.name != "auto" and body.name not in c.router.providers:
             raise HTTPException(400, "unknown AI")
-        await asyncio.to_thread(write_user_settings, c.settings.data_dir, {"llm": {"preferred": body.name}})
+        change: dict[str, Any] = {"preferred": body.name}
+        if body.fallback is not None:
+            change["fallback"] = body.fallback
+        await asyncio.to_thread(write_user_settings, c.settings.data_dir, {"llm": change})
         c.settings.llm.preferred = c.router.preferred = body.name
-        c.audit.record("apps.preferred", name=body.name)
+        if body.fallback is not None:
+            c.settings.llm.fallback = c.router.fallback = body.fallback
+        c.audit.record("apps.preferred", name=body.name, fallback=c.router.fallback)
         return {"ok": True}
 
     @app.put("/api/apps/{name}/models", dependencies=[Depends(auth)])

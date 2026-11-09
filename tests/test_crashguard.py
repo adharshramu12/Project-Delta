@@ -64,6 +64,9 @@ async def test_background_task_errors_are_reported_but_socket_resets_stay_quiet(
     try:
         g.install_loop(loop)
         loop.call_exception_handler({"message": "x", "exception": ConnectionResetError(10054, "reset")})
+        LocalProtocolError = type("LocalProtocolError", (Exception,), {})  # h11's, from uvicorn's send_400_response
+        loop.call_exception_handler({"message": "x", "exception": LocalProtocolError(
+            "can't handle event type Response when role=SERVER and state=CLOSED")})
         assert g.count == 0
         task = loop.create_task(asyncio.sleep(0), name="watcher-loop")
         await task

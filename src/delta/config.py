@@ -43,6 +43,11 @@ class LLMConfig(BaseModel):
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     routes: dict[str, list[str]] = Field(default_factory=dict)
     preferred: str = "auto"  # provider tried first for every job; "auto" = follow `routes`
+    # With a main AI chosen (preferred is not "auto"): when it fails, try the other AIs on the route too. Off by
+    # default: the AI the user picked is the one that answers (and is billed); a failure says why instead of a
+    # different AI answering silently. A job the main AI cannot do at all (pictures for a text-only AI) still
+    # uses the route.
+    fallback: bool = False
 
 
 class AgentConfig(BaseModel):

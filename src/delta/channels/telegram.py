@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from delta.bootstrap import Container
+from delta.channels import telegram_net as net
 from delta.channels.base import approval_text, chunks, is_allowed, result_text, to_html
 from delta.channels.menu import help_text
 from delta.channels.pc_menu import PCMenu
@@ -47,7 +48,7 @@ class TelegramChannel(PCMenu):
     name = "telegram"
 
     def __init__(self, c: Container, token: str, allowed: list[str]) -> None:
-        from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+        from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
         self.c = c
         self.allowed = list(allowed)
@@ -62,8 +63,17 @@ class TelegramChannel(PCMenu):
         self._pending_pin: dict[str, tuple[Any, str, float]] = {}  # user -> (action to run, what, until)
         self.phone_chats: Any = None  # this channel's chats per person (delta.channels.menu), set by telegram_menu
         self._pc_init()
-        # concurrent_updates: an approval button must work while a long task is still running
-        self.app = Application.builder().token(token).concurrent_updates(True).build()
+        # The poll loop's health (telegram_net): watched every WATCH_EVERY_S, restarted when it died or stalled, and
+        # a dashboard line only for a sustained outage.
+        self.health = net.PollHealth()
+        self._clock: Callable[[], float] = time.monotonic
+        self._restarts = 0
+        self._next_restart = 0.0
+        self._outage_shown = ""
+        self._watch_task: asyncio.Task[None] | None = None
+        # concurrent_updates: an approval button must work while a long task is still running; timeouts fit slow
+        # networks (the defaults were 5 s for everything)
+        self.app = net.build_app(token, self.health)
         self.app.add_handler(CommandHandler("start", self._start_cmd))
         self.app.add_handler(CommandHandler("status", self._status_cmd))
         self.app.add_handler(CommandHandler("help", self._help_cmd))
@@ -111,9 +121,64 @@ class TelegramChannel(PCMenu):
         await self.app.initialize()
         await self.app.start()
         assert self.app.updater
-        await self.app.updater.start_polling(drop_pending_updates=True)
+        await self.app.updater.start_polling(**self._poll_args(drop=True))
         self.bot_name = (await self.app.bot.get_me()).username or ""
         self._menu_task = asyncio.create_task(self._set_menu())  # cosmetic: not part of the start-up timeout
+        self._watch_task = asyncio.create_task(self._watch(), name="telegram-watchdog")
+
+    # --- keeping the poll loop alive (delta.channels.telegram_net) ----------------------------------------------
+    def _poll_args(self, drop: bool) -> dict[str, Any]:
+        """Long poll of POLL_TIMEOUT_S. Only the first start drops what was sent while Delta was off; a restart
+        after an outage keeps it, so a message sent during the outage is still answered."""
+        return {"timeout": net.POLL_TIMEOUT_S, "drop_pending_updates": drop, "error_callback": self._on_poll_error}
+
+    def _on_poll_error(self, exc: Any) -> None:
+        """python-telegram-bot retries the poll by itself; this only records why (it must never raise)."""
+        with contextlib.suppress(Exception):
+            self.health.failed(exc)
+            if self.health.failures in (1, 5) or self.health.failures % 50 == 0:
+                log.info("telegram.poll_error", error=type(exc).__name__, detail=str(exc)[:160],
+                         failures=self.health.failures)
+
+    async def _watch(self) -> None:
+        while True:
+            await asyncio.sleep(net.WATCH_EVERY_S)
+            try:
+                await self._watch_once()
+            except Exception as e:  # the watchdog must outlive anything it watches
+                log.warning("telegram.watch_failed", error=str(e)[:200])
+
+    async def _watch_once(self) -> None:
+        up = self.app.updater
+        now = self._clock()
+        if self.health.last_ok and now - self.health.last_ok < net.WATCH_EVERY_S * 2:
+            self._restarts = 0
+        dead = up is None or not up.running
+        if (dead or self.health.stalled()) and now >= self._next_restart and up is not None:
+            wait = net.RESTART_BACKOFF_S[min(self._restarts, len(net.RESTART_BACKOFF_S) - 1)]
+            self._restarts += 1
+            self._next_restart = now + wait
+            log.warning("telegram.poll_restart", dead=dead, restarts=self._restarts,
+                        failures=self.health.failures)
+            with contextlib.suppress(Exception):
+                if up.running:
+                    await asyncio.wait_for(up.stop(), 15)
+            try:
+                await asyncio.wait_for(up.start_polling(**self._poll_args(drop=False)), 30)
+            except Exception as e:
+                self.health.failed(e)
+                log.info("telegram.poll_restart_failed", error=type(e).__name__)
+        self._show_outage(self.health.outage())
+
+    def _show_outage(self, message: str | None) -> None:
+        """One dashboard line while Telegram is really down; gone again as soon as a poll works."""
+        warnings = getattr(self.c, "warnings", None)
+        if self._outage_shown and message != self._outage_shown and warnings is not None:
+            warnings[:] = [w for w in warnings if w != self._outage_shown]
+            self._outage_shown = ""
+        if message and message != self._outage_shown and callable(warn := getattr(self.c, "warn", None)):
+            warn(message)
+            self._outage_shown = message
 
     async def _set_menu(self) -> None:
         """The "/" menu: every command the bot handles, for private chats (delta.channels.telegram_menu)."""
@@ -192,6 +257,10 @@ class TelegramChannel(PCMenu):
             f"then send me the {PAIR_LENGTH}-character code shown there (just the code).")
 
     async def stop(self) -> None:
+        if self._watch_task is not None:
+            self._watch_task.cancel()
+            self._watch_task = None
+        self._show_outage(None)
         if self.app.updater and self.app.updater.running:
             await self.app.updater.stop()
         await self.app.stop()
@@ -381,7 +450,13 @@ class TelegramChannel(PCMenu):
         answer at all; now it is reported (crashguard) and an allowed user is told, so they are not left waiting."""
         from delta.system.crashguard import guard_of
 
-        guard_of(self.c).report("Telegram", getattr(ctx, "error", None))
+        error = getattr(ctx, "error", None)
+        if net.is_network(error):
+            # A slow or dropped connection to Telegram is not a bug in Delta: no crash line on the dashboard (it
+            # stayed there for good). Sends are already retried; a real outage shows through the poll watchdog.
+            log.info("telegram.network_error", error=type(error).__name__, detail=str(error)[:160])
+            return
+        guard_of(self.c).report("Telegram", error)
         with contextlib.suppress(Exception):
             user = getattr(update, "effective_user", None)
             msg = getattr(update, "effective_message", None)
@@ -540,7 +615,7 @@ class TelegramChannel(PCMenu):
         if await self._locked(update.message.reply_text):
             return
         media = update.message.voice or update.message.audio
-        await update.message.chat.send_action("typing")
+        await net.safe_action(update.message.chat)
         try:
             audio = bytes(await (await media.get_file()).download_as_bytearray())
             text = await transcribe(audio, getattr(media, "file_name", None) or "voice.ogg")
@@ -639,14 +714,15 @@ class TelegramChannel(PCMenu):
         if size > limit_mb * 1048576:
             raise AttachmentError(too_big(size, limit_mb) + (" Telegram bots can only download files up to 20 MB."
                                                               if limit_mb >= TELEGRAM_MAX_MB else ""))
-        await message.chat.send_action("typing")
-        tg_file = await media.get_file()
+        await net.safe_action(message.chat)
+        tg_file = await net.resilient(media.get_file, "get_file")
         fd, tmp = tempfile.mkstemp(prefix="delta-tg-", suffix=".part")
         import os
 
         os.close(fd)
         try:
-            await tg_file.download_to_drive(custom_path=tmp)
+            await net.resilient(lambda: tg_file.download_to_drive(custom_path=tmp, read_timeout=net.DOWNLOAD_READ_S),
+                                "download")
             att, _ = await svc.ingest_file(Path(tmp), name, self._chat(uid), "telegram")
             return att
         finally:
@@ -664,7 +740,7 @@ class TelegramChannel(PCMenu):
         something; a question comes back with tap buttons for its choices. `attachments`: files the user sent
         (delta.attachments.store.Attachment), already saved in this chat's folder."""
         message = update.message or update.callback_query.message
-        await message.chat.send_action("typing")
+        await net.safe_action(message.chat)  # best effort: a slow "typing..." never stops the request
         from delta.system.notify import notify
 
         notify("\U0001f4f1 Delta: request from Telegram", text[:120])
@@ -684,8 +760,9 @@ class TelegramChannel(PCMenu):
         except VaultUnavailableError as e:  # never stored unencrypted: tell the owner why, do nothing else
             await message.reply_text(str(e))
             return
-        res = await self.c.submit(TaskRequest(text, channel=self.name, user=uid, chat_id=chat_id, history=history,
-                                              attachments=[a.id for a in files]))
+        async with net.working(message):  # "typing..." throughout, and "Still working on it" for a long task
+            res = await self.c.submit(TaskRequest(text, channel=self.name, user=uid, chat_id=chat_id,
+                                                  history=history, attachments=[a.id for a in files]))
         if chats and chat_id:
             with contextlib.suppress(VaultUnavailableError):  # the answer is still sent below
                 chats.add(chat_id, "delta", res.answer, {"status": res.status, "provider": res.provider,
@@ -702,10 +779,14 @@ class TelegramChannel(PCMenu):
             await self._send(message, part, kb if i == len(parts) - 1 else None)
 
     async def _send(self, message: Any, text: str, kb: Any = None) -> None:
+        """An answer: tried again after a network blip (it used to be lost); plain text if the HTML is refused."""
         try:
-            await message.reply_text(to_html(text), parse_mode="HTML", reply_markup=kb)
-        except Exception:
-            await message.reply_text(text, reply_markup=kb)
+            await net.resilient(lambda: message.reply_text(to_html(text), parse_mode="HTML", reply_markup=kb),
+                                "reply")
+        except Exception as e:
+            if net.is_network(e):
+                raise
+            await net.resilient(lambda: message.reply_text(text, reply_markup=kb), "reply")
 
     # --- question forms: several questions, tick boxes (multi) or pick-one ---------------------------------
     async def _start_form(self, message: Any, uid: str, res: Any) -> None:
@@ -789,8 +870,14 @@ class TelegramChannel(PCMenu):
         if req.for_task:  # offered only for actions it may cover (see ToolExecutor.task_grant_key)
             rows.append([InlineKeyboardButton("🔁 Allow for this task", callback_data=f"appr:{req.id}:t")])
         kb = InlineKeyboardMarkup(rows)
+        text = approval_text(req)
         for uid in self.allowed:
-            await self.app.bot.send_message(int(uid), approval_text(req), reply_markup=kb)
+            chat = int(uid)
+
+            async def send(chat: int = chat) -> Any:
+                return await self.app.bot.send_message(chat, text, reply_markup=kb)
+
+            await net.resilient(send, "approval")
 
     async def _on_button(self, update: Any, ctx: Any) -> None:
         q = update.callback_query

@@ -39,6 +39,13 @@ TEXT_CHARS = 4000
 LINE_KINDS = ("memory", "grounding", "learning")  # Batch D timeline lines
 
 
+def provider_label(result: Any) -> str:
+    """Which AI ran the task, as the task list shows it: "groq · openai/gpt-oss-120b", or the provider alone."""
+    provider = str(getattr(result, "provider", "") or "")
+    model = str(getattr(result, "model", "") or "")
+    return f"{provider} · {model}" if provider and model and model != "default" else provider
+
+
 def fingerprint(tool: str, raw_args: Any) -> str:
     """Same tool with the same arguments = same fingerprint. Only the hash is stored, never the args."""
     try:
@@ -229,7 +236,7 @@ class TaskEngine:
         new = RESULT_STATE.get(str(result.status), S.FAILED)
         usage = getattr(result, "usage", None) or {}
         self._move(task_id, new, "", answer=redact_text(str(result.answer or ""), TEXT_CHARS),
-                   provider=str(result.provider or ""), tokens_in=int(usage.get("input", 0) or 0),
+                   provider=provider_label(result), tokens_in=int(usage.get("input", 0) or 0),
                    tokens_out=int(usage.get("output", 0) or 0), calls=int(usage.get("calls", 0) or 0))
         verification = getattr(result, "verification", None)
         if verification is not None:

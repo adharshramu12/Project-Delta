@@ -177,7 +177,8 @@ async def test_a_channel_that_times_out_at_start_keeps_retrying(monkeypatch):
     c.warn = lambda m: c.warnings.append(m)
     monkeypatch.setattr(daemon, "CHANNELS", {"telegram": (lambda _c: Flaky(), "channels")})
     monkeypatch.setattr(daemon, "RETRY_DELAYS_S", (0,))
-    assert await daemon._start_channels(c) == [] and "Retrying" in c.warnings[0]
+    # one slow start is not shown on the dashboard any more; a start that keeps failing is (test_telegram_resilience)
+    assert await daemon._start_channels(c) == [] and c.warnings == []
     for _ in range(50):
         await asyncio.sleep(0.01)
         if "telegram" in c.live_channels:

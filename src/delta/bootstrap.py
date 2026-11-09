@@ -437,7 +437,7 @@ def build(settings: Settings) -> Container:
     events = EventBus()
     governor = Governor(settings.governor, watch_gpu=any(p.local for p in settings.llm.providers.values()))
     router = ModelRouter(build_providers(settings), settings.llm.routes, allow_local=governor.allow_local,
-                         preferred=settings.llm.preferred)
+                         preferred=settings.llm.preferred, fallback=settings.llm.fallback)
     memory = MemoryStore.from_config(data / "memory.db", settings.memory)
     # Keyed chain (HMAC) when the credential store works; otherwise the plain hash chain as before.
     audit = AuditLog(data / "audit.jsonl", key_loader=load_or_create_key)
@@ -463,11 +463,12 @@ def build(settings: Settings) -> Container:
         FetchPage(),
         *(memory_tools(memory) if settings.memory.enabled else []),
     ])
-    from delta.tools.email import email_tools
+    from delta.tools.email import email_tools, save_draft_tool
 
     draft_email, send_email = email_tools(router)  # every email is shown in full and sent only on a human yes
     registry.register(draft_email)
     registry.register(send_email)
+    registry.register(save_draft_tool(send_email))  # keep it in Gmail Drafts, checked field by field, never sent
     send_email.registry = registry
     from delta.addons.writer import writer_tools
 
