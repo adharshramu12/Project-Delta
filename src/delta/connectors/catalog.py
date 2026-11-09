@@ -63,12 +63,18 @@ class ToolDefaults(BaseModel):
     destructive: list[str] = Field(default_factory=list)  # off until the user switches them on
 
 
+# The Apps page's sections, in the order it shows them. Custom servers go under "Custom".
+CATEGORIES = ("Productivity", "Email and chat", "Files", "Design", "Developer tools", "Databases", "Websites",
+              "Automation and web data", "Docs and AI", "Finance and markets", "Marketing and launches", "Custom")
+
+
 class AppSpec(BaseModel):
     id: str
     name: str
     publisher: str = ""
     status: Literal["official", "official-preview", "reference", "community", "custom"] = "custom"
     description: str = ""
+    category: str = "Custom"
     transport: Literal["http", "sse", "stdio"] = "http"
     url: str = ""
     sse_url: str = ""
@@ -83,6 +89,13 @@ class AppSpec(BaseModel):
     checked: str = ""
     notes: str = ""
     tools: ToolDefaults = Field(default_factory=ToolDefaults)
+
+    @field_validator("category")
+    @classmethod
+    def _category(cls, v: str) -> str:
+        if v not in CATEGORIES:
+            raise ValueError(f"category must be one of: {', '.join(CATEGORIES)}")
+        return v
 
     @field_validator("id")
     @classmethod
@@ -116,7 +129,8 @@ class AppSpec(BaseModel):
 
     def summary(self) -> dict[str, Any]:
         return {"id": self.id, "name": self.name, "publisher": self.publisher, "status": self.status,
-                "description": self.description, "transport": self.transport, "url": self.url,
+                "description": self.description, "category": self.category, "transport": self.transport,
+                "url": self.url,
                 "runtime": self.runtime, "package": self.package, "auth": self.auth.type,
                 "client": self.auth.client if self.auth.type == "oauth" else "",
                 "client_secret": self.auth.client_secret, "auth_label": self.auth.label, "auth_help": self.auth.help,

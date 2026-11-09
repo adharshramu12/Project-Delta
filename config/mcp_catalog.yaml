@@ -15,17 +15,19 @@
 #                     client: user = you create an OAuth app at the vendor and paste its client id (and secret)
 #            token  = paste a personal access token or API key (stored encrypted with Windows DPAPI)
 #            none   = no sign-in
+# category: the section the Apps page shows the app in (one of delta.connectors.catalog.CATEGORIES).
 # tools: Delta's own default risk for tool names it verified in the vendor's docs (read = never asks;
 #        destructive = off until you switch it on). Every other tool is "external": it asks first, except
 #        in Autopilot. You can change any tool on the Apps page. A server's own readOnlyHint is used only
 #        when you tick "trust this app's read-only labels" for that app.
 
 version: 1
-checked: "2026-11-06"
+checked: "2026-11-09"
 
 apps:
   notion:
     name: Notion
+    category: Productivity
     publisher: Notion
     status: official
     description: Search, read and write pages and databases in your Notion workspace.
@@ -39,6 +41,7 @@ apps:
 
   github:
     name: GitHub
+    category: Developer tools
     publisher: GitHub
     status: official
     description: Repositories, issues, pull requests, Actions and code search on GitHub.
@@ -57,6 +60,7 @@ apps:
 
   atlassian:
     name: Atlassian (Jira, Confluence)
+    category: Productivity
     publisher: Atlassian
     status: official
     description: Jira work items, Confluence pages, Jira Service Management and more.
@@ -69,6 +73,7 @@ apps:
 
   linear:
     name: Linear
+    category: Productivity
     publisher: Linear
     status: official
     description: Find, create and update Linear issues, projects and comments.
@@ -81,6 +86,7 @@ apps:
 
   slack:
     name: Slack
+    category: Email and chat
     publisher: Slack
     status: official
     description: Search and read messages, channels and users, and post messages in Slack.
@@ -101,6 +107,7 @@ apps:
 
   sentry:
     name: Sentry
+    category: Developer tools
     publisher: Sentry
     status: official
     description: Search errors and issues, look at performance and triage problems in Sentry.
@@ -112,6 +119,7 @@ apps:
 
   stripe:
     name: Stripe
+    category: Finance and markets
     publisher: Stripe
     status: official
     description: Customers, payments, invoices, products and Stripe's docs.
@@ -126,6 +134,7 @@ apps:
 
   gmail:
     name: Gmail
+    category: Email and chat
     publisher: Google
     status: official-preview
     description: Search and read your mail, list labels and create drafts (Gmail never sends from these tools).
@@ -151,6 +160,7 @@ apps:
 
   google_drive:
     name: Google Drive
+    category: Files
     publisher: Google
     status: official-preview
     description: Search, read and create files in Google Drive.
@@ -173,6 +183,7 @@ apps:
 
   google_calendar:
     name: Google Calendar
+    category: Email and chat
     publisher: Google
     status: official-preview
     description: Find free time, list and create events in Google Calendar.
@@ -197,6 +208,7 @@ apps:
 
   asana:
     name: Asana
+    category: Productivity
     publisher: Asana
     status: official
     description: Tasks, projects and goals in Asana.
@@ -213,6 +225,7 @@ apps:
 
   vercel:
     name: Vercel
+    category: Developer tools
     publisher: Vercel
     status: official
     description: Projects, deployments and logs on Vercel.
@@ -224,6 +237,7 @@ apps:
 
   supabase:
     name: Supabase
+    category: Databases
     publisher: Supabase
     status: official
     description: Supabase projects, databases, edge functions and logs.
@@ -236,6 +250,7 @@ apps:
 
   huggingface:
     name: Hugging Face
+    category: Docs and AI
     publisher: Hugging Face
     status: official
     description: Search models, datasets, Spaces and papers on the Hugging Face Hub.
@@ -246,8 +261,371 @@ apps:
     checked: "2026-11-06"
     notes: Works without signing in (public Hub data).
 
+  producthunt:
+    name: Product Hunt
+    category: Marketing and launches
+    publisher: Product Hunt
+    status: official
+    description: Research products, launches and leaderboards, and draft, check and submit your own launch.
+    transport: http
+    url: https://mcp.producthunt.com/mcp
+    auth: {type: oauth, client: dynamic, scopes: ["mcp:account", "launches:read", "launches:write"]}
+    docs: https://www.producthunt.com/mcp/install
+    checked: "2026-11-09"
+    notes: >-
+      Hosted server. Dynamic client registration, public clients and PKCE (S256) confirmed in its authorization
+      server metadata. Delta does not ask for the ads scopes (ads:read, ads:write), so it can never spend money on
+      ads. Submitting a launch is public and always asks first; editing a launch is off until you switch it on.
+    tools:
+      read: [get_my_account, get_launch_context, list_my_launches, get_launch, get_launch_preview_view,
+             get_categories, get_products, find_alternatives, get_product_profile, search_launches,
+             semantic_product_search, get_leaderboard, find_investable_startups]
+      destructive: [update_launch]
+
+  todoist:
+    name: Todoist
+    category: Productivity
+    publisher: Doist
+    status: official
+    description: Read, add and complete your Todoist tasks and projects.
+    transport: http
+    url: https://ai.todoist.net/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://www.todoist.com/help/articles/use-todoist-with-ai-tools-via-mcp
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  clickup:
+    name: ClickUp
+    category: Productivity
+    publisher: ClickUp
+    status: official
+    description: Tasks, lists, docs and comments in your ClickUp workspace.
+    transport: http
+    url: https://mcp.clickup.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://help.clickup.com/hc/en-us/articles/33335772678423-What-is-ClickUp-MCP
+    checked: "2026-11-09"
+    notes: Hosted server, available on all ClickUp plans. Dynamic client registration and PKCE (S256) confirmed.
+
+  monday:
+    name: monday.com
+    category: Productivity
+    publisher: monday.com
+    status: official
+    description: Boards, items and updates in your monday.com account.
+    transport: http
+    url: https://mcp.monday.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://developer.monday.com/apps/docs/mondaycom-mcp-integration
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  airtable:
+    name: Airtable
+    category: Productivity
+    publisher: Airtable
+    status: official
+    description: Read and update records in your Airtable bases.
+    transport: http
+    url: https://mcp.airtable.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://support.airtable.com/docs/using-the-airtable-mcp-server
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  canva:
+    name: Canva
+    category: Design
+    publisher: Canva
+    status: official
+    description: Find, create and edit Canva designs, and export them.
+    transport: http
+    url: https://mcp.canva.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://www.canva.com/help/mcp-agent-setup/
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  mermaid_chart:
+    name: Mermaid Chart
+    category: Design
+    publisher: Mermaid Chart
+    status: official
+    description: Draw and check diagrams (flowcharts, sequence, timelines) with Mermaid.
+    transport: http
+    url: https://mcp.mermaidchart.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.mermaidchart.com/ai/mcp-server
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  webflow:
+    name: Webflow
+    category: Websites
+    publisher: Webflow
+    status: official
+    description: Pages, CMS collections and items on your Webflow sites.
+    transport: http
+    url: https://mcp.webflow.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://developers.webflow.com/mcp/reference/overview
+    checked: "2026-11-09"
+    notes: Hosted server. Publishing changes a live website, so it asks first like every write.
+
+  wix:
+    name: Wix
+    category: Websites
+    publisher: Wix
+    status: official
+    description: Manage your Wix site, its content and its business apps.
+    transport: http
+    url: https://mcp.wix.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://dev.wix.com/docs/sdk/articles/use-the-wix-mcp/about-the-wix-mcp
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  netlify:
+    name: Netlify
+    category: Developer tools
+    publisher: Netlify
+    status: official
+    description: Create, deploy and manage your Netlify sites.
+    transport: http
+    url: https://netlify-mcp.netlify.app/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.netlify.com/build/build-with-ai/netlify-mcp-server/
+    checked: "2026-11-09"
+    notes: Hosted server. Deploys change a live site, so they ask first.
+
+  neon:
+    name: Neon
+    category: Databases
+    publisher: Neon
+    status: official
+    description: Neon Postgres projects, branches and SQL.
+    transport: http
+    url: https://mcp.neon.tech/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://neon.com/docs/ai/neon-mcp-server
+    checked: "2026-11-09"
+    notes: Database tools can change or delete data; Delta treats them as external (asks first).
+
+  prisma:
+    name: Prisma Postgres
+    category: Databases
+    publisher: Prisma
+    status: official
+    description: Create and manage Prisma Postgres databases and run migrations.
+    transport: http
+    url: https://mcp.prisma.io/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://www.prisma.io/docs/postgres/integrations/mcp-server
+    checked: "2026-11-09"
+    notes: Database tools can change or delete data; Delta treats them as external (asks first).
+
+  semgrep:
+    name: Semgrep
+    category: Developer tools
+    publisher: Semgrep
+    status: official
+    description: Scan code for security issues and bugs with Semgrep.
+    transport: http
+    url: https://mcp.semgrep.ai/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://semgrep.dev/docs/mcp
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  jam:
+    name: Jam
+    category: Developer tools
+    publisher: Jam
+    status: official
+    description: Read Jam bug reports (screen recordings, console logs and network requests).
+    transport: http
+    url: https://mcp.jam.dev/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://jam.dev/docs/debug-a-jam/mcp
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  apify:
+    name: Apify
+    category: Automation and web data
+    publisher: Apify
+    status: official
+    description: Run Apify Actors to scrape websites and collect data.
+    transport: http
+    url: https://mcp.apify.com
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.apify.com/platform/integrations/mcp
+    checked: "2026-11-09"
+    notes: Actor runs can use your Apify credits; every run asks first.
+
+  globalping:
+    name: Globalping
+    category: Developer tools
+    publisher: jsDelivr
+    status: official
+    description: Ping, traceroute, DNS and HTTP checks from probes around the world.
+    transport: http
+    url: https://mcp.globalping.dev/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://github.com/jsdelivr/globalping-mcp-server
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  zapier:
+    name: Zapier
+    category: Automation and web data
+    publisher: Zapier
+    status: official
+    description: Use the apps and actions you enabled in Zapier (thousands of apps through one connection).
+    transport: http
+    url: https://mcp.zapier.com/api/mcp/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://help.zapier.com/hc/en-us/articles/36265392843917
+    checked: "2026-11-09"
+    notes: Zapier actions run in other apps and count against your Zapier plan; each one asks first.
+
+  intercom:
+    name: Intercom
+    category: Email and chat
+    publisher: Intercom
+    status: official
+    description: Search and read Intercom conversations and contacts.
+    transport: http
+    url: https://mcp.intercom.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://developers.intercom.com/docs/guides/mcp
+    checked: "2026-11-09"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  deepwiki:
+    name: DeepWiki
+    category: Docs and AI
+    publisher: Cognition
+    status: official
+    description: Ask questions about any public GitHub repository and read its generated docs.
+    transport: http
+    url: https://mcp.deepwiki.com/mcp
+    auth: {type: none}
+    docs: https://docs.devin.ai/work-with-devin/deepwiki-mcp
+    checked: "2026-11-09"
+    notes: Works without signing in (public repositories).
+
+  context7:
+    name: Context7
+    category: Docs and AI
+    publisher: Upstash
+    status: official
+    description: Up-to-date documentation and code examples for programming libraries.
+    transport: http
+    url: https://mcp.context7.com/mcp
+    auth: {type: none}
+    docs: https://github.com/upstash/context7
+    checked: "2026-11-09"
+    notes: Works without signing in (a free API key raises the limits).
+
+  microsoft_learn:
+    name: Microsoft Learn
+    category: Docs and AI
+    publisher: Microsoft
+    status: official
+    description: Search official Microsoft documentation (Windows, Azure, .NET, Microsoft 365).
+    transport: http
+    url: https://learn.microsoft.com/api/mcp
+    auth: {type: none}
+    docs: https://learn.microsoft.com/en-us/training/support/mcp
+    checked: "2026-11-09"
+    notes: Works without signing in (public documentation).
+
+  aws_knowledge:
+    name: AWS Knowledge
+    category: Docs and AI
+    publisher: Amazon Web Services
+    status: official
+    description: Search AWS documentation, guidance and regional availability.
+    transport: http
+    url: https://knowledge-mcp.global.api.aws
+    auth: {type: none}
+    docs: https://awslabs.github.io/mcp/servers/aws-knowledge-mcp-server
+    checked: "2026-11-09"
+    notes: Works without signing in (public documentation).
+
+  excalidraw:
+    name: Excalidraw
+    category: Design
+    publisher: Excalidraw
+    status: official
+    description: Draw hand-drawn style diagrams and sketches.
+    transport: http
+    url: https://mcp.excalidraw.com/mcp
+    auth: {type: none}
+    docs: https://github.com/excalidraw/excalidraw-mcp
+    checked: "2026-11-09"
+    notes: Works without signing in.
+
+  kite:
+    name: Zerodha Kite
+    category: Finance and markets
+    publisher: Zerodha
+    status: official
+    description: Your Zerodha holdings, positions, orders, margins, quotes and charts data.
+    transport: http
+    url: https://mcp.kite.trade/mcp
+    auth: {type: none}
+    docs: https://github.com/zerodha/kite-mcp-server
+    checked: "2026-11-09"
+    notes: >-
+      Sign in to Kite through its own login tool (Zerodha's page, in your browser). Viewing your portfolio and
+      market data never asks. Every order tool (place, modify or cancel an order or GTT) is off until you switch it
+      on, and even then each order needs your yes: a trade cannot be undone. Not financial advice.
+    tools:
+      read: [get_profile, get_margins, get_holdings, get_mf_holdings, get_positions, get_orders, get_order_history,
+             get_order_trades, get_trades, get_gtts, get_quotes, get_ltp, get_ohlc, get_historical_data,
+             search_instruments, login]
+      destructive: [place_order, modify_order, cancel_order, place_gtt_order, modify_gtt_order, delete_gtt_order]
+
+  alpaca_data:
+    name: Alpaca market data
+    category: Finance and markets
+    publisher: Alpaca
+    status: official
+    description: US stock, options and crypto prices, bars, quotes and market calendar (data only).
+    transport: http
+    url: https://mcp.alpaca.markets/mcp
+    auth: {type: none}
+    docs: https://docs.alpaca.markets/docs/alpaca-mcp-server
+    checked: "2026-11-09"
+    notes: Market data only; this server has no trading tools. Not financial advice.
+    tools:
+      read: [get_asset, get_all_assets, get_corporate_actions, get_calendar, get_clock, get_stock_bars,
+             get_stock_quotes, get_stock_trades, get_stock_latest_bar, get_stock_latest_quote, get_stock_latest_trade,
+             get_stock_snapshot, get_crypto_bars, get_crypto_quotes, get_crypto_trades, get_crypto_latest_bar,
+             get_crypto_latest_quote, get_crypto_latest_trade, get_crypto_snapshot, get_crypto_latest_orderbook,
+             get_option_contracts, get_option_latest_quote, get_option_snapshot, get_option_chain]
+
+  coingecko:
+    name: CoinGecko
+    category: Finance and markets
+    publisher: CoinGecko
+    status: official
+    description: Crypto prices, market data, coins and exchanges (data only).
+    transport: http
+    url: https://mcp.api.coingecko.com/mcp
+    auth: {type: none}
+    docs: https://docs.coingecko.com/reference/mcp-server
+    checked: "2026-11-09"
+    notes: Public data with no sign-in. Market data only. Not financial advice.
+    tools:
+      read: [search_docs]
+
   figma_desktop:
     name: Figma (desktop app)
+    category: Design
     publisher: Figma
     status: official
     description: Design context from the Figma desktop app running on this PC.
@@ -262,6 +640,7 @@ apps:
 
   filesystem:
     name: Files (MCP reference server)
+    category: Files
     publisher: Model Context Protocol
     status: reference
     description: Read and write files in one folder you choose, through the MCP reference file server.
@@ -278,6 +657,7 @@ apps:
 
   fetch:
     name: Web fetch (MCP reference server)
+    category: Automation and web data
     publisher: Model Context Protocol
     status: reference
     description: Fetch a web page and turn it into text, through the MCP reference fetch server.
