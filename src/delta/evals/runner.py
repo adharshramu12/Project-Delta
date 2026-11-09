@@ -138,8 +138,11 @@ class _Router:
         from delta.config import load_settings
 
         user = load_settings()
-        preferred = self.model if self.model in user.llm.providers else user.llm.preferred
-        return ModelRouter(build_providers(user), user.llm.routes, preferred=preferred)
+        named = self.model in user.llm.providers
+        preferred = self.model if named else user.llm.preferred
+        # `--model groq` measures Groq: another AI answering after a Groq failure would score the wrong model.
+        return ModelRouter(build_providers(user), user.llm.routes, preferred=preferred,
+                           fallback=False if named else user.llm.fallback)
 
 
 def _perception(task: EvalTask, router: Any, fake_mgr: Any) -> Any:

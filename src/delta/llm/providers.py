@@ -31,7 +31,22 @@ class Provider(Protocol):
     async def unload(self) -> None: ...
 
 
-JSON_TOOL_PROMPT = """You can use tools. Available tools (JSON schema):
+# How the user knows each API provider (Settings > Keys); anything else shows its config name.
+DISPLAY_NAMES = {"groq": "Groq", "nim": "NVIDIA", "nvidia": "NVIDIA", "deepseek": "DeepSeek", "ollama": "Ollama",
+                 "lmstudio": "LM Studio"}
+
+
+def display_name(name: str) -> str:
+    return DISPLAY_NAMES.get(name, name)
+
+
+def key_refused(name: str) -> str:
+    """The one line the user needs when a provider refuses its API key (expired, revoked, mistyped)."""
+    return f"{display_name(name)} key expired or invalid. Add a new one in Settings > Keys"
+
+
+JSON_TOOL_PROMPT = """You can use tools. Available tools, one per line as name(arguments): what it does
+(arg?: optional; arg=x: optional, x if left out; "a"|"b": one of these values):
 {tools}
 
 To call tools reply with ONLY this JSON, nothing else:
@@ -61,9 +76,100 @@ def extract_json(text: str) -> Any:
         raise
 
 
+def lean_schema(schema: Any, top: bool = True) -> Any:
+    """The same JSON schema without what tells a model nothing: titles, `default: null`, the wrapper
+    `anyOf: [X, null]` of an optional argument (being left out of `required` already says it is optional) and
+    the schema's own description of the argument object. Delta still checks every call against the full schema."""
+    if isinstance(schema, list):
+        return [lean_schema(v, False) for v in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out: dict[str, Any] = {}
+    for k, v in schema.items():
+        if k == "title" or (k == "default" and v is None) or (top and k == "description" and "properties" in schema):
+            continue
+        if k == "properties" and isinstance(v, dict):
+            out[k] = {name: lean_schema(p, False) for name, p in v.items()}
+        else:
+            out[k] = lean_schema(v, False)
+    options = out.get("anyOf")
+    if isinstance(options, list):
+        real = [o for o in options if not (isinstance(o, dict) and o.get("type") == "null")]
+        if len(real) == 1 and isinstance(real[0], dict):
+            del out["anyOf"]
+            out = {**real[0], **out}
+    return out
+
+
+def wire_tools(tools: list[dict] | None) -> list[dict] | None:
+    """Tool specs as sent to an API with native tool calling: same tools, lean schemas (see lean_schema)."""
+    if not tools:
+        return tools
+    return [{**t, "function": {**t["function"], "parameters": lean_schema(t["function"].get("parameters") or
+                                                                           {"type": "object", "properties": {}})}}
+            for t in tools]
+
+
+def _type_text(schema: Any) -> str:
+    if not isinstance(schema, dict):
+        return "any"
+    if "enum" in schema:
+        return "|".join(json.dumps(v) for v in schema["enum"])
+    if "anyOf" in schema or "oneOf" in schema:
+        options = [o for o in schema.get("anyOf") or schema.get("oneOf") or []
+                   if not (isinstance(o, dict) and o.get("type") == "null")]
+        return "|".join(dict.fromkeys(_type_text(o) for o in options)) or "any"
+    kind = schema.get("type", "any")
+    if isinstance(kind, list):
+        kind = "|".join(str(k) for k in kind if k != "null")
+    if kind == "array":
+        return f"list[{_type_text(schema.get('items', {}))}]"
+    if kind == "object" and isinstance(schema.get("properties"), dict):
+        return "{" + ", ".join(_arg_text(n, p, n in (schema.get("required") or []))
+                               for n, p in schema["properties"].items()) + "}"
+    if kind == "string" and (pattern := schema.get("pattern")) and re.fullmatch(r"\^\(?[\w|]+\)?\$", pattern):
+        return "|".join(json.dumps(v) for v in pattern.strip("^$()").split("|"))
+    return str(kind)
+
+
+def _arg_text(name: str, schema: Any, required: bool) -> str:
+    text = f"{name}: {_type_text(schema)}"
+    if not required:
+        default = schema.get("default") if isinstance(schema, dict) else None
+        text = f"{name}?: {_type_text(schema)}" if default in (None, "") else f"{text}={json.dumps(default)}"
+    return text
+
+
+def _limits(schema: dict[str, Any]) -> str:
+    parts = [f"{word} {schema[k]}" for k, word in (("minimum", "at least"), ("exclusiveMinimum", "more than"),
+                                                    ("maximum", "at most"), ("exclusiveMaximum", "less than"))
+             if k in schema]
+    return ", ".join(parts)
+
+
+def tool_lines(tools: list[dict] | None) -> str:
+    """Tools as short signatures for the JSON tool protocol (CLI and local models): the same names, arguments,
+    types, defaults, allowed values and descriptions as the JSON schema, in about half the characters."""
+    lines = []
+    for t in tools or []:
+        fn = t["function"]
+        params = fn.get("parameters") or {}
+        props = params.get("properties") or {}
+        required = set(params.get("required") or [])
+        sig = ", ".join(_arg_text(n, p, n in required) for n, p in props.items())
+        lines.append(f"- {fn['name']}({sig}): {fn.get('description', '').strip()}")
+        for n, p in props.items():
+            if not isinstance(p, dict):
+                continue
+            about = [str(p.get("description", "")).strip(), _limits(p)]
+            if any(about):
+                lines.append(f"    {n}: " + "; ".join(a for a in about if a))
+    return "\n".join(lines)
+
+
 def inject_tool_prompt(messages: list[Message], tools: list[dict] | None) -> list[Message]:
     """Flatten tool history to text and append the JSON tool protocol to the system prompt."""
-    specs = json.dumps([t["function"] for t in tools or []], separators=(",", ":"))
+    specs = tool_lines(tools)
     out = flatten_messages(messages)
     sys = JSON_TOOL_PROMPT.format(tools=specs)
     if out and out[0]["role"] == "system":
@@ -200,9 +306,12 @@ class OpenAICompatProvider:
             )
         return self._client_obj
 
+    def handles(self, task: str) -> bool:
+        """A model is set for this job (whether or not the key is saved yet)."""
+        return task in self.cfg.models or (task != "vision" and "chat" in self.cfg.models)
+
     def supports(self, task: str) -> bool:
-        fits = task in self.cfg.models or (task != "vision" and "chat" in self.cfg.models)
-        return fits and self.available()
+        return self.handles(task) and self.available()
 
     def model_for(self, task: str) -> str:
         model = self.cfg.models.get(task) or self.cfg.models["chat"]
@@ -289,7 +398,7 @@ class OpenAICompatProvider:
 
         kwargs: dict[str, Any] = {"model": model, "messages": msgs, "temperature": 0.2}
         if native:
-            kwargs["tools"] = tools
+            kwargs["tools"] = wire_tools(tools)
         if (json_mode or prompt_tools) and not self._no_json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if self.cfg.keep_alive:
@@ -339,8 +448,15 @@ class OpenAICompatProvider:
             raise LLMError(f"{self.name}: timed out after {self.cfg.timeout_s}s") from e
         except openai.APIConnectionError as e:
             raise LLMError(f"{self.name}: not reachable at {self.cfg.base_url}", kind="unreachable") from e
+        except (openai.AuthenticationError, openai.PermissionDeniedError) as e:
+            # 401/403: the key is wrong, expired or revoked. Said plainly, never retried with the same key.
+            if self.cfg.secret:
+                raise LLMError(f"{self.name}: {key_refused(self.name)}", kind="auth") from e
+            raise LLMError(f"{self.name}: HTTP {e.status_code}: {str(e.message)[:200]}", kind="auth") from e
         except openai.APIStatusError as e:
             text = str(e.message).lower()
+            if e.status_code == 402 or ("insufficient" in text and ("credit" in text or "balance" in text)):
+                raise LLMError(f"{self.name}: your {display_name(self.name)} credits are used up", kind="quota") from e
             if e.status_code == 413 or "too large" in text or "reduce your message size" in text \
                     or "context length" in text or "maximum context" in text:
                 raise LLMError(f"{self.name}: request too large", kind="too_large") from e

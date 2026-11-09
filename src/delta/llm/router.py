@@ -20,6 +20,19 @@ from delta.llm.schemas import AllProvidersFailedError, LLMError, LLMResponse, Me
 from delta.system.logging import log
 
 
+def not_set_up(p: object) -> str:
+    """Why a provider cannot answer at all right now, in the words the user acts on."""
+    from delta.llm.providers import display_name
+
+    name = str(getattr(p, "name", "this AI"))
+    cfg = getattr(p, "cfg", None)
+    if cfg is not None and getattr(cfg, "secret", None):
+        return f"no {display_name(name)} key is saved; add one in Settings > Keys"
+    if _is_cli(p):
+        return f"{getattr(p, 'label', name)} is not installed on this PC (or Delta cannot find it)"
+    return "not running on this PC"
+
+
 def _is_cli(p: object) -> bool:
     """Claude Code / Codex / Cline: a CLI that builds its own prompt, so Delta cannot estimate it."""
     try:
@@ -60,6 +73,7 @@ MAX_RATE_LIMIT_WAIT_S = 20.0  # waiting this long beats switching to a weaker mo
 LAST_RESORT_WAIT_S = 60.0     # when no other provider is left
 DEFAULT_RATE_WAIT_S = 15.0    # rate limited but the provider gave no "try again in" hint
 QUOTA_COOLDOWN_S = 600.0  # out of credits/quota: no point asking again on every message
+AUTH_COOLDOWN_S = 3600.0  # key rejected (expired, revoked, mistyped): rests until a new key is saved (refresh())
 UNREACHABLE_COOLDOWN_S = 300.0  # local servers only; cloud blips use the normal breaker
 NETWORK_RETRY_DELAY_S = 1.5
 
@@ -71,10 +85,15 @@ class ModelRouter:
         routes: dict[str, list[str]],
         allow_local: Callable[[], bool] = lambda: True,
         preferred: str = "auto",
+        fallback: bool = True,
     ) -> None:
         self.providers = providers
         self.routes = routes
-        self.preferred = preferred  # the user's main AI: first for every task, others only as fallback
+        self.preferred = preferred  # the user's main AI: first for every task
+        # llm.fallback: may the other AIs on the route answer when the main AI fails? Delta's settings turn it off
+        # (bootstrap); True here keeps the router's own default for evals and tests that build it directly.
+        self.fallback = fallback
+        self.task_models: dict[str, str] = {}  # provider -> model that answered, since reset_meter()
         self.meter: dict[str, int] = {}  # tokens since reset_meter(): input / cached / output / calls
         self.allow_local = allow_local
         self.breakers = {name: CircuitBreaker() for name in providers}
@@ -116,17 +135,37 @@ class ModelRouter:
             log.info("router.local_back", provider=name)
         return back
 
-    def route(self, task: str) -> list[str]:
+    def _handles(self, name: str, task: str) -> bool:
+        """The provider can do this kind of job at all (a model is set for it), whether or not it is ready now."""
+        p = self.providers.get(name)
+        if p is None:
+            return False
+        handles = getattr(p, "handles", None)
+        return bool(handles(task)) if callable(handles) else bool(p.supports(task))
+
+    def strict(self, task: str) -> bool:
+        """Only the main AI may answer this job: one is chosen, it can do the job, and fallback is off."""
+        return (not self.fallback and self.preferred in self.providers
+                and self._handles(self.preferred, task))
+
+    def full_route(self, task: str) -> list[str]:
+        """Every provider that may be tried for `task` with fallback on: the main AI first, then the route."""
         route = self.routes.get(task) or self.routes.get("chat") or list(self.providers)
         if self.preferred in self.providers:
             route = [self.preferred, *(n for n in route if n != self.preferred)]
         return route
 
+    def route(self, task: str) -> list[str]:
+        if self.strict(task):
+            return [self.preferred]
+        return self.full_route(task)
+
     def usable(self) -> list[str]:
         """Providers that can serve chat right now, in the order they are tried: cloud ones need
-        a key, local ones (Ollama) must actually be running."""
+        a key, local ones (Ollama) must actually be running. Lists every ready provider (the settings page marks
+        each one ready or not), also when only the main AI answers."""
         out = []
-        for name in self.route("chat"):
+        for name in self.full_route("chat"):
             p = self.providers.get(name)
             if p is None:
                 continue
@@ -141,7 +180,11 @@ class ModelRouter:
         out = []
         for name in self.route(task):
             p = self.providers.get(name)
-            if p is None or not p.supports(task):
+            if p is None:
+                continue
+            if not p.supports(task):
+                if name == self.preferred and self.strict(task):
+                    self.skipped.setdefault(name, not_set_up(p))
                 continue
             if not self._ready(name, p):
                 self.skipped.setdefault(name, self.why_down.get(name, "resting after errors"))
@@ -178,11 +221,21 @@ class ModelRouter:
         candidates = self.candidates(task)
         if (first := self._first(prefer, task)) is not None:
             candidates = [first, *(c for c in candidates if c.name != first.name)]
+        if not candidates and self.strict(task):
+            p = self.providers[self.preferred]
+            ready = p.supports(task)
+            why = (self.why_down.get(self.preferred) or "resting after errors") if ready else not_set_up(p)
+            msg = self._main_failed(why)
+            raise AllProvidersFailedError(msg, ["error" if ready else "not_set_up"],
+                                          errors=[f"{self.preferred}: {why}"], user_message=msg)
         try:
             return await self._walk(candidates, messages, tools, task, json_mode, errors, kinds)
-        except AllProvidersFailedError:
+        except AllProvidersFailedError as e:
             extra = self._fallback_candidates(task, {c.name for c in candidates}, errors, kinds)
             if not extra:
+                if self.strict(task) and errors and "rate_limit" not in kinds[-1:]:
+                    msg = self._main_failed(errors[-1].split(": ", 1)[-1])
+                    raise AllProvidersFailedError(msg, kinds, errors=list(errors), user_message=msg) from e
                 raise
             log.warning("router.fallbacks", task=task, providers=[p.name for p in extra])
             resp = await self._walk(extra, messages, tools, task, json_mode, errors, kinds)
@@ -195,12 +248,21 @@ class ModelRouter:
         keep one live session per task and must not be shared by parallel helpers. Changes no route or
         default; raises AllProvidersFailedError when only CLI providers are set up."""
         candidates = [p for p in self.candidates(task) if not _is_cli(p)]
+        if not candidates and self.strict(task) and _is_cli(self.providers[self.preferred]):
+            # The main AI is a CLI, which helpers cannot share: they use the API providers on the route, as before.
+            candidates = [p for n in self.full_route(task) if (p := self.providers.get(n)) is not None
+                          and not _is_cli(p) and p.supports(task) and self._ready(n, p)
+                          and (not p.local or self.allow_local())]
         errors: list[str] = []
         kinds: list[str] = []
         if not candidates:
             raise AllProvidersFailedError(
                 f"No API model provider is available for task '{task}' (CLI providers are not used here)", [])
         return await self._walk(candidates, messages, tools, task, False, errors, kinds)
+
+    def _main_failed(self, why: str) -> str:
+        return (f"{self.preferred} (your main AI) could not answer: {why.strip().rstrip('.')}. Delta did not "
+                "switch to another AI because fallback is off (Apps > AI models).")
 
     def _fallback_candidates(self, task: str, tried: set[str], errors: list[str], kinds: list[str]) -> list[Provider]:
         """router.fallbacks (opt-in), only after outage-type failures: rate limit, unreachable, quota."""
@@ -248,13 +310,17 @@ class ModelRouter:
                 if e.kind == "quota":
                     # Out of credits: rest it instead of paying a failed call on every message.
                     self.breakers[p.name].trip(QUOTA_COOLDOWN_S)
+                elif e.kind == "auth":
+                    # The key was refused: every further call fails the same way until the user saves a new one
+                    # (saving a key calls refresh(), which lets it be tried again at once).
+                    self.breakers[p.name].trip(AUTH_COOLDOWN_S)
                 elif e.kind == "unreachable" and p.local:
                     # Nothing listening on this PC (e.g. Ollama not installed): stop trying for a while.
                     self.breakers[p.name].trip(UNREACHABLE_COOLDOWN_S)
                     self._resting_unreachable.add(p.name)
                     if callable(forget := getattr(p, "forget_ping", None)):
                         forget()  # its last "it answers" is stale now: ask again before using it
-                elif e.kind not in ("rate_limit", "too_large", "bad_tool_call", "quota"):  # not a provider health issue
+                elif e.kind not in ("rate_limit", "too_large", "bad_tool_call", "quota", "auth"):  # not its health
                     self.breakers[p.name].record_failure()
                 errors.append(str(e))
                 kinds.append(e.kind)
@@ -271,7 +337,7 @@ class ModelRouter:
         raise AllProvidersFailedError(
             "No model provider is available for task "
             f"'{task}'. Errors: {'; '.join(errors) or 'none configured (add API keys or start Ollama)'}",
-            kinds,
+            kinds, errors=list(errors),
             nothing_set_up=bool(candidates) and all(p.local for p in candidates)
             and all(k == "unreachable" for k in kinds),
         )
@@ -281,6 +347,8 @@ class ModelRouter:
         estimate for API providers, or "not reported" for CLI providers (usage.py)."""
         usage.add(self.meter, "calls", 1)
         self.model_calls[p.name] = self.model_calls.get(p.name, 0) + 1
+        if resp.model:
+            self.task_models[p.name] = resp.model
         if resp.usage:
             usage.add(self.meter, "reported_calls", 1)
             for k, v in resp.usage.items():
@@ -303,7 +371,15 @@ class ModelRouter:
         self.meter = {}
         self.skipped = {}
         self.model_calls = {}
+        self.task_models = {}
         self.fallback_used = ""
+
+    def answered_by(self) -> tuple[str, str]:
+        """(provider, model) that answered most of this task's calls (since reset_meter()), or ("", "")."""
+        if not self.model_calls:
+            return "", ""
+        name = max(self.model_calls, key=lambda n: (self.model_calls[n], n == self.preferred))
+        return name, self.task_models.get(name, "")
 
     def fallback_note(self) -> str:
         """Why the user's chosen main AI did not answer this task (e.g. out of credits), or ""."""

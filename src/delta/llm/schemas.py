@@ -30,7 +30,8 @@ class LLMError(RuntimeError):
     """Raised when a provider fails in a way that should trigger fallback.
 
     kind: "unreachable" (nothing listening, e.g. Ollama not installed), "rate_limit", "quota" (out of
-    credits: skip this provider for a while), or "error".
+    credits: skip this provider for a while), "auth" (the API key was refused: expired, revoked or wrong), or
+    "error".
     retry_after_s: for rate limits, how long the provider asked us to wait (if it said).
     """
 
@@ -41,9 +42,12 @@ class LLMError(RuntimeError):
 
 
 class AllProvidersFailedError(LLMError):
-    def __init__(self, message: str, kinds: list[str] | None = None, nothing_set_up: bool = False) -> None:
+    def __init__(self, message: str, kinds: list[str] | None = None, nothing_set_up: bool = False,
+                 errors: list[str] | None = None, user_message: str = "") -> None:
         super().__init__(message)
         self.kinds = kinds or []
+        self.errors = errors or []  # each provider's own error, "name: why"
+        self.user_message = user_message  # already in plain words for the user (e.g. the main AI's own failure)
         # Every provider tried was a local server (Ollama, LM Studio) that is not running: on a new PC with no key
         # this is "no AI model is set up", not an outage.
         self.nothing_set_up = nothing_set_up

@@ -437,7 +437,7 @@ def build(settings: Settings) -> Container:
     events = EventBus()
     governor = Governor(settings.governor, watch_gpu=any(p.local for p in settings.llm.providers.values()))
     router = ModelRouter(build_providers(settings), settings.llm.routes, allow_local=governor.allow_local,
-                         preferred=settings.llm.preferred)
+                         preferred=settings.llm.preferred, fallback=settings.llm.fallback)
     memory = MemoryStore.from_config(data / "memory.db", settings.memory)
     # Keyed chain (HMAC) when the credential store works; otherwise the plain hash chain as before.
     audit = AuditLog(data / "audit.jsonl", key_loader=load_or_create_key)

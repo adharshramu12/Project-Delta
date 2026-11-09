@@ -6,6 +6,27 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Changed
+
+- **The AI you pick is the AI that answers.** With a main AI chosen in Apps > AI models (Groq, NVIDIA, Cline, Codex,
+  ...), every planning, doing and checking step uses it. Before, any failure of it (for example an expired Groq key)
+  quietly handed the task to the next AI on the route, usually Codex, which then used your Codex plan. A new switch,
+  "If my main AI fails, let my other AIs answer" (`llm.fallback`, off by default), brings that back when you want it.
+  "Automatic" still follows the route as before, and a job your main AI cannot do at all (reading a screenshot with
+  a text-only AI) still uses the route.
+- **Refused keys are named.** A Groq, NVIDIA or DeepSeek key that is expired, revoked or mistyped now says "Groq key
+  expired or invalid. Add a new one in Settings > Keys" instead of a bare HTTP 401, and is not retried on every
+  message until you save a new one. NVIDIA "no credits left" (HTTP 402) is reported as used-up credits.
+- **Each answer and task says which AI and model ran it**: "via groq (openai/gpt-oss-120b)" under the answer and in
+  the Tasks list, counted from this task's own calls.
+- **Cline on Windows**: `cline.cmd` from npm is run through node directly, so Cline gets the whole prompt (cmd.exe cut
+  it at the first line break and would read `&` or `|` in a web page as commands); the command-line limit now counts
+  Windows quoting, so an over-long prompt is shortened and retried instead of Cline failing to start.
+- **Fewer tokens per step**: tools are described to Codex, Claude Code, Cline and local models as short signatures
+  instead of JSON schemas, API providers get lean schemas, and rules about tools a task is not given are left out.
+  `evals/token_bench.py`: 44,766 to 39,729 estimated input tokens over its six tasks (-11%), and 177,019 to 145,443
+  characters of CLI prompt (-18%).
+
 ### Fixed
 
 - **Pictures are recognised**: a picture from the dashboard or Telegram is looked at unless only its text is wanted;
