@@ -542,10 +542,10 @@ class MakeSpreadsheet(_WriterBase, Tool[MakeSpreadsheetArgs]):
 
         given = ([SheetArgs(name=args.title, table=args.table, totals=args.totals)] if args.table.strip() else [])
         sheets: list[Sheet] = []
-        for s in [*given, *args.more_sheets]:
-            columns, rows = parse_table(s.table)
+        for tab in [*given, *args.more_sheets]:
+            columns, rows = parse_table(tab.table)
             if columns:
-                sheets.append(Sheet(s.name, columns, [list(r) for r in rows], s.totals))
+                sheets.append(Sheet(tab.name, columns, [list(r) for r in rows], tab.totals))
         if not sheets:
             return ToolResult(False, "There was no table to put in the spreadsheet. Pass `table` as CSV text with "
                                      "the column headings on the first line, e.g. 'Item,Amount\\nRent,12000'.")
