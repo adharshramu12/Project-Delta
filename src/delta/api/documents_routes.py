@@ -15,7 +15,9 @@ from delta.addons.writer.document import list_documents
 
 MEDIA = {"pdf": "application/pdf", "md": "text/markdown; charset=utf-8", "html": "text/html; charset=utf-8",
          "tex": "text/plain; charset=utf-8",
-         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+         "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+         "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
 
 
 def register(app: FastAPI, c: Any, auth: Any) -> None:

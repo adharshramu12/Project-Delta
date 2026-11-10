@@ -54,8 +54,8 @@ _NEGATION = re.compile(r"(not|n't|never|unable|couldn|cannot|can't|failed|withou
 ACTION_TOOLS: dict[str, set[str]] = {
     "sent": {"send_message", "send_file", "chat_for_me", "start_meeting", "schedule_meeting",
              "alert_emergency_contacts"},
-    "saved": {"write_file", "edit_file", "make_document", "write_post", "take_screenshot", "camera_photo", "remember",
-              "schedule_task"},
+    "saved": {"write_file", "edit_file", "make_document", "make_presentation", "make_spreadsheet", "write_post",
+              "take_screenshot", "camera_photo", "remember", "schedule_task"},
     "deleted": {"delete_path", "delete_schedule", "edit_meeting"},
     "moved": {"move_path"},
     "scheduled": {"schedule_meeting", "schedule_task", "edit_meeting"},

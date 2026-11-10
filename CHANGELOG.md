@@ -12,6 +12,21 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   fails, ducks while you type, sleeps when nothing happens, says good morning once a day and laughs when clicked.
   It only reacts to real events, stays still with Windows' reduced motion, hides on narrow windows and can be
   switched off in Settings. Drawn with SVG shapes and CSS: no images, no library.
+- **Presentations and spreadsheets in one step.** "Make a presentation about X" now builds a real PowerPoint file
+  (.pptx): Delta writes the slides in one AI call (titles, short points, tables, speaker notes) and builds a clean
+  16:9 deck on the PC. "Make an Excel sheet of my budget" builds a real .xlsx with no extra AI call: a bold header
+  that stays in view, filters, numbers kept as numbers, a Total row and formulas. Both open in Microsoft Office,
+  Google and LibreOffice, are saved in Documents\Delta, show under Documents in the app, and go back to Telegram
+  when asked from there. Measured on a real PC with Groq: a 7-slide deck in 10 seconds and about 6,400 tokens; the
+  same kind of request used 380,000 tokens and failed before. A budget sheet took 4 seconds and one AI call.
+  Slide text is written by AI from what you give it, so Delta reminds you to check names, numbers and claims.
+  Spreadsheet text can never run as a formula; only plain arithmetic formulas (SUM, AVERAGE, IF, ROUND and
+  similar over cells of the same sheet) are kept as formulas.
+
+### Fixed
+- **A task no longer stops with "Something went wrong on my side" when the AI wraps its plan in a list.** Seen
+  with Groq's gpt-oss-120b; Delta now reads that plan, and anything that is not a plan falls back to working on
+  the request itself.
 
 ## 0.4.0 - 2026-11-09
 

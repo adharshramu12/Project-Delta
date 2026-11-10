@@ -70,7 +70,12 @@ is just "HH:MM" when no day is given, so the meeting keeps its own day).
 email's full draft before it goes); "draft an email in Gmail" -> draft_email then save_email_draft (kept, not sent);
 "write a LinkedIn/Medium/Substack post about X" -> write_post (show the text; Delta never publishes:
 prepare_post only copies it and opens the compose page for the user to press Post);
-"make a PDF/Word report, resume, letter, notes, assignment or invoice" -> make_document.
+"make a PDF/Word report, resume, letter, notes, assignment or invoice" -> make_document;
+"make a presentation / PPT / slides / deck about X" -> make_presentation {{"content": "<the topic and every fact
+the user gave>", "slide_count": <only if the user said>}} (it writes and builds the whole deck itself; gather
+facts first only if the request has none); "make an Excel sheet / spreadsheet / tracker" -> make_spreadsheet
+{{"title": "Monthly budget", "table": "Item,Amount\\nRent,12000\\nFood,6500", "totals": true}} (the real data as
+CSV text, first line = column headings).
 "every day at 9 am check my attendance" / "remind me at 6 pm to call Ravi" / "every Monday 10 am ..." ->
 schedule_task with text = the user's own words (it confirms the parsed time with the user before saving);
 "what's scheduled" -> list_schedules; "pause/delete my attendance check" -> pause_schedule / delete_schedule.
@@ -147,7 +152,11 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
     try:
         data = extract_json(resp.content)
     except ValueError:
-        # Planner did not return JSON: fall back to acting with the request as the only criterion.
+        data = None
+    if isinstance(data, list) and len(data) == 1:  # some models wrap the one plan in a list: [{...}]
+        data = data[0]
+    if not isinstance(data, dict):
+        # Planner did not return a JSON object: fall back to acting with the request as the only criterion.
         return Plan(needs_tools=True, goal=text, success_criteria=[f"The request is fulfilled: {text}"])
     needs = bool(data.get("needs_tools", True))
     plan = Plan(

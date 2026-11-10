@@ -65,7 +65,8 @@ If something failed, it tells you plainly instead of pretending.
   Delta stays under about 1 GB instead of growing.
 
 Delta also runs scheduled tasks and reminders, keeps a history of every task with resume after a crash, lets you
-undo its file changes, remembers what you tell it (encrypted on your PC) and writes PDF and Word documents. The
+undo its file changes, remembers what you tell it (encrypted on your PC) and makes PDF and Word documents, PowerPoint presentations
+and Excel spreadsheets. The
 docs below cover each one.
 
 ## Requirements
