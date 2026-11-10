@@ -24,7 +24,7 @@ TEMPLATE_OF: dict[str, str] = {
     "report": "report", "assignment": "report", "paper": "report", "letter": "letter", "resume": "resume",
     "notes": "notes", "one_pager": "notes", "invoice": "notes", "other": "notes",
 }
-DOC_EXTS = {".pdf", ".docx", ".md", ".html", ".tex"}
+DOC_EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".md", ".html", ".tex"}
 MATH = re.compile(r"\$\$.+?\$\$|(?<![\\$\w])\$(?=\S)[^$\n]{1,200}?(?<=\S)\$(?!\w)|\\\(.+?\\\)|\\\[.+?\\\]", re.S)
 LATEX_HINT = re.compile(r"\\(?:frac|sum|int|sqrt|alpha|beta|gamma|theta|lambda|sigma|pi|infty|partial|cdot|leq|geq|"
                         r"mathbb|mathrm|begin\{(?:equation|align))")

@@ -5,7 +5,7 @@
   const D = window.Delta, {$, h, icon, btn} = D;
   const box = $("documents");
   const path = name => `/api/documents/${encodeURIComponent(name)}`;
-  const TYPES = {pdf: "PDF", docx: "Word", md: "Markdown", html: "Web page", tex: "LaTeX"};
+  const TYPES = {pdf: "PDF", docx: "Word", pptx: "PowerPoint", xlsx: "Excel", md: "Markdown", html: "Web page", tex: "LaTeX"};
   let loaded = false;
 
   function downloadButton(name, label = "Download") {
