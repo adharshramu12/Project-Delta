@@ -113,23 +113,85 @@ def find_cli(names: tuple[str, ...], configured: str | None = None) -> str | Non
         if found := shutil.which(name):
             return found
     home = Path.home()
-    # The last folder is where the Codex desktop app keeps its CLI; it shares the app's sign-in.
+    env = os.environ.get
+    # ~/.codex/plugins/.plugin-appserver is where the Codex desktop app keeps a copy of its CLI (same sign-in).
     extra = [home / ".local" / "bin", home / ".claude" / "local", home / ".codex" / "bin",
-             home / ".codex" / "plugins" / ".plugin-appserver"]
-    if appdata := os.environ.get("APPDATA"):
+             home / ".codex" / "plugins" / ".plugin-appserver",
+             home / ".bun" / "bin", home / ".volta" / "bin", home / "scoop" / "shims", home / ".npm-global" / "bin"]
+    if appdata := env("APPDATA"):
         extra.append(Path(appdata) / "npm")
-    for folder in extra:
+    if local := env("LOCALAPPDATA"):
+        extra += [Path(local) / "pnpm", Path(local) / "Volta" / "bin", Path(local) / "Microsoft" / "WinGet" / "Links",
+                  Path(local) / "Microsoft" / "WindowsApps"]
+    extra += [Path(v) for k in ("NVM_SYMLINK", "PNPM_HOME", "BUN_INSTALL", "VOLTA_HOME") if (v := env(k))]
+    # Delta runs for days: a CLI installed after it started is on the PATH Windows has now, not on the PATH this
+    # process was given at sign-in. Read today's PATH from the registry too.
+    extra += windows_path_now()
+    for folder in dict.fromkeys(extra):
         for name in names:
             for suffix in ((".exe", ".cmd", "") if sys.platform == "win32" else ("",)):
-                if (p := folder / f"{name}{suffix}").is_file():
-                    return str(p)
-    if sys.platform == "win32" and "claude" in names and (local := os.environ.get("LOCALAPPDATA")):
+                try:
+                    if (p := folder / f"{name}{suffix}").is_file():
+                        return str(p)
+                except OSError:  # a PATH entry on a drive that is gone
+                    continue
+    if sys.platform == "win32" and "claude" in names and local:
         # The Claude desktop app ships its own Claude Code; use the newest copy when nothing else is installed.
         bundled = sorted(Path(local).glob("Claude-Data/*/claude-code/*/*/claude.exe"),
                          key=lambda p: p.stat().st_mtime, reverse=True)
         if bundled:
             return str(bundled[0])
+    if "codex" in names:
+        # The Codex app from the Microsoft Store: its CLI is inside the app's package folder. The copy under
+        # ~/.codex only appears after the app has used a plugin, so a fresh install has only this one.
+        for root in store_package_roots("OpenAI.Codex_"):
+            if (p := root / "app" / "resources" / "codex.exe").is_file():
+                return str(p)
     return None
+
+
+def windows_path_now() -> list[Path]:
+    """The folders on the user's and the machine's PATH as Windows has them now (the registry), with %VARS% filled
+    in. [] off Windows or when the registry cannot be read."""
+    if sys.platform != "win32":
+        return []
+    import winreg
+
+    out: list[Path] = []
+    for hive, key in ((winreg.HKEY_CURRENT_USER, "Environment"),
+                      (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
+        try:
+            with winreg.OpenKey(hive, key) as k:
+                value = str(winreg.QueryValueEx(k, "Path")[0])
+        except OSError:
+            continue
+        out += [Path(os.path.expandvars(part.strip().strip('"'))) for part in value.split(";") if part.strip()]
+    return out
+
+
+def store_package_roots(prefix: str) -> list[Path]:
+    """Install folders of this user's Microsoft Store packages whose full name starts with `prefix`, newest first.
+    Read from the registry: C:\\Program Files\\WindowsApps cannot be listed, but a known folder in it can be read."""
+    if sys.platform != "win32":
+        return []
+    import winreg
+
+    base = r"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages"
+    roots: list[Path] = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base) as k:
+            for i in range(winreg.QueryInfoKey(k)[0]):
+                name = winreg.EnumKey(k, i)
+                if not name.lower().startswith(prefix.lower()):
+                    continue
+                try:
+                    with winreg.OpenKey(k, name) as pkg:
+                        roots.append(Path(str(winreg.QueryValueEx(pkg, "PackageRootFolder")[0])))
+                except OSError:
+                    continue
+    except OSError:
+        return []
+    return sorted(roots, key=lambda p: p.name, reverse=True)
 
 
 # npm's Windows shim (cmd-shim): `"%_prog%"  "%dp0%\node_modules\pkg\bin\cli.js" %*`, or `"%dp0%\...\x.exe" %*`.
@@ -853,8 +915,10 @@ class ClineProvider(CLIProvider):
 
     def handles(self, task: str) -> bool:
         return task != "vision" and super().handles(task)  # its CLI takes no screenshots
-    MAX_PROMPT_CHARS = 30000  # the prompt is a command-line argument; Windows allows ~32k characters
+    MAX_PROMPT_CHARS = 400_000  # beyond any model Cline offers; smaller prompts are trimmed by the orchestrator
+    MAX_INLINE_LINE = 24000   # a longer command line: the prompt goes into PROMPT_FILE and is @-mentioned
     MAX_COMMAND_LINE = 32000  # Windows: 32,767 characters for the whole command line, quoting included
+    PROMPT_FILE = "delta-prompt.md"
     # The list the Cline app shows (free, recommended, ...). Free models cost the user nothing.
     MODELS_URL = "https://api.cline.bot/api/v1/ai/cline/recommended-models"
     FREE_OFFLINE = ("reflection/beam-free", "cline-free/solar-mini4", "cline-free/nemotron-3.5-super-vl",
@@ -941,9 +1005,18 @@ class ClineProvider(CLIProvider):
         return cmd
 
     async def _run(self, cmd: list[str], prompt: str, cwd: str) -> tuple[str, str, int]:
-        # Cline reads its prompt only from the command line (piped input is not detected on Windows).
+        # Cline reads its prompt only from the command line (piped input is not detected on Windows), and Windows
+        # allows about 32,000 characters there. A longer prompt (a task that has read a few web pages) goes into a
+        # file in Cline's working folder, and the command line carries only an @file mention: Cline puts the file's
+        # text into the prompt itself, with no tool call. Before, such a task simply failed.
         if len(prompt) > self.MAX_PROMPT_CHARS:
-            raise LLMError(f"{self.name}: prompt too long for Cline's command line", kind="too_large")
+            raise LLMError(f"{self.name}: prompt too long for Cline", kind="too_large")
+        if prompt and len(subprocess.list2cmdline([*cmd, prompt])) > self.MAX_INLINE_LINE:
+            try:
+                (Path(cwd) / self.PROMPT_FILE).write_text(prompt, encoding="utf-8")
+            except OSError as e:
+                raise LLMError(f"{self.name}: could not write the prompt file: {e}", kind="too_large") from e
+            prompt = f"Your whole task is in @{self.PROMPT_FILE} . Do exactly what it says and reply as it asks."
         if cmd and sys.platform == "win32" and not Path(cmd[0]).suffix and Path(cmd[0] + ".cmd").is_file():
             cmd = [cmd[0] + ".cmd", *cmd[1:]]  # npm's extensionless `cline` is a shell script for Git Bash
         if cmd and cmd[0].lower().endswith((".cmd", ".bat")):

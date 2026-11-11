@@ -5,7 +5,10 @@ follows the pointer, a thin orange border around the screen, a small label) and 
 
 - `active()` wraps every action where Delta drives input (desktop tools, your-browser tools, Delta's own
   browser). Nested and back-to-back actions keep it on without flicker (a short hold after the last one).
-- An action that fails or is cancelled hides it at once, without the hold. `stop()` (task end, Stop, the
+- Inside a task (`arm()` .. `stop()`) it comes on with the first such action and then stays on until the task
+  ends, also while the AI is thinking between steps: before, it vanished after every step and people could not
+  tell whether Delta was still working.
+- A cancelled action hides it at once; outside a task a failed one does too. `stop()` (task end, Stop, the
   hotkeys) hides it at once whatever is still nested.
 - Heartbeat: while it is on, the event loop that turned it on beats every second; if Delta hangs, the
   overlay hides itself after a few seconds without a beat.
@@ -50,6 +53,7 @@ class AgentCursor:
         self._timer: threading.Timer | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._beating = False
+        self._in_task = False  # arm() .. stop(): once Delta has driven something, the signal stays until the task ends
         atexit.register(self.close)
 
     # --- set-up -------------------------------------------------------------------------------------------
@@ -60,6 +64,7 @@ class AgentCursor:
             self._on_stop = on_stop
         with contextlib.suppress(RuntimeError):
             self._loop = asyncio.get_running_loop()
+        self._in_task = True
         self._ensure_overlay()
 
     def _ensure_overlay(self) -> Any:
@@ -91,8 +96,13 @@ class AgentCursor:
         self.begin()
         try:
             yield
+        except Exception:
+            # Inside a task a failed step is not the end: Delta reads the error and tries another way, so the
+            # signal stays (the task's end hides it). Outside a task it is gone at once.
+            self.end(now=not self._in_task)
+            raise
         except BaseException:
-            self.end(now=True)  # failed or stopped: gone at once
+            self.end(now=True)  # stopped or cancelled: gone at once
             raise
         self.end()
 
@@ -111,7 +121,9 @@ class AgentCursor:
             if now:
                 self._depth = 0
                 self._hide()
-            elif self._depth == 0 and self._on:
+            elif self._depth == 0 and self._on and not self._in_task:
+                # Inside a task it stays on between steps, while the AI thinks about the next one: people watching
+                # must see that Delta still has the PC. stop() hides it when the task ends, fails or is stopped.
                 self._timer = threading.Timer(HOLD_S, self._hide_if_idle)
                 self._timer.daemon = True
                 self._timer.start()
@@ -119,6 +131,7 @@ class AgentCursor:
     def stop(self) -> None:
         """Task ended or was stopped: hide now, whatever is still running."""
         with self._lock:
+            self._in_task = False
             self._depth = 0
             if self._timer:
                 self._timer.cancel()

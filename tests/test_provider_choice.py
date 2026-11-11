@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -356,9 +357,10 @@ def test_cline_command_line_limit_counts_quoting(tmp_path: Path, monkeypatch: py
     exe = tmp_path / "cline-cli.exe"
     exe.write_text("", encoding="utf-8")
     p, seen = _capture_cline(monkeypatch, str(exe))
-    with pytest.raises(LLMError) as e:
-        asyncio.run(p.complete("chat", [{"role": "user", "content": '"' * 20000}], None))
-    assert e.value.kind == "too_large" and seen == []
+    asyncio.run(p.complete("chat", [{"role": "user", "content": '"' * 20000}], None))
+    # too long once quoted: the prompt goes into a file and the command line stays far under Windows' limit
+    assert len(seen) == 1 and f"@{p.PROMPT_FILE}" in seen[0][-1]
+    assert len(subprocess.list2cmdline(seen[0])) < p.MAX_INLINE_LINE
 
 
 def test_cline_desktop_exe_is_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
