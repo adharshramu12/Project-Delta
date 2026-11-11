@@ -415,12 +415,24 @@ async def test_cline_gets_the_prompt_as_an_argument_and_refuses_oversize(tmp_pat
     from delta.llm.schemas import LLMError
 
     p = _cline(tmp_path)
-    procs = fake_cline(monkeypatch, lambda cmd: (CLINE_OK, 0))
+    files: list[str] = []
+
+    def respond(cmd):  # read the prompt file while Cline's working folder still exists
+        f = Path(cmd[cmd.index("-c") + 1]) / p.PROMPT_FILE
+        files.append(f.read_text(encoding="utf-8") if f.is_file() else "")
+        return CLINE_OK, 0
+
+    procs = fake_cline(monkeypatch, respond)
     r = await p.complete("chat", [{"role": "user", "content": "say OK"}], None)
-    assert r.content == "OK" and "say OK" in procs[0].cmd[-1]
+    assert r.content == "OK" and "say OK" in procs[0].cmd[-1] and files == [""]  # short: on the command line
+    # A long prompt (a task that read web pages) used to fail with "prompt too long for Cline's command line".
+    # Now it goes into a file in Cline's folder and the command line only mentions the file.
+    r = await p.complete("chat", [{"role": "user", "content": "x" * 40000 + " END-MARK"}], None)
+    assert r.content == "OK" and f"@{p.PROMPT_FILE}" in procs[1].cmd[-1] and len(procs[1].cmd[-1]) < 200
+    assert "END-MARK" in files[1] and len(files[1]) > 40000
     with pytest.raises(LLMError) as e:
-        await p.complete("chat", [{"role": "user", "content": "x" * 40000}], None)
-    assert e.value.kind == "too_large"
+        await p.complete("chat", [{"role": "user", "content": "x" * (p.MAX_PROMPT_CHARS + 1)}], None)
+    assert e.value.kind == "too_large" and len(procs) == 2
     assert not p.supports("vision")
 
 

@@ -102,7 +102,10 @@ class DuckDuckGo:
 
 
 class SearchRouter:
-    COOLDOWN_S = 3600
+    COOLDOWN_S = 3600      # a refused key or a used-up plan: no point asking again for an hour
+    SHORT_COOLDOWN_S = 60  # anything else (a slow network, a busy service): try again in a minute
+    _LONG = ("401", "402", "403", "quota", "credit", "invalid api key", "unauthorized", "payment")
+    _EMPTY = ("no results", "no result")
 
     def __init__(self, providers: list[SearchProvider]) -> None:
         self.providers = providers
@@ -116,20 +119,32 @@ class SearchRouter:
     async def search(self, query: str, n: int = 5) -> tuple[str, list[SearchHit]]:
         import httpx
 
-        errors = []
-        for p in self.providers:
-            if not p.available() or self._cooldown.get(p.name, 0) > time.monotonic():
-                continue
+        errors: list[str] = []
+        empty = False
+        usable = [p for p in self.providers if p.available()]
+        rested = [p for p in usable if self._cooldown.get(p.name, 0) <= time.monotonic()]
+        # Every provider resting is not a reason to answer nothing: ask the last one anyway (the free one).
+        for p in rested or usable[-1:]:
             try:
                 hits = await p.search(query, n)
             except (SearchError, httpx.HTTPError) as e:
-                self._cooldown[p.name] = time.monotonic() + self.COOLDOWN_S
-                errors.append(str(e))
-                log.warning("search.fallback", provider=p.name, error=str(e))
+                text = str(e)
+                if any(w in text.lower() for w in self._EMPTY):
+                    empty = True  # the search worked and found nothing: that is an answer, not a broken provider
+                    continue
+                long = any(w in text.lower() for w in self._LONG)
+                self._cooldown[p.name] = time.monotonic() + (self.COOLDOWN_S if long else self.SHORT_COOLDOWN_S)
+                errors.append(text)
+                log.warning("search.fallback", provider=p.name, error=text)
                 continue
             if hits:
                 return p.name, hits
-        raise SearchError("all search providers failed: " + "; ".join(errors))
+            empty = True
+        if empty and not errors:
+            raise SearchError(f"No results for '{query[:80]}'. Try fewer or different words.")
+        why = "; ".join(errors) or "no search provider is set up"
+        raise SearchError(f"Web search is not working right now ({why}). "
+                          "Use browser_search to search in the browser instead.")
 
 
 class SearchArgs(BaseModel):

@@ -24,6 +24,26 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   similar over cells of the same sheet) are kept as formulas.
 
 ### Fixed
+- **WhatsApp messages go through again, and to phone numbers too.** The new WhatsApp for Windows is a web view:
+  one look at its window took Delta about 17 seconds (15,000 controls, the same page seen 80 times) against waits
+  of 5 seconds, so Delta opened WhatsApp and then stopped. Delta now looks only inside the page (about 0.2
+  seconds). A phone number ("+91 98765 43210", or a local number, which gets the PC's country code) opens its
+  chat with WhatsApp's own link, so it also works for a number that is not in your contacts.
+- **Codex and Cline are found when they are installed.** Delta now finds the Codex app from the Microsoft Store
+  in its package folder, looks in the folders of pnpm, Bun, Volta, Scoop, WinGet and nvm, and reads Windows'
+  current PATH, so a CLI installed after Delta started is found without signing out. Opening Apps > AI models
+  checks again at once.
+- **The orange border stays for the whole task.** It used to vanish a second after every step, so while the AI
+  was thinking nobody could tell whether Delta was still working. Now it comes on with the first step that
+  drives the mouse, keyboard or browser and stays until the task is done, fails or is stopped.
+- **Long tasks no longer fail on Cline with "prompt too long for Cline's command line".** A prompt that does not
+  fit Windows' command line goes into a file that Cline reads in. Browser tasks that had read a few pages hit
+  this and ended with no answer.
+- **Web search no longer switches itself off for an hour.** One search with no results rested the free search
+  for an hour, and every search in that hour failed with no reason given. "No results" is now an answer, a short
+  network problem rests a provider for a minute, and when search really is down Delta is told to search in the
+  browser instead.
+- **A window that closes at the wrong moment no longer fails the step** ("Invalid window handle").
 - **A task no longer stops with "Something went wrong on my side" when the AI wraps its plan in a list.** Seen
   with Groq's gpt-oss-120b; Delta now reads that plan, and anything that is not a plan falls back to working on
   the request itself.

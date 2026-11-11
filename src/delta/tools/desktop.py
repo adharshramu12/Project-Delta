@@ -225,7 +225,12 @@ def _is_foreground(w: Any) -> bool:
         top = w.top_level_parent().handle
     except Exception:
         top = w.handle
-    return fg in (w.handle, top) or win32gui.GetAncestor(fg, 3) == top  # GA_ROOTOWNER
+    if fg in (w.handle, top):
+        return True
+    try:  # no window is in front for a moment while Windows switches windows: fg is 0 and GetAncestor raises
+        return bool(fg) and win32gui.GetAncestor(fg, 3) == top  # GA_ROOTOWNER
+    except Exception:
+        return False
 
 
 def _ensure_foreground(title: str | None) -> Any:
@@ -382,7 +387,10 @@ def _window_info(hwnd: int) -> Target:
     import win32gui
     import win32process
 
-    top = win32gui.GetAncestor(hwnd, 2) or hwnd  # GA_ROOT
+    try:
+        top = win32gui.GetAncestor(hwnd, 2) or hwnd  # GA_ROOT
+    except Exception:  # the window closed between finding it and asking about it
+        top = hwnd
     _, pid = win32process.GetWindowThreadProcessId(top)
     try:
         process = psutil.Process(pid).name()

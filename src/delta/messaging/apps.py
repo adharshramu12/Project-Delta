@@ -116,6 +116,68 @@ def _press(keys: str) -> None:
     send_keys(keys)
 
 
+def _scope(w: Any) -> Any:
+    """Where to look for controls: the app's web page when it has one, else the window.
+
+    WhatsApp for Windows is now a web view. Walking its whole window visits the same page about 80 times (the
+    wrappers around it repeat), about 15,000 controls and 17 seconds per look, far longer than any wait here.
+    Asking Windows for the page itself takes a few hundredths of a second, and the page has about 200 controls.
+    Apps with no web page (Telegram) are searched as before."""
+    try:
+        from pywinauto.controls.uiawrapper import UIAWrapper
+        from pywinauto.uia_defines import IUIA
+        from pywinauto.uia_element_info import UIAElementInfo
+
+        ui = IUIA()
+        is_page = ui.iuia.CreatePropertyCondition(ui.UIA_dll.UIA_ControlTypePropertyId,
+                                                  ui.UIA_dll.UIA_DocumentControlTypeId)
+        found = w.element_info.element.FindFirst(ui.UIA_dll.TreeScope_Descendants, is_page)
+        return UIAWrapper(UIAElementInfo(found)) if found else w
+    except Exception:
+        return w
+
+
+# Country calling codes for a number written without one, by the PC's region (Windows Settings > Region).
+CALLING_CODES = {"IN": "91", "US": "1", "CA": "1", "GB": "44", "AE": "971", "AU": "61", "SG": "65", "DE": "49",
+                 "FR": "33", "PK": "92", "BD": "880", "LK": "94", "NP": "977", "SA": "966", "MY": "60", "ID": "62",
+                 "NG": "234", "ZA": "27", "BR": "55", "QA": "974", "KW": "965", "OM": "968", "IT": "39", "ES": "34"}
+_PHONE = re.compile(r"^\+?[\d\s().-]{7,20}$")
+
+
+def region_code() -> str:
+    """The PC's region as two letters ('IN'), or '' when Windows does not say."""
+    try:
+        import ctypes
+
+        buf = ctypes.create_unicode_buffer(8)
+        return buf.value.upper() if ctypes.windll.kernel32.GetUserDefaultGeoName(buf, 8) else ""
+    except Exception:
+        return ""
+
+
+def phone_number(person: str, region: str | None = None) -> str | None:
+    """'+91 98765 43210' / '9876543210' -> '919876543210' (digits with the country code), or None when `person` is
+    a name. A number with no country code gets the PC's region's code; MessagingError when that is unknown."""
+    text = person.strip()
+    if not _PHONE.match(text):
+        return None
+    digits = re.sub(r"\D", "", text)
+    if not 7 <= len(digits) <= 15:
+        return None
+    if text.startswith("+"):
+        return digits
+    if digits.startswith("00"):
+        return digits[2:]
+    if digits.startswith("0"):  # a local number written with its leading 0 (098765 43210)
+        digits = digits.lstrip("0")
+    elif len(digits) > 10:  # already has its country code (919876543210)
+        return digits
+    code = CALLING_CODES.get(region_code() if region is None else region, "")
+    if not code:
+        raise MessagingError(f"'{person}' has no country code. Give the number with it, like +91 98765 43210.")
+    return code + digits
+
+
 class AppDriver(ABC):
     name: str = ""
     label: str = ""
@@ -174,7 +236,7 @@ class _SearchListDriver(AppDriver):
         """(search box, message box). The message box is matched by name only: once text is typed,
         WhatsApp's search box loses its name, and typing a message into it must never happen."""
         search = compose = unnamed = None
-        for e in w.descendants(control_type="Edit"):
+        for e in _scope(w).descendants(control_type="Edit"):
             n = (e.element_info.name or "").strip()
             if compose is None and any(n.startswith(c) for c in self.compose_names) and e.is_visible():
                 compose = e
@@ -193,20 +255,37 @@ class _SearchListDriver(AppDriver):
         time.sleep(0.2)
         _press("^a{BACKSPACE}")
         _type(person)
-        time.sleep(2.2)
-        items = [e for e in w.descendants() if e.element_info.control_type in self.result_types]
-        chat = choose_contact(person, [e.element_info.name or "" for e in items])
+        time.sleep(0.8)
+        end = time.monotonic() + 6  # results arrive in a moment or after a few seconds on a slow PC: look until then
+        while True:
+            items = [e for e in _scope(w).descendants() if e.element_info.control_type in self.result_types]
+            try:
+                chat = choose_contact(person, [e.element_info.name or "" for e in items])
+                break
+            except AmbiguousContactError:
+                raise
+            except ContactNotFoundError:
+                if time.monotonic() >= end:
+                    raise
+                time.sleep(0.5)
         target = next(e for e in items if contact_label(e.element_info.name or "") == chat)
         try:
             target.invoke()
         except Exception:
             target.click_input()
-        end = time.monotonic() + 5
-        while time.monotonic() < end:  # an open chat has a message box
-            if self._edits(w)[1] is not None:
-                return chat
-            time.sleep(0.5)
+        if self._wait_for_message_box(w, 8):
+            return chat
         raise MessagingError(f"Opened '{chat}' in {self.label} but no message box appeared.")
+
+    def _wait_for_message_box(self, w: Any, seconds: float) -> bool:
+        """An open chat has a message box. At least one look, however long a look takes."""
+        end = time.monotonic() + seconds
+        while True:
+            if self._edits(w)[1] is not None:
+                return True
+            if time.monotonic() >= end:
+                return False
+            time.sleep(0.4)
 
     def send_text(self, text: str) -> bool:
         """Type into the chat's message box and send. Enter is pressed ONLY after the text is
@@ -245,20 +324,37 @@ class _SearchListDriver(AppDriver):
     def read(self, count: int = 15) -> list[str]:
         w = self.open_app()
         rows = [re.sub(r"\s+", " ", e.element_info.name or "").strip()
-                for e in w.descendants(control_type="ListItem")]
+                for e in _scope(w).descendants(control_type="ListItem")]
         return [r for r in rows if r][-count:]
 
 
 class WhatsAppDriver(_SearchListDriver):
     name, label = "whatsapp", "WhatsApp"
-    search_names = ("Search or start a new chat", "Search")
-    compose_names = ("Type a message",)
+    search_names = ("Search or start a new chat", "Search", "Ask Meta AI or Search")
+    compose_names = ("Type a message", "Type to ")
+    TITLE = re.compile(r"^(?:\(\d+\+?\)\s*)?WhatsApp(?: Beta)?$")  # "(3) WhatsApp" with unread chats
 
     def _is_mine(self, title: str) -> bool:
-        return title.strip() == "WhatsApp"
+        return bool(self.TITLE.match(title.strip()))
 
     def _launch(self) -> None:
         os.startfile("whatsapp:")
+
+    def open_chat(self, person: str) -> str:
+        """A name goes through WhatsApp's search. A phone number opens its chat directly with WhatsApp's own
+        link, which also works for a number that is not in the contacts (search finds only saved people)."""
+        number = phone_number(person)
+        if number is None:
+            return super().open_chat(person)
+        os.startfile(f"whatsapp://send?phone={number}")
+        w = self.window(wait_s=25)
+        if w is None:
+            raise MessagingError("WhatsApp did not open. Is it installed and signed in?")
+        w.set_focus()
+        if self._wait_for_message_box(w, 12):
+            return f"+{number}"
+        raise MessagingError(f"WhatsApp did not open a chat for +{number}. The number may not be on WhatsApp, or "
+                             "it needs its country code (like +91 98765 43210).")
 
     CALL_BUTTON = re.compile(r"^(voice|audio) call$", re.I)
 
@@ -266,7 +362,7 @@ class WhatsAppDriver(_SearchListDriver):
         """Open the person's chat (confirmed, as for sending) and press WhatsApp's voice-call button."""
         chat = self.open_chat(person)
         w = self.open_app()
-        buttons = (e for e in w.descendants() if e.element_info.control_type == "Button")
+        buttons = (e for e in _scope(w).descendants() if e.element_info.control_type == "Button")
         button = next((e for e in buttons if self.CALL_BUTTON.match(e.element_info.name or "")), None)
         if button is None:
             raise MessagingError(f"Opened {chat}'s chat but found no voice-call button; the message was still sent.")

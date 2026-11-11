@@ -86,6 +86,8 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
 
     async def describe(name: str, p: Any) -> dict[str, Any]:
         if isinstance(p, CLIProvider):
+            if not p.available():
+                p.refresh()  # the page is open because the user is looking: check again now, not in a minute
             exe = await asyncio.to_thread(p.executable)
             signed = await p.signed_in() if exe else None
             return {"name": name, "label": p.label, "kind": "cli", "installed": bool(exe),
