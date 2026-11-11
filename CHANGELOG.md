@@ -7,6 +7,11 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Changed
+- **A warmer start.** While Delta starts, Tri draws itself, lands with a small bounce, opens its eyes and says
+  what it is doing ("Waking up", "Finding your tools"), in your PC's light or dark colours, then fades into the
+  app. On the first screen the greeting and the example cards arrive one after another, and a card lifts under
+  the pointer. Design only: nothing about how Delta works has changed, and with Windows' reduced motion it is
+  still.
 - **"Open this site" finishes at once, with no AI call.** "open youtube.com", "go to github.com/you", "open gmail",
   "open tradingview account": Delta opens the page and is done. Before, the page opened and then a second AI call
   ran only to decide that the task was finished; on a real PC that call took 93 seconds and the user stopped it.
