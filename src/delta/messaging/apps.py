@@ -137,6 +137,20 @@ def _scope(w: Any) -> Any:
         return w
 
 
+def _controls(w: Any, control_type: str | None = None) -> list[Any]:
+    """Every control in the app's page (or only those of one type). A list that is redrawing can lose a row in
+    the middle of the walk, and the walk then fails: look again, a few times, before giving up."""
+    last: Exception | None = None
+    for _ in range(4):
+        try:
+            scope = _scope(w)
+            return list(scope.descendants(control_type=control_type) if control_type else scope.descendants())
+        except Exception as e:  # pywinauto raises KeyError, COMError and others for a control that is gone
+            last = e
+            time.sleep(0.4)
+    raise MessagingError(f"Could not read the app's window ({type(last).__name__}). Nothing was typed or sent.")
+
+
 # Country calling codes for a number written without one, by the PC's region (Windows Settings > Region).
 CALLING_CODES = {"IN": "91", "US": "1", "CA": "1", "GB": "44", "AE": "971", "AU": "61", "SG": "65", "DE": "49",
                  "FR": "33", "PK": "92", "BD": "880", "LK": "94", "NP": "977", "SA": "966", "MY": "60", "ID": "62",
@@ -214,15 +228,16 @@ class AppDriver(ABC):
         """Open `person`'s chat and return the confirmed chat name."""
 
     @abstractmethod
-    def send_text(self, text: str) -> bool:
-        """Type and send into the open chat; True if the message was seen afterwards."""
+    def send_text(self, text: str, chat: str = "") -> bool:
+        """Type and send into the open chat; True if the message was seen afterwards. `chat` is the chat it must
+        go to (default: the one open_chat opened last); a driver that can read the open chat's name checks it."""
 
     def read(self, count: int = 15) -> list[str]:
         raise MessagingError(f"Reading {self.label} chats is not supported yet.")
 
     def send(self, person: str, text: str) -> Sent:
         chat = self.open_chat(person)
-        return Sent(chat, self.send_text(text))
+        return Sent(chat, self.send_text(text, chat))
 
 
 class _SearchListDriver(AppDriver):
@@ -231,12 +246,33 @@ class _SearchListDriver(AppDriver):
     search_names: tuple[str, ...] = ()
     compose_names: tuple[str, ...] = ()  # the message box, found ONLY by its own name
     result_types: tuple[str, ...] = ("DataItem", "ListItem")
+    opened: str = ""  # the chat open_chat confirmed last
+    LOAD_WAIT_S = 40  # a cold start shows a loading screen first
+
+    def box_chat(self, compose: Any) -> str:
+        """The chat the message box says it writes to ('Type a message to Ravi' -> 'Ravi'), or '' when the app's
+        box does not say."""
+        return ""
+
+    def check_chat(self, w: Any, chat: str) -> Any:
+        """The message box, only if the open chat is `chat`. Raises MessagingError otherwise, before a single key
+        is typed. A message to the wrong person cannot be taken back, so "probably right" is never enough: where
+        the app names the open chat, the name must match."""
+        _, compose = self._edits(w)
+        if compose is None:
+            raise MessagingError(f"No open chat in {self.label} to type into.")
+        if not chat:
+            return compose
+        named = self.box_chat(compose)
+        if named and _norm(named) != _norm(chat):
+            raise MessagingError(f"{self.label} has the chat '{named}' open, not '{chat}'. Nothing was typed or sent.")
+        return compose
 
     def _edits(self, w: Any) -> tuple[Any | None, Any | None]:
         """(search box, message box). The message box is matched by name only: once text is typed,
         WhatsApp's search box loses its name, and typing a message into it must never happen."""
         search = compose = unnamed = None
-        for e in _scope(w).descendants(control_type="Edit"):
+        for e in _controls(w, "Edit"):
             n = (e.element_info.name or "").strip()
             if compose is None and any(n.startswith(c) for c in self.compose_names) and e.is_visible():
                 compose = e
@@ -249,33 +285,47 @@ class _SearchListDriver(AppDriver):
     def open_chat(self, person: str) -> str:
         w = self.open_app()
         search, _ = self._edits(w)
+        end = time.monotonic() + self.LOAD_WAIT_S
+        while search is None and time.monotonic() < end:  # just started: still loading its chats
+            time.sleep(1.0)
+            search, _ = self._edits(w)
         if search is None:
-            raise MessagingError(f"Could not find {self.label}'s search box.")
+            raise MessagingError(f"Could not find {self.label}'s search box after {self.LOAD_WAIT_S} seconds. Is "
+                                 f"{self.label} signed in and showing your chats?")
         search.click_input()  # a click: Windows may refuse a plain focus request
         time.sleep(0.2)
         _press("^a{BACKSPACE}")
         _type(person)
-        time.sleep(0.8)
-        end = time.monotonic() + 6  # results arrive in a moment or after a few seconds on a slow PC: look until then
+        self.opened = ""
+        time.sleep(1.5)
+        # The list redraws while results arrive, and a row read a moment ago can be showing another chat by the
+        # time it is clicked. So: wait until two looks in a row give the same list, then pick from that list.
+        end = time.monotonic() + 8
+        before: list[str] | None = None
         while True:
-            items = [e for e in _scope(w).descendants() if e.element_info.control_type in self.result_types]
-            try:
-                chat = choose_contact(person, [e.element_info.name or "" for e in items])
+            items = [e for e in _controls(w) if e.element_info.control_type in self.result_types]
+            names = [e.element_info.name or "" for e in items]
+            if names == before or time.monotonic() >= end:
                 break
-            except AmbiguousContactError:
-                raise
-            except ContactNotFoundError:
-                if time.monotonic() >= end:
-                    raise
-                time.sleep(0.5)
+            before = names
+            time.sleep(0.6)
+        chat = choose_contact(person, names)
         target = next(e for e in items if contact_label(e.element_info.name or "") == chat)
-        try:
-            target.invoke()
-        except Exception:
-            target.click_input()
-        if self._wait_for_message_box(w, 8):
-            return chat
-        raise MessagingError(f"Opened '{chat}' in {self.label} but no message box appeared.")
+        if contact_label(target.element_info.name or "") != chat:  # read again at the last moment
+            raise MessagingError(f"{self.label}'s list changed while opening '{chat}'. Nothing was typed or sent.")
+        target.click_input()
+        end = time.monotonic() + 8
+        problem = f"Opened '{chat}' in {self.label} but no message box appeared."
+        while True:  # the chat is open only when the message box is there AND, where the app says, names this chat
+            try:
+                self.check_chat(w, chat)
+                self.opened = chat
+                return chat
+            except MessagingError as e:
+                problem = str(e) if "open, not" in str(e) or "Could not confirm" in str(e) else problem
+            if time.monotonic() >= end:
+                raise MessagingError(problem)
+            time.sleep(0.4)
 
     def _wait_for_message_box(self, w: Any, seconds: float) -> bool:
         """An open chat has a message box. At least one look, however long a look takes."""
@@ -287,14 +337,14 @@ class _SearchListDriver(AppDriver):
                 return False
             time.sleep(0.4)
 
-    def send_text(self, text: str) -> bool:
+    def send_text(self, text: str, chat: str = "") -> bool:
         """Type into the chat's message box and send. Enter is pressed ONLY after the text is
         confirmed inside that box: if Windows kept focus elsewhere, the keys would land in another
-        app, and Enter there could do anything. Sent = the box empties, as both apps do on send."""
+        app, and Enter there could do anything. Sent = the box empties, as both apps do on send.
+        The open chat is checked against `chat` before typing and again before Enter."""
         w = self.open_app()
-        _, compose = self._edits(w)
-        if compose is None:
-            raise MessagingError(f"No open chat in {self.label} to type into.")
+        chat = chat or self.opened
+        compose = self.check_chat(w, chat)
         compose.click_input()  # a real click: focus requests can be refused by Windows, clicks are not
         time.sleep(0.3)
         _press("^a{BACKSPACE}")
@@ -306,6 +356,12 @@ class _SearchListDriver(AppDriver):
                 _press("^a{BACKSPACE}")
             raise MessagingError(f"The text did not reach {self.label}'s message box (another window kept the "
                                  "keyboard), so nothing was sent. Try again with the app in front.")
+        try:
+            self.check_chat(w, chat)  # still the same chat, now that the text is in the box
+        except MessagingError:
+            if self._has_focus(compose):
+                _press("^a{BACKSPACE}")
+            raise
         _press("{ENTER}")
         end = time.monotonic() + 5
         while time.monotonic() < end:
@@ -324,7 +380,7 @@ class _SearchListDriver(AppDriver):
     def read(self, count: int = 15) -> list[str]:
         w = self.open_app()
         rows = [re.sub(r"\s+", " ", e.element_info.name or "").strip()
-                for e in _scope(w).descendants(control_type="ListItem")]
+                for e in _controls(w, "ListItem")]
         return [r for r in rows if r][-count:]
 
 
@@ -332,6 +388,22 @@ class WhatsAppDriver(_SearchListDriver):
     name, label = "whatsapp", "WhatsApp"
     search_names = ("Search or start a new chat", "Search", "Ask Meta AI or Search")
     compose_names = ("Type a message", "Type to ")
+    BOX_CHAT = re.compile(r"^(?:Type a message to|Type to)\s+(.+)$", re.S)
+
+    def box_chat(self, compose: Any) -> str:
+        m = self.BOX_CHAT.match((compose.element_info.name or "").strip())
+        return m.group(1).strip() if m else ""
+
+    def check_chat(self, w: Any, chat: str) -> Any:
+        """WhatsApp's message box names its chat ('Type a message to Ravi'). A box that names nobody (an older
+        WhatsApp) is accepted only when the chat's own heading shows the name."""
+        compose = super().check_chat(w, chat)
+        if chat and not self.box_chat(compose):
+            heads = (e.element_info.name or "" for e in _controls(w, "Text"))
+            if not any(_norm(h) == _norm(chat) for h in heads):
+                raise MessagingError(f"Could not confirm that '{chat}' is the open WhatsApp chat. Nothing was typed "
+                                     "or sent.")
+        return compose
     TITLE = re.compile(r"^(?:\(\d+\+?\)\s*)?WhatsApp(?: Beta)?$")  # "(3) WhatsApp" with unread chats
 
     def _is_mine(self, title: str) -> bool:
@@ -346,15 +418,30 @@ class WhatsAppDriver(_SearchListDriver):
         number = phone_number(person)
         if number is None:
             return super().open_chat(person)
+        self.opened = ""
+        was = ""  # the chat that is open now, so a chat left open from before is never mistaken for the new one
+        if (w := self.window()) is not None and (box := self._edits(w)[1]) is not None:
+            was = self.box_chat(box)
         os.startfile(f"whatsapp://send?phone={number}")
         w = self.window(wait_s=25)
         if w is None:
             raise MessagingError("WhatsApp did not open. Is it installed and signed in?")
         w.set_focus()
-        if self._wait_for_message_box(w, 12):
-            return f"+{number}"
-        raise MessagingError(f"WhatsApp did not open a chat for +{number}. The number may not be on WhatsApp, or "
-                             "it needs its country code (like +91 98765 43210).")
+        end = time.monotonic() + 12
+        while True:
+            box = self._edits(w)[1]
+            named = self.box_chat(box) if box is not None else ""
+            # The box names the number itself (not in the contacts) or the contact's name (then it must be a chat
+            # that was not open before the link). Anything else is not proof, and nothing is typed without proof.
+            if named and (re.sub(r"\D", "", named).endswith(number[-7:]) or _norm(named) != _norm(was)):
+                self.opened = named
+                return named
+            if time.monotonic() >= end:
+                break
+            time.sleep(0.4)
+        raise MessagingError(f"Could not confirm that WhatsApp opened the chat for +{number}. The number may not be "
+                             "on WhatsApp, or it needs its country code (like +91 98765 43210). If the person is "
+                             "in your contacts, give their name instead. Nothing was typed or sent.")
 
     CALL_BUTTON = re.compile(r"^(voice|audio) call$", re.I)
 
@@ -362,7 +449,7 @@ class WhatsAppDriver(_SearchListDriver):
         """Open the person's chat (confirmed, as for sending) and press WhatsApp's voice-call button."""
         chat = self.open_chat(person)
         w = self.open_app()
-        buttons = (e for e in _scope(w).descendants() if e.element_info.control_type == "Button")
+        buttons = (e for e in _controls(w) if e.element_info.control_type == "Button")
         button = next((e for e in buttons if self.CALL_BUTTON.match(e.element_info.name or "")), None)
         if button is None:
             raise MessagingError(f"Opened {chat}'s chat but found no voice-call button; the message was still sent.")
@@ -413,7 +500,7 @@ class SlackDriver(AppDriver):
             time.sleep(0.6)
         raise MessagingError(f"Slack did not open a conversation with '{person}'. Check the name.")
 
-    def send_text(self, text: str) -> bool:
+    def send_text(self, text: str, chat: str = "") -> bool:
         self.open_app()  # the message box has focus after switching conversations
         _type(text)
         _press("{ENTER}")

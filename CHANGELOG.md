@@ -29,6 +29,12 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   of 5 seconds, so Delta opened WhatsApp and then stopped. Delta now looks only inside the page (about 0.2
   seconds). A phone number ("+91 98765 43210", or a local number, which gets the PC's country code) opens its
   chat with WhatsApp's own link, so it also works for a number that is not in your contacts.
+- **A WhatsApp message can no longer go to the wrong chat.** In a test on 11 November a message went to another
+  person: Delta clicked a search result while the list was still redrawing, saw a message box and typed. WhatsApp
+  names the chat in the box itself ("Type a message to Ravi"), and Delta now reads it: before typing and again
+  before Enter the name must match, or nothing is typed and Delta says which chat was open. Delta also waits for
+  the search results to stop changing, waits for WhatsApp to finish loading, and reads the list again when a row
+  vanishes mid-read.
 - **Codex and Cline are found when they are installed.** Delta now finds the Codex app from the Microsoft Store
   in its package folder, looks in the folders of pnpm, Bun, Volta, Scoop, WinGet and nvm, and reads Windows'
   current PATH, so a CLI installed after Delta started is found without signing out. Opening Apps > AI models

@@ -87,23 +87,112 @@ def test_whatsapp_window_titles():
     assert not any(d._is_mine(t) for t in ("WhatsApp - Google Chrome", "My WhatsApp notes.txt - Notepad", ""))
 
 
-def test_a_number_opens_its_chat_with_whatsapps_own_link(monkeypatch):
-    opened: list[str] = []
+class Box:
+    """A message box as UI Automation shows it: WhatsApp names the chat in the box's own name."""
+
+    def __init__(self, name):
+        self.element_info = type("Info", (), {"name": name})()
+        self.typed = False
+
+    def click_input(self):
+        self.typed = True
+
+
+def whatsapp_showing(monkeypatch, box_name):
+    """A WhatsApp whose open chat has this message box (None = no chat open). The name can be changed later."""
+    state = {"name": box_name, "started": []}
 
     class Window:
         def set_focus(self):
-            opened.append("focus")
+            pass
 
     d = WhatsAppDriver()
-    monkeypatch.setattr(apps.os, "startfile", opened.append, raising=False)
+    monkeypatch.setattr(apps.os, "startfile", state["started"].append, raising=False)
     monkeypatch.setattr(apps, "region_code", lambda: "IN")
+    monkeypatch.setattr(apps.time, "sleep", lambda s: None)
+    clock = iter(range(0, 10**6, 2))  # every look "takes" two seconds, so waits end without real waiting
+    monkeypatch.setattr(apps.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(d, "window", lambda wait_s=0: Window())
-    monkeypatch.setattr(d, "_wait_for_message_box", lambda w, seconds: True)
-    assert d.open_chat("98765 43210") == "+919876543210"
-    assert opened == ["whatsapp://send?phone=919876543210", "focus"]
-    monkeypatch.setattr(d, "_wait_for_message_box", lambda w, seconds: False)
-    with pytest.raises(MessagingError, match="may not be on WhatsApp"):
+    monkeypatch.setattr(d, "open_app", lambda: Window())
+    monkeypatch.setattr(d, "_edits", lambda w: (None, Box(state["name"]) if state["name"] is not None else None))
+    monkeypatch.setattr(apps, "_controls", lambda w, control_type=None: [])
+    return d, state
+
+
+def test_nothing_is_typed_unless_the_message_box_names_the_right_chat(monkeypatch):
+    """11 Nov: a test message went to the wrong person. Delta clicked a search result, saw *a* message box and
+    typed. The box said which chat it belonged to ('Type a message to ...') and nobody read it."""
+    typed: list[str] = []
+    monkeypatch.setattr(apps, "_type", typed.append)
+    monkeypatch.setattr(apps, "_press", typed.append)
+    d, state = whatsapp_showing(monkeypatch, "Type a message to Someone Else")
+    with pytest.raises(MessagingError, match="has the chat 'Someone Else' open, not 'Ramu BSNL'"):
+        d.send_text("hello", "Ramu BSNL")
+    assert typed == []  # not one key
+    d.opened = "Ramu BSNL"  # the chat open_chat confirmed is the default
+    with pytest.raises(MessagingError, match="Nothing was typed or sent"):
+        d.send_text("hello")
+    assert typed == []
+    state["name"] = "Type a message to ramu  bsnl"  # same chat: case and spacing do not matter
+    assert d.check_chat(object(), "Ramu BSNL") is not None
+    state["name"] = "Type a message"  # an older WhatsApp names nobody: without the chat's heading, no
+    with pytest.raises(MessagingError, match="Could not confirm"):
+        d.check_chat(object(), "Ramu BSNL")
+    heading = type("T", (), {"element_info": type("I", (), {"name": "Ramu BSNL"})()})()
+    monkeypatch.setattr(apps, "_controls", lambda w, control_type=None: [heading])
+    assert d.check_chat(object(), "Ramu BSNL") is not None
+    state["name"] = None
+    with pytest.raises(MessagingError, match="No open chat"):
+        d.check_chat(object(), "Ramu BSNL")
+
+
+def test_the_chat_is_checked_again_after_typing_and_before_enter(monkeypatch):
+    d, state = whatsapp_showing(monkeypatch, "Type a message to Ramu BSNL")
+    keys: list[str] = []
+
+    def typing(text):
+        keys.append(text)
+        state["name"] = "Type a message to Someone Else"  # the app switched chats while Delta typed
+
+    monkeypatch.setattr(apps, "_type", typing)
+    monkeypatch.setattr(apps, "_press", keys.append)
+    monkeypatch.setattr(apps, "_value", lambda box: "hello")
+    with pytest.raises(MessagingError, match="open, not 'Ramu BSNL'"):
+        d.send_text("hello", "Ramu BSNL")
+    assert "{ENTER}" not in keys
+
+
+def test_a_number_opens_its_chat_with_whatsapps_own_link_and_must_be_confirmed(monkeypatch):
+    d, state = whatsapp_showing(monkeypatch, "Type a message to +91 98765 43210")
+    assert d.open_chat("98765 43210") == "+91 98765 43210" and d.opened == "+91 98765 43210"
+    assert state["started"] == ["whatsapp://send?phone=919876543210"]
+    # A chat that was already open and names somebody else is not proof that the link worked.
+    d, state = whatsapp_showing(monkeypatch, "Type a message to Someone Else")
+    with pytest.raises(MessagingError, match="Could not confirm"):
         d.open_chat("+91 98765 43210")
+    assert d.opened == ""
+    d, state = whatsapp_showing(monkeypatch, None)
+    with pytest.raises(MessagingError, match="Nothing was typed or sent"):
+        d.open_chat("+91 98765 43210")
+
+
+def test_a_row_that_vanishes_while_the_list_redraws_is_read_again(monkeypatch):
+    calls = []
+
+    class Scope:
+        def descendants(self, control_type=None):
+            calls.append(control_type)
+            if len(calls) < 3:
+                raise KeyError(None)  # pywinauto, for a control that is gone
+            return ["row"]
+
+    monkeypatch.setattr(apps, "_scope", lambda w: Scope())
+    monkeypatch.setattr(apps.time, "sleep", lambda s: None)
+    assert apps._controls(object()) == ["row"] and len(calls) == 3
+    calls.clear()
+    monkeypatch.setattr(Scope, "descendants", lambda self, control_type=None: (_ for _ in ()).throw(KeyError(None)))
+    with pytest.raises(MessagingError, match="Nothing was typed or sent"):
+        apps._controls(object(), "Edit")
 
 
 def test_the_message_box_is_looked_for_at_least_once_however_slow_a_look_is(monkeypatch):
