@@ -6,6 +6,20 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.4.1 - 2026-11-11
+
+Fixes for what the first users reported, and files Delta can now make. In short:
+
+- **WhatsApp works again, and never types into the wrong chat** (#66): messages to names and to phone numbers,
+  with the chat's name checked before typing and again before sending.
+- **Codex and Cline are found when they are installed** (#66), including the Codex app from the Microsoft Store.
+- **The orange border stays on for the whole task** (#66), so you can see that Delta is still working.
+- **Long tasks no longer end with no answer** (#66): long prompts work on Cline, and web search no longer switches
+  itself off for an hour.
+- **Presentations and spreadsheets in one step** (#64): real PowerPoint and Excel files, in seconds.
+- **Tri, Delta's pet** (#61): a small triangle in the corner that shows what Delta is doing.
+- **A cleaner install** (#63): no more warning from uv.
+
 ### Added
 - **Tri, Delta's pet.** A small triangle (Delta's own Δ) in the corner of the dashboard that shows what
   Delta is doing: it thinks while Delta plans, bounces while it works, jumps when a task is done, tips over when one
