@@ -6,6 +6,13 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Changed
+- **"Open this site" finishes at once, with no AI call.** "open youtube.com", "go to github.com/you", "open gmail",
+  "open tradingview account": Delta opens the page and is done. Before, the page opened and then a second AI call
+  ran only to decide that the task was finished; on a real PC that call took 93 seconds and the user stopped it.
+  The open proves itself only when the page that loaded is on the site asked for; a sign-in wall or another site
+  still goes to the normal agent.
+
 ## 0.4.1 - 2026-11-11
 
 Fixes for what the first users reported, and files Delta can now make. In short:

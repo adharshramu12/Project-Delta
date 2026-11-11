@@ -142,6 +142,48 @@ def pc_intent(text: str) -> Intent | None:
     return None
 
 
+# "open youtube.com", "go to github.com/adharshramu12", "open gmail", "open tradingview account": one browser_open
+# call, 0 tokens, no planner. Before, the page opened and then a second, slow AI call only decided that the task was
+# finished: people saw the browser open and Delta "stop" for a minute or more. Strict: a web address, or one of the
+# site names below, and nothing else to do there. browser_open proves the result itself (the page that loaded is on
+# the site asked for); when it cannot, the normal agent takes over with the page already open.
+SITES = {
+    "youtube": "youtube.com", "gmail": "mail.google.com", "google": "google.com", "chatgpt": "chatgpt.com",
+    "gemini": "gemini.google.com", "claude": "claude.ai", "instagram": "instagram.com", "facebook": "facebook.com",
+    "linkedin": "linkedin.com", "twitter": "x.com", "reddit": "reddit.com", "netflix": "netflix.com",
+    "wikipedia": "wikipedia.org", "github": "github.com", "notebooklm": "notebooklm.google.com",
+    "notebook lm": "notebooklm.google.com", "perplexity": "perplexity.ai", "tradingview": "tradingview.com",
+    "trading view": "tradingview.com", "whatsapp web": "web.whatsapp.com", "google drive": "drive.google.com",
+    "google docs": "docs.google.com", "google sheets": "sheets.google.com", "google calendar": "calendar.google.com",
+    "google maps": "maps.google.com", "google meet": "meet.google.com", "flipkart": "flipkart.com",
+    "stack overflow": "stackoverflow.com", "stackoverflow": "stackoverflow.com", "hugging face": "huggingface.co",
+    "huggingface": "huggingface.co",
+}
+# Endings that are web addresses, not file names ("open notes.txt" and "open setup.exe" are not websites).
+_TLDS = ("com|in|org|net|io|ai|dev|app|co|edu|gov|me|tv|info|xyz|tech|so|uk|us|ca|au|de|fr|jp|sg|ae|online|site|"
+         "store|cloud|gg|to|ly|fm|be")
+_OPEN_SITE = re.compile(
+    POLITE + r"(?:open|launch|go\s+to|visit|take\s+me\s+to|show\s+me)\s+(?:up\s+)?(?:the\s+|my\s+)?"
+    r"(?:(?:website|site|page|link|url)\s+)?(?P<what>.+?)"
+    r"(?:\s+(?:website|site|page|account|home\s*page))?(?:\s+in\s+(?:the\s+|my\s+)?browser)?"
+    r"(?:\s+(?:please|pls|now))?\s*[.!]*$", re.I)
+_ADDRESS = re.compile(rf"^(?:https?://)?(?:[\w-]+\.)+(?:{_TLDS})(?::\d{{2,5}})?(?:/\S*)?$", re.I)
+
+
+def open_site_intent(text: str) -> Intent | None:
+    m = _OPEN_SITE.match(text)
+    if not m:
+        return None
+    what = m["what"].strip(" '\"")
+    if _ADDRESS.match(what) and " " not in what:
+        url = what if "://" in what else f"https://{what}"
+    elif (site := SITES.get(" ".join(what.lower().split()))) is not None:
+        url = f"https://{site}"
+    else:
+        return None
+    return Intent("browser_open", {"url": url}, f"{url} is open in the browser")
+
+
 def match_intent(text: str, available: set[str]) -> Intent | None:
     t = " ".join(text.split())
     if len(t) > 160 or "\n" in text:
@@ -153,6 +195,8 @@ def match_intent(text: str, available: set[str]) -> Intent | None:
             return intent if intent.tool in available else None
     if (pc := pc_intent(t)) is not None:
         return pc if pc.tool in available else None
+    if (site := open_site_intent(t)) is not None:  # before apps: "open tradingview" is a site, not a program
+        return site if site.tool in available else None
     if (opened := open_app_intent(t)) is not None:
         return opened if opened.tool in available else None
     if (browser := browser_intent(t)) is not None:
