@@ -380,6 +380,20 @@ class BrowserManager:
             self._proc = None
 
 
+def same_site(asked: str, got: str) -> bool:
+    """True when the page that loaded (`got`) is on the site that was asked for: the same host, or one a site
+    sends you to itself (www, a sub-domain, its parent). 'gmail.com' -> 'accounts.google.com' is not: a sign-in
+    wall or a parked page is not the site, and the agent should look at it."""
+    from urllib.parse import urlsplit
+
+    def host(url: str) -> str:
+        h = (urlsplit(url if "://" in url else f"https://{url}").hostname or "").lower()
+        return h.removeprefix("www.")
+
+    a, g = host(asked), host(got)
+    return bool(a and g) and (a == g or a.endswith("." + g) or g.endswith("." + a))
+
+
 async def _evidence(page: Any, mgr: BrowserManager) -> dict[str, Any]:
     mgr.current_url = page.url
     return {"url": page.url, "title": await page.title()}
@@ -811,7 +825,11 @@ class BrowserOpen(_BrowserTool[OpenArgs]):
             url = args.url if "://" in args.url else f"https://{args.url}"
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await settle(page)
-            return await _observed(page, self.mgr, f"opened {await page.title()} ({page.url})", force_full=True)
+            result = await _observed(page, self.mgr, f"opened {await page.title()} ({page.url})", force_full=True)
+            # Opening a page proves itself when the page is on the site asked for: "open youtube.com" is then done
+            # with this one call, with no second AI call only to say so.
+            result.evidence["verified"] = same_site(url, page.url)
+            return result
 
         return await self._guarded(go)
 

@@ -491,7 +491,12 @@ class UBOpen(_UBTool):
         return [args.url]
 
     async def run(self, args: OpenArgs) -> ToolResult:
-        return await self._do(self.ub.open, args.url)
+        result = await self._do(self.ub.open, args.url)
+        if result.ok:  # the address bar shows the site asked for: the open proved itself (see BrowserOpen)
+            from delta.tools.browser import same_site
+
+            result.evidence["verified"] = same_site(args.url, str(result.evidence.get("url", "")))
+        return result
 
 
 class UBSearch(_UBTool):

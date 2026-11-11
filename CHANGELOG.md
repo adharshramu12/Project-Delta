@@ -12,6 +12,11 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   app. On the first screen the greeting and the example cards arrive one after another, and a card lifts under
   the pointer. Design only: nothing about how Delta works has changed, and with Windows' reduced motion it is
   still.
+- **"Open this site" finishes at once, with no AI call.** "open youtube.com", "go to github.com/you", "open gmail",
+  "open tradingview account": Delta opens the page and is done. Before, the page opened and then a second AI call
+  ran only to decide that the task was finished; on a real PC that call took 93 seconds and the user stopped it.
+  The open proves itself only when the page that loaded is on the site asked for; a sign-in wall or another site
+  still goes to the normal agent.
 
 ## 0.4.1 - 2026-11-11
 

@@ -293,10 +293,54 @@ async def test_a_blip_rests_a_provider_briefly_and_the_last_one_is_always_asked(
     r = SearchRouter([ddg])
     with pytest.raises(SearchError, match="browser_search"):
         await r.search("q")
-    assert r._cooldown["duckduckgo"] - time.monotonic() <= SearchRouter.SHORT_COOLDOWN_S
+    assert r._cooldown["duckduckgo"] - time.monotonic() <= SearchRouter.SHORT_COOLDOWN_S + 1  # +1: clock rounding
     ddg.error, ddg.hits = "", [SearchHit("t", "https://x", "s")]
     assert (await r.search("q"))[0] == "duckduckgo"  # resting, but it is the only one: asked anyway
     paid = Search("tavily", error="HTTP 402 out of credits")
     r = SearchRouter([paid, ddg])
     await r.search("q")
-    assert r._cooldown["tavily"] - time.monotonic() > SearchRouter.SHORT_COOLDOWN_S  # a used-up plan rests long
+    assert r._cooldown["tavily"] - time.monotonic() > SearchRouter.SHORT_COOLDOWN_S + 1  # a used-up plan rests long
+
+
+# --- "open this site" ------------------------------------------------------------------------------------
+
+
+def test_opening_a_site_is_one_call_with_no_ai():
+    """'open trading view account': the page opened in 8 s, then a second AI call ran for 93 s only to decide the
+    task was finished, and the user stopped it. A plain 'open <site>' is now an instant command."""
+    from delta.core.intents import match_intent
+
+    tools = {"open_app", "browser_open", "play_youtube"}
+
+    def url(text):
+        i = match_intent(text, tools)
+        return i.args.get("url") if i is not None and i.tool == "browser_open" else None
+
+    assert url("open youtube.com") == "https://youtube.com"
+    assert url("open trading view account") == "https://tradingview.com"
+    assert url("open tradingview") == "https://tradingview.com"  # a site, not a program
+    assert url("go to github.com/adharshramu12") == "https://github.com/adharshramu12"
+    assert url("open https://newerp.kluniversity.in/") == "https://newerp.kluniversity.in/"
+    assert url("Open the website kluniversity.in please") == "https://kluniversity.in"
+    assert url("open google docs in my browser") == "https://docs.google.com"
+    # anything with more to do, a file, or a program is not this command
+    for text in ("open gmail and send a mail to ravi", "open youtube and play lofi", "open notes.txt",
+                 "open setup.exe", "open report.pdf", "open my downloads", "open the page about pricing"):
+        assert url(text) is None, text
+    assert match_intent("open notepad", tools).tool == "open_app"
+    assert match_intent("open chrome", tools).tool == "open_app"
+    assert match_intent("open youtube.com", {"open_app"}) is None  # no browser tool: the planner decides
+
+
+def test_an_open_proves_itself_only_on_the_site_that_was_asked_for():
+    from delta.tools.browser import same_site
+
+    assert same_site("youtube.com", "https://www.youtube.com/")
+    assert same_site("https://mail.google.com", "https://mail.google.com/mail/u/0/")
+    assert same_site("tradingview.com", "https://in.tradingview.com/")
+    assert same_site("github.com/a", "https://github.com/a")
+    # a sign-in wall, a blank page or another site is not proof: the agent looks at it
+    assert not same_site("mail.google.com", "https://accounts.google.com/signin")
+    assert not same_site("x.com", "about:blank")
+    assert not same_site("example.com", "https://notexample.com/")
+    assert not same_site("", "https://example.com/")
