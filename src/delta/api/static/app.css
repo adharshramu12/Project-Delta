@@ -622,3 +622,10 @@ dialog::backdrop{background:var(--overlay)}
 @keyframes tri-z{0%{opacity:0;transform:translate(0,0)}40%{opacity:1}100%{opacity:0;transform:translate(8px,-14px)}}
 @media (max-width:760px){.tri{display:none}}
 @media (prefers-reduced-motion:reduce){.tri-body,.tri[data-mood] .tri-body,.tri-z{animation:none!important}}
+
+/* First screen: the greeting and the example cards arrive one after another; a card lifts under the pointer */
+.hero>*{animation:hero-in .45s var(--ease) both}
+.hero>:nth-child(2){animation-delay:.06s}.hero>:nth-child(3){animation-delay:.12s}.hero>:nth-child(n+4){animation-delay:.18s}
+.example{transition:border-color var(--t-fast),background var(--t-fast),transform var(--t-fast),box-shadow var(--t-fast)}
+.example:hover{transform:translateY(-2px);box-shadow:var(--shadow-2)}
+@keyframes hero-in{from{opacity:0;transform:translateY(8px)}}

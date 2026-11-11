@@ -157,21 +157,82 @@ def _open_app_window(settings: Settings, url: str) -> bool:
 
 
 # Shown the instant the user double-clicks, while the service starts (a few seconds, longer on a busy
-# PC). With nothing on screen people click again; now they see Delta starting. It switches itself to
-# the dashboard once the service answers. No token in this file: it arrives in the URL's #fragment.
-SPLASH = """<!doctype html><meta charset="utf-8"><title>Delta</title>
-<style>body{margin:0;height:100vh;display:grid;place-items:center;background:#1f1e1d;color:#eceae6;
-font:16px system-ui,sans-serif}.d{width:10px;height:10px;border-radius:50%;background:#d97757;display:inline-block;
-margin-right:10px;animation:p .8s infinite alternate}@keyframes p{to{opacity:.25}}#s{color:#9b968f;font-size:13px;
-margin-top:10px}</style>
-<div><span class="d"></span>Starting Delta…<div id="s">This takes a few seconds.</div></div>
+# PC). With nothing on screen people click again; now they see Delta starting: Tri draws itself, lands with a
+# small bounce, opens its eyes and says what it is doing, in the PC's light or dark colours. It switches itself
+# to the dashboard once the service answers (after at least a second on screen, so it never just flashes), with a
+# short fade. No token in this file: it arrives in the URL's #fragment. Still with Windows' reduced motion.
+SPLASH = """<!doctype html><html lang="en"><meta charset="utf-8"><title>Delta</title>
+<meta name="color-scheme" content="dark light">
+<style>
+:root{--bg:#1f1e1d;--fg:#eceae6;--mut:#9b968f;--o:#E07A47;--od:#9C4A22}
+@media (prefers-color-scheme:light){:root{--bg:#faf9f7;--fg:#1f1e1d;--mut:#77726b}}
+body{margin:0;height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);
+font:16px "Segoe UI",system-ui,sans-serif;overflow:hidden}
+main{display:grid;justify-items:center;transition:opacity .28s ease,transform .28s ease}
+main.go{opacity:0;transform:scale(1.06)}
+svg{width:132px;height:128px;overflow:visible}
+.tri{transform-origin:60px 100px;animation:land .9s cubic-bezier(.2,1.5,.4,1) both,bob 3s ease-in-out 1.3s infinite}
+.shape{fill:var(--o);stroke:var(--od);stroke-width:3;stroke-linejoin:round;stroke-dasharray:312;
+stroke-dashoffset:312;fill-opacity:0;animation:draw .7s ease-out forwards,fill .35s .5s forwards}
+.face{opacity:0;animation:show .25s .85s forwards}
+.eyes{transform-origin:60px 67px;animation:blink 4.2s 1.8s infinite}
+.shadow{fill:#0003;transform-origin:60px 110px;animation:shadow .9s both}
+h1{font-size:22px;font-weight:600;letter-spacing:.2px;margin:14px 0 4px;opacity:0;animation:rise .5s 1s forwards}
+#s{color:var(--mut);font-size:13px;min-height:18px;max-width:80vw;text-align:center;opacity:0;
+animation:rise .5s 1.15s forwards;transition:opacity .2s}
+#s.swap{opacity:0!important}
+.bar{width:120px;height:3px;border-radius:3px;background:#8883;overflow:hidden;margin-top:16px;opacity:0;
+animation:rise .5s 1.3s forwards}
+.bar i{display:block;width:40%;height:100%;border-radius:3px;background:var(--o);
+animation:slide 1.3s ease-in-out infinite}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes fill{to{fill-opacity:1}}
+@keyframes show{to{opacity:1}}
+@keyframes land{0%{transform:translateY(-26px) scale(.86)}60%{transform:translateY(0) scale(1.04,.94)}
+100%{transform:none}}
+@keyframes bob{50%{transform:translateY(-4px)}}
+@keyframes blink{0%,93%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+@keyframes shadow{0%{transform:scaleX(.5);opacity:0}100%{transform:none;opacity:1}}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01s!important;animation-delay:0s!important;
+animation-iteration-count:1!important;transition:none!important}}
+</style>
+<main id="m"><svg viewBox="0 0 120 116" aria-hidden="true">
+<ellipse class="shadow" cx="60" cy="110" rx="40" ry="4"/>
+<g class="tri"><path class="shape" d="M60 10 L112 100 L8 100 Z"/>
+<g class="face"><path d="M40 52 L54 55 M80 52 L66 55" stroke="#3A2418" stroke-width="3" stroke-linecap="round"/>
+<g class="eyes"><ellipse cx="49" cy="66" rx="8" ry="10" fill="#fff"/>
+<ellipse cx="71" cy="66" rx="8" ry="10" fill="#fff"/>
+<circle cx="51" cy="69" r="4.5" fill="#2A2420"/><circle cx="73" cy="69" r="4.5" fill="#2A2420"/></g>
+<path d="M51 84 Q60 92 69 84" fill="none" stroke="#2A2420" stroke-width="3" stroke-linecap="round"/>
+<ellipse cx="38" cy="82" rx="5" ry="3" fill="#F2A7A7"/><ellipse cx="82" cy="82" rx="5" ry="3" fill="#F2A7A7"/>
+</g></g></svg>
+<h1>Delta</h1><div id="s" role="status">Waking up…</div><div class="bar"><i></i></div></main>
 <script>
 const q = new URLSearchParams(location.search), target = q.get("target"), t0 = Date.now();
+const s = document.getElementById("s"), m = document.getElementById("m");
+const lines = ["Waking up…", "Stretching my corners…", "Finding your tools…", "Almost there…"];
+let n = 0, late = false;
+const talk = setInterval(() => {
+  if (late) return;
+  s.classList.add("swap");
+  setTimeout(() => { s.textContent = lines[n = Math.min(n + 1, lines.length - 1)]; s.classList.remove("swap"); }, 200);
+}, 2200);
+function open() {
+  clearInterval(talk);
+  m.classList.add("go");
+  setTimeout(() => location.replace(target + location.hash), 280);
+}
 async function poll() {
-  try { await fetch(target, {mode: "no-cors", cache: "no-store"}); location.replace(target + location.hash); }
-  catch (e) {
-    if (Date.now() - t0 > 90000) document.getElementById("s").textContent =
-      "Delta is taking unusually long. Details: " + q.get("log");
+  try {
+    await fetch(target, {mode: "no-cors", cache: "no-store"});
+    setTimeout(open, Math.max(0, 1100 - (Date.now() - t0)));
+  } catch (e) {
+    if (Date.now() - t0 > 90000) {
+      late = true;
+      s.textContent = "Delta is taking unusually long. Details: " + q.get("log");
+    }
     setTimeout(poll, 400);
   }
 }

@@ -6,6 +6,13 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Changed
+- **A warmer start.** While Delta starts, Tri draws itself, lands with a small bounce, opens its eyes and says
+  what it is doing ("Waking up", "Finding your tools"), in your PC's light or dark colours, then fades into the
+  app. On the first screen the greeting and the example cards arrive one after another, and a card lifts under
+  the pointer. Design only: nothing about how Delta works has changed, and with Windows' reduced motion it is
+  still.
+
 ### Added
 - **Tri, Delta's pet.** A small triangle (Delta's own Δ) in the corner of the dashboard that shows what
   Delta is doing: it thinks while Delta plans, bounces while it works, jumps when a task is done, tips over when one
