@@ -30,7 +30,9 @@ from delta.tools.base import Risk, Tool, ToolResult
 
 T = TypeVar("T")
 
+# Money leaving or a position changing is never a plain click: buying AND selling, trading, withdrawing.
 SENDY = re.compile(r"\b(send|submit|pay|payment|buy|purchase|order|place order|checkout|check out|donate|"
+                   r"sell|trade|square off|exit position|withdraw|withdrawal|redeem|invest|top up|add money|"
                    r"subscribe|upgrade|add to cart|book|reserve|post|publish|tweet|reply|comment|transfer|"
                    r"share|sign up|register|confirm|accept|agree|allow|authori[sz]e|install|uninstall)\b", re.I)
 DELETY = re.compile(r"\b(delete|remove|erase|discard|empty|format|reset|clear all)\b", re.I)

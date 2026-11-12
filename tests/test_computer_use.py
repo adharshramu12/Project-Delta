@@ -27,6 +27,15 @@ def test_click_risk_by_button_name():
     assert click_risk("Delete repository") == Risk.DESTRUCTIVE
 
 
+def test_selling_and_moving_money_ask_first_and_looking_does_not():
+    """'Buy' asked first and 'Sell' did not: on a trading page Delta could have sold without asking."""
+    for name in ("Sell", "SELL RELIANCE", "Buy", "Square off", "Exit position", "Withdraw funds", "Redeem",
+                 "Invest now", "Add money", "Trade"):
+        assert click_risk(name) == Risk.EXTERNAL, name
+    for name in ("Holdings", "Positions", "Watchlist", "Portfolio", "Orders", "Selling price", "Funds"):
+        assert click_risk(name) == Risk.ACT, name  # looking at your own account never asks
+
+
 def test_risky_clicks_need_approval_even_in_trusted_mode():
     pe = PolicyEngine(Boundaries(autonomy="trusted"))
     ctl = DesktopController()

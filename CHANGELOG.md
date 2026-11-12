@@ -6,6 +6,11 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Fixed
+- **"Sell" asks first, like "Buy".** Delta asked before clicking Buy or Place order, but a button called Sell,
+  Square off, Withdraw, Redeem or Invest was an ordinary click. On a trading or banking page every one of them now
+  needs your yes. Looking at holdings, positions, orders or a watchlist never asks.
+
 ### Changed
 - **Questions about today's facts are answered in seconds.** "Today's stock market", "the weather in X", "what is
   new in X": Delta now searches, reads the best pages itself and writes a short answer with numbered sources, in
