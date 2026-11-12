@@ -6,6 +6,14 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Added
+- **Routines: do a task once, then run it again with no AI.** After a task has worked, say "save this as
+  timetable"; later "run timetable" repeats the same steps back to back. Measured on a real PC: a task that took 66
+  seconds and 16,209 tokens with the AI ran again in 6 seconds with no AI call for its steps. The steps are taken
+  from what really ran, in code. Every step still follows your approval rules, a step that sends or deletes asks
+  each time, and the first step that fails stops the routine and says which one. "my routines" lists them and
+  "delete routine timetable" removes one. More: [docs/ROUTINES.md](docs/ROUTINES.md).
+
 ### Changed
 - **Questions about today's facts are answered in seconds.** "Today's stock market", "the weather in X", "what is
   new in X": Delta now searches, reads the best pages itself and writes a short answer with numbered sources, in

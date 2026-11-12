@@ -474,6 +474,9 @@ class Orchestrator:
         self.learning = learning
         self.proof = proof
         self._planned: set[str] = set()  # tasks whose planner call also did the fact learning
+        # chat -> (request, steps) of its last finished task, for "save this as <name>" (delta.core.routines).
+        # In memory only: the steps' arguments are never written anywhere unless the user saves a routine.
+        self._last_done: dict[str, tuple[str, list[StepRecord]]] = {}
         self._learning: set[asyncio.Task[None]] = set()
         # task id -> (first outside source, text read from outside), kept from the end of a task until its
         # learning step has run: the executor forgets both when the task ends.
@@ -496,6 +499,20 @@ class Orchestrator:
         except Exception:
             log.exception("proof.finish_failed", task=result.task_id)
             self.proof.dir = None
+
+    def _note_done(self, req: TaskRequest, result: TaskResult) -> None:
+        """Remember a finished task's steps for its chat. A routine command itself is not "the last task"."""
+        from delta.core.routines import NEVER
+
+        steps = [s for s in (result.steps or []) if s.ok]
+        if result.status != "done" or not steps or any(s.tool in NEVER or s.tool == "list_routines" for s in steps):
+            return
+        if len(self._last_done) > 50:
+            self._last_done.pop(next(iter(self._last_done)))
+        self._last_done[req.chat_id] = (req.text, list(result.steps))
+
+    def last_done(self, chat_id: str) -> tuple[str, list[StepRecord]] | None:
+        return self._last_done.get(chat_id)
 
     async def drain(self) -> None:
         """Wait for background learning (used at shutdown and in tests)."""
@@ -556,6 +573,7 @@ class Orchestrator:
                 await self.router.release()  # free long-lived CLI sessions (RAM) between tasks
             except Exception:
                 log.exception("router.release_failed", task=req.id)
+        self._note_done(req, result)
         if result.status in ("done", "needs_user") and not result.fast and result.answer:
             # One writing style everywhere (delta.core.style): long dashes, AI phrases, US spellings, stray emojis
             # and any claim to be human are fixed in code, at no token cost.
