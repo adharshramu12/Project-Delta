@@ -34,7 +34,7 @@ ALWAYS_SIDE_EFFECT = frozenset({"run_shell", "run_python", "send_message", "send
                                 "alert_emergency_contacts", "remember", "delete_path", "write_file", "move_path",
                                 "edit_file", "make_dir", "make_document", "make_presentation",
                                 "make_spreadsheet", "prepare_post", "run_routine", "save_routine",
-                                "delete_routine", "schedule_task",
+                                "delete_routine", "record_routine", "schedule_task",
                                 "delete_schedule", "pause_schedule", "resume_schedule"})
 SUMMARY_CHARS = 300
 TEXT_CHARS = 4000
