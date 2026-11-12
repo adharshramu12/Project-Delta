@@ -7,6 +7,11 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Fixed
+- **Delta never trades.** On a broker, an exchange or a trading app (Zerodha Kite, Groww, Upstox, TradingView,
+  Binance and the like), Buy, Sell, Place order, Modify, Cancel, Square off, Exit and an order form's Enter are
+  refused before anything is clicked. This is a hard rule like passwords and payments: no permission level, no
+  approval and no routine turns it off, also not Autopilot. The order tools of the Zerodha Kite app can no longer
+  be switched on. Looking at holdings, positions, orders, prices and a watchlist works as before.
 - **"Sell" asks first, like "Buy".** Delta asked before clicking Buy or Place order, but a button called Sell,
   Square off, Withdraw, Redeem or Invest was an ordinary click. On a trading or banking page every one of them now
   needs your yes. Looking at holdings, positions, orders or a watchlist never asks.

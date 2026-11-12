@@ -363,7 +363,13 @@ def _presses_enter(keys: list[str] | None) -> bool:
     return bool({k.lower() for k in keys or []} & {"enter", "return"})
 
 
-def click_risk(name: str) -> Risk:
+def click_risk(name: str, where: str = "") -> Risk:
+    """How risky a click on something called `name` is. `where` is the page address or the window title: on a
+    trading place a trade is never allowed (delta.safety.trading), whatever the permission level."""
+    from delta.safety.trading import never_trade
+
+    if never_trade(name, where):
+        return Risk.SYSTEM
     if DELETY.search(name):
         return Risk.DESTRUCTIVE
     if SENDY.search(name):
@@ -468,7 +474,8 @@ class _DesktopTool[A: BaseModel](Tool[A]):
         return names
 
     def click_risk_at(self, x: int, y: int) -> Risk:
-        return riskiest(Risk.ACT, *(click_risk(n) for n in self.labels_at(x, y) or []))
+        where = _title_of(None)  # the window in front is the one a coordinate click lands on
+        return riskiest(Risk.ACT, *(click_risk(n, where) for n in self.labels_at(x, y) or []))
 
     async def _act(self, fn: Callable[[], str], evidence: Callable[[], dict[str, Any]] | None = None,
                    settle: float = 0.4) -> ToolResult:
@@ -604,7 +611,7 @@ class ClickElement(_DesktopTool[ClickElementArgs]):
     Args = ClickElementArgs
 
     def risk_for(self, args: ClickElementArgs) -> Risk:
-        return click_risk(args.name)
+        return click_risk(args.name, _title_of(args.window))
 
     def summary(self, args: ClickElementArgs) -> str:
         return f"click '{args.name}'" + (f" in {args.window}" if args.window else "")
@@ -662,7 +669,8 @@ class ClickAt(_DesktopTool[ClickAtArgs]):
 
     def risk_for(self, args: ClickAtArgs) -> Risk:
         # A coordinate click on a Send/Pay/Delete button is that action, exactly like click_element.
-        return riskiest(self.click_risk_at(args.x, args.y), click_risk(args.expect) if args.expect else Risk.ACT)
+        expected = click_risk(args.expect, _title_of(None)) if args.expect else Risk.ACT
+        return riskiest(self.click_risk_at(args.x, args.y), expected)
 
     def summary(self, args: ClickAtArgs) -> str:
         names = self.labels_at(args.x, args.y)
