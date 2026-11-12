@@ -188,6 +188,11 @@ def match_intent(text: str, available: set[str]) -> Intent | None:
     t = " ".join(text.split())
     if len(t) > 160 or "\n" in text:
         return None  # long or multi-part requests need real planning
+    from delta.core.routines import routine_command
+
+    if (routine := routine_command(t)) is not None:  # "save this as X", "run X", "my routines", "delete routine X"
+        tool, args = routine
+        return Intent(tool, args, "the routine command is done") if tool in available else None
     for pattern, build in _RULES:
         m = pattern.match(t)
         if m:

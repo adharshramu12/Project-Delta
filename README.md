@@ -199,6 +199,7 @@ Set them up in Setup, or from Telegram with `/ai`, `/model` and `/keys`. Routes 
 - [Architecture](docs/ARCHITECTURE.md) and [add-ons](docs/ADDONS.md)
 - [Connected apps and MCP](docs/APPS.md)
 - [Saved logins](docs/LOGINS.md) and [watchers](docs/WATCHERS.md)
+- [Routines](docs/ROUTINES.md): do a task once, then run it again with no AI
 - [Attachments](docs/ATTACHMENTS.md)
 - [Writing style and identity](docs/STYLE_AND_IDENTITY.md)
 - [Dashboard design](docs/UI.md) and [updates](docs/UPDATES.md)

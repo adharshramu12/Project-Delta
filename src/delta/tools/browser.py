@@ -936,7 +936,9 @@ class BrowserClick(_BrowserTool[RefClickArgs]):
             before = await page_state(page)
             await robust_click(page, target, what=f"'{label}'")
             await settle(page)
-            return await _observed(page, self.mgr, f"clicked '{label}', now at {page.url}", before=before)
+            result = await _observed(page, self.mgr, f"clicked '{label}', now at {page.url}", before=before)
+            result.evidence["target"] = label  # the element's name: a routine replays the click by it
+            return result
 
         return await self._guarded(go)
 
@@ -1056,8 +1058,10 @@ class BrowserFill(_BrowserTool[RefFillArgs]):
                 await box.press("Enter")
                 await settle(page)
             done = "filled and submitted" if args.submit else "filled"
-            return await _observed(page, self.mgr, f"{done} '{label}'{check}",
-                                   before=before if args.submit else None)
+            result = await _observed(page, self.mgr, f"{done} '{label}'{check}",
+                                     before=before if args.submit else None)
+            result.evidence["target"] = label  # the field's name: a routine replays the fill by it
+            return result
 
         return await self._guarded(go)
 
