@@ -208,7 +208,7 @@ class WatchMe:
         """Called from the page (through Playwright) for each action of the person."""
         if self.rec is None or not isinstance(event, dict) or len(self.rec.events) >= MAX_EVENTS:
             return
-        clean = {k: (str(v)[:2000] if isinstance(v, str) else bool(v)) for k, v in event.items()
+        clean: dict[str, Any] = {k: (str(v)[:2000] if isinstance(v, str) else bool(v)) for k, v in event.items()
                  if k in ("kind", "name", "field", "value", "option", "url", "secret")}
         if clean.get("secret"):
             clean["value"] = ""  # whatever the page sent: a secret field's text is never kept
