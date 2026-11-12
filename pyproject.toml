@@ -1,6 +1,6 @@
 [project]
 name = "delta-agent"
-version = "0.4.1"
+version = "0.4.2"
 description = "Project Delta by Adharsh Kumar Bachu: a personal, local-first, OS-level AI agent with human approval and verified task execution."
 readme = "README.md"
 license = "AGPL-3.0-or-later"
