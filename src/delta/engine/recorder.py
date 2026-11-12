@@ -74,7 +74,7 @@ def is_side_effect(name: str, risk: str) -> bool:
         return risk != READ_RISK
     # unknown risk: assume it changed something unless the name says it only looks
     return not name.startswith(("read_", "list_", "look_", "browser_read", "path_info", "recall", "media_status",
-                                "search_", "web_search", "fetch_page"))
+                                "search_", "web_search", "web_answer", "fetch_page"))
 
 
 @dataclass

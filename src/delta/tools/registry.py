@@ -142,7 +142,7 @@ class ToolRegistry:
 # page already open, which is how Deep Research and form filling work.
 UNTRUSTED_SOURCES = {"browser_read", "fetch_page", "web_search", "read_messages", "read_file",
                      "read_window", "look_at_screen", "look_with_marks", "read_screen_text", "helper_read_page",
-                     "parallel_research"}
+                     "parallel_research", "web_answer"}
 GUARDED_RISKS = {Risk.EXTERNAL, Risk.DESTRUCTIVE}
 ALWAYS_GUARDED = {"run_shell", "run_python", "remember", "send_file", "send_message", "chat_for_me"}
 IN_PAGE = {"browser_click", "browser_fill", "browser_press"}

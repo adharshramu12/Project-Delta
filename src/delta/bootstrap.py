@@ -45,7 +45,7 @@ from delta.tools.pc import pc_tools
 from delta.tools.power import power_tools
 from delta.tools.registry import ToolExecutor, ToolRegistry
 from delta.tools.shell import RunShell
-from delta.tools.web_search import FetchPage, SearchRouter, WebSearch
+from delta.tools.web_search import FetchPage, SearchRouter, WebAnswer, WebSearch
 
 
 def _installed(*modules: str) -> bool:
@@ -493,8 +493,9 @@ def build(settings: Settings) -> Container:
         *meeting_tools(),
         *messaging_tools(chats),
         AlertEmergencyContacts(emergency),
-        WebSearch(SearchRouter.from_order(settings.search.order)),
+        WebSearch(search := SearchRouter.from_order(settings.search.order)),
         FetchPage(),
+        WebAnswer(search, router),  # a current-facts question in one step: search, read, answer
         *(memory_tools(memory) if settings.memory.enabled else []),
     ])
     from delta.tools.email import email_tools, save_draft_tool
