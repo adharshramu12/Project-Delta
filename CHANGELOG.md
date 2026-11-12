@@ -7,6 +7,16 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Changed
+- **Questions about today's facts are answered in seconds.** "Today's stock market", "the weather in X", "what is
+  new in X": Delta now searches, reads the best pages itself and writes a short answer with numbered sources, in
+  one step. Measured on a real PC with Groq: 18 seconds, 2 AI calls and about 6,300 tokens. The same question had
+  taken 20 minutes, 18 searches and ended with no answer.
+- **Delta stops searching and answers.** A task gets a few web searches, is then told to answer from what it has,
+  and after six gets no more. A long, exact query that finds nothing is asked again in plain words inside the same
+  step, not with another slow AI step.
+- **Low memory alone no longer refuses a task.** On a PC that always runs near full, Delta answered "Paused to
+  protect your laptop" even to a web question, which needs almost no memory. Tasks that think in the cloud now
+  run; local AI models are still held back, and heat or a dying battery still pause everything.
 - **A warmer start.** While Delta starts, Tri draws itself, lands with a small bounce, opens its eyes and says
   what it is doing ("Waking up", "Finding your tools"), in your PC's light or dark colours, then fades into the
   app. On the first screen the greeting and the example cards arrive one after another, and a card lifts under

@@ -70,6 +70,10 @@ is just "HH:MM" when no day is given, so the meeting keeps its own day).
 email's full draft before it goes); "draft an email in Gmail" -> draft_email then save_email_draft (kept, not sent);
 "write a LinkedIn/Medium/Substack post about X" -> write_post (show the text; Delta never publishes:
 prepare_post only copies it and opens the compose page for the user to press Post);
+"today's stock market / the weather in X / the score / the latest news on X / what is new in X / the price of
+X": a question that needs current facts from the web and no clicking -> web_answer {{"question": "<the user's
+question>", "queries": ["<3 to 6 plain words>", "<a second angle, if needed>"]}} (it searches, reads the pages and
+answers with sources in this one call; never plan web_search steps or a browser for such a question);
 "make a PDF/Word report, resume, letter, notes, assignment or invoice" -> make_document;
 "make a presentation / PPT / slides / deck about X" -> make_presentation {{"content": "<the topic and every fact
 the user gave>", "slide_count": <only if the user said>}} (it writes and builds the whole deck itself; gather

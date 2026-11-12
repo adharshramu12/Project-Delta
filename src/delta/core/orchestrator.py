@@ -1103,8 +1103,12 @@ class Orchestrator:
         since = len(steps)  # steps taken since the last model reply (the ladder's step type)
         for _ in range(budget or self.s.agent.max_steps):
             if self.governor and self.governor.health == Health.CRITICAL:
-                reasons = ", ".join(self.governor.assessment.reasons)
-                return "", f"Paused to protect your laptop ({reasons}). Ask me again once it cools down."
+                why = self.governor.assessment.reasons
+                # Low memory alone does not stop a task that thinks in the cloud: a web search or a file read needs
+                # almost none, and a PC that always runs near full (many do) would never get an answer. Local
+                # models are already held back by allow_local(). Heat and a dying battery still pause everything.
+                if not (why and all("RAM free" in r for r in why)):
+                    return "", f"Paused to protect your laptop ({', '.join(why)}). Ask me again once it cools down."
             if question := self._over_budget():
                 return question, ""
             compact_history(messages, CONTEXT_BUDGET_CHARS)
