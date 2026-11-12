@@ -25,6 +25,7 @@ contain something private; saved logins are safe, because sign_in takes the logi
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -48,7 +49,8 @@ LOOKERS = OBSERVERS | {"web_search", "fetch_page", "web_answer", "browser_tabs",
                        "find_app_tool", "search_files", "read_attachment", "look_at_attachment", "browser_wait",
                        "list_routines", "list_schedules", "list_watchers", "take_screenshot"}
 # Never part of a routine: a routine does not run or change routines, and a captcha is new every time.
-NEVER = frozenset({"save_routine", "run_routine", "delete_routine", "solve_captcha", "remember", "set_browser"})
+NEVER = frozenset({"save_routine", "run_routine", "delete_routine", "record_routine", "solve_captcha", "remember",
+                   "set_browser"})
 _NAME_OK = re.compile(r"[^\w '&+-]+", re.UNICODE)
 
 SCHEMA = """
@@ -60,7 +62,8 @@ CREATE TABLE IF NOT EXISTS routines(
   created REAL NOT NULL,
   runs INTEGER NOT NULL DEFAULT 0,
   failures INTEGER NOT NULL DEFAULT 0,
-  last_run REAL
+  last_run REAL,
+  browser TEXT NOT NULL DEFAULT ''   -- 'private': recorded in Delta's own browser, so it runs there
 );
 """
 
@@ -79,40 +82,45 @@ class Routine:
     runs: int = 0
     failures: int = 0
     last_run: float | None = None
+    browser: str = ""  # "private" = recorded by hand in Delta's own browser (delta.core.watch_me): it runs there
 
 
 class RoutineStore:
     def __init__(self, path: Path) -> None:
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.executescript(SCHEMA)
+        if "browser" not in {r[1] for r in self._db.execute("PRAGMA table_info(routines)")}:
+            with self._db:  # a store made before recordings existed
+                self._db.execute("ALTER TABLE routines ADD COLUMN browser TEXT NOT NULL DEFAULT ''")
         self._lock = threading.Lock()
 
     def close(self) -> None:
         self._db.close()
 
-    def save(self, title: str, request: str, steps: list[dict[str, Any]]) -> Routine:
+    def save(self, title: str, request: str, steps: list[dict[str, Any]], browser: str = "") -> Routine:
         title = clean_name(title)
         if not title:
             raise ValueError("a routine needs a name")
         with self._lock, self._db:
             self._db.execute(
-                "INSERT INTO routines(name, title, request, steps, created) VALUES (?,?,?,?,?) "
+                "INSERT INTO routines(name, title, request, steps, created, browser) VALUES (?,?,?,?,?,?) "
                 "ON CONFLICT(name) DO UPDATE SET title=excluded.title, request=excluded.request, "
-                "steps=excluded.steps, created=excluded.created, runs=0, failures=0, last_run=NULL",
-                (title.lower(), title, request[:500], json.dumps(steps), time.time()))
-        return Routine(title.lower(), title, request[:500], steps)
+                "steps=excluded.steps, created=excluded.created, runs=0, failures=0, last_run=NULL, "
+                "browser=excluded.browser",
+                (title.lower(), title, request[:500], json.dumps(steps), time.time(), browser))
+        return Routine(title.lower(), title, request[:500], steps, browser=browser)
 
     def get(self, name: str) -> Routine | None:
         with self._lock:
-            row = self._db.execute("SELECT name, title, request, steps, runs, failures, last_run FROM routines "
-                                   "WHERE name=?", (clean_name(name).lower(),)).fetchone()
-        return Routine(row[0], row[1], row[2], json.loads(row[3]), row[4], row[5], row[6]) if row else None
+            row = self._db.execute("SELECT name, title, request, steps, runs, failures, last_run, browser FROM "
+                                   "routines WHERE name=?", (clean_name(name).lower(),)).fetchone()
+        return Routine(row[0], row[1], row[2], json.loads(row[3]), row[4], row[5], row[6], row[7]) if row else None
 
     def list(self) -> list[Routine]:
         with self._lock:
-            rows = self._db.execute("SELECT name, title, request, steps, runs, failures, last_run FROM routines "
-                                    "ORDER BY title COLLATE NOCASE").fetchall()
-        return [Routine(r[0], r[1], r[2], json.loads(r[3]), r[4], r[5], r[6]) for r in rows]
+            rows = self._db.execute("SELECT name, title, request, steps, runs, failures, last_run, browser FROM "
+                                    "routines ORDER BY title COLLATE NOCASE").fetchall()
+        return [Routine(r[0], r[1], r[2], json.loads(r[3]), r[4], r[5], r[6], r[7]) for r in rows]
 
     def names(self) -> set[str]:
         with self._lock:
@@ -169,6 +177,7 @@ def describe(step: dict[str, Any]) -> str:
         "browser_fill": lambda: (f"type into '{a.get('field', '')}'"
                                  + (" and press Enter" if args.get("submit") else "")),
         "browser_search": lambda: f"search for '{a.get('query', '')}'",
+        "browser_select": lambda: f"choose '{a.get('option', '')}' in '{a.get('label', '')}'",
         "browser_press": lambda: f"press {a.get('keys', a.get('key', ''))}",
         "sign_in": lambda: f"sign in with the saved login '{a.get('login', a.get('name', ''))}'",
         "open_app": lambda: f"open {a.get('name', '')}",
@@ -198,6 +207,7 @@ class _RoutineTool:
     def __init__(self, store: RoutineStore) -> None:
         self.store = store
         self.executor: Any = None                # the ToolExecutor, set at start-up
+        self.hub: Any = None                     # the BrowserHub, set at start-up (recorded routines pin a browser)
         self.last_done: Callable[[str], tuple[str, list[StepRecord]] | None] = lambda chat: None
 
 
@@ -253,6 +263,27 @@ class RunRoutine(_RoutineTool, Tool[NameArgs]):
         req = CURRENT_REQUEST.get()
         total = len(routine.steps)
         last: ToolResult | None = None
+        pinned = self._pin_browser(routine)
+        try:
+            return await self._steps(routine, req, total, last)
+        finally:
+            if pinned is not None:
+                from delta.tools.browser_switch import TASK_BROWSER
+
+                with contextlib.suppress(ValueError):
+                    TASK_BROWSER.reset(pinned)
+
+    def _pin_browser(self, routine: Routine) -> Any:
+        """A routine recorded by hand in Delta's own browser runs there: that is where its sign-ins are."""
+        if routine.browser != "private" or self.hub is None or getattr(self.hub, "mgr", None) is None:
+            return None
+        from delta.tools.browser_choice import BrowserPick
+        from delta.tools.browser_switch import TASK_BROWSER, TaskBrowser
+
+        engine = getattr(self.hub.settings.browser, "private_engine", "auto")
+        return TASK_BROWSER.set(TaskBrowser(BrowserPick("private", engine), "this task"))
+
+    async def _steps(self, routine: Routine, req: Any, total: int, last: ToolResult | None) -> ToolResult:
         for i, step in enumerate(routine.steps, 1):
             if step["tool"] in NEVER or step["tool"] in NOT_REPLAYABLE:  # an edited or old store: never trust it
                 self.store.ran(routine.name, ok=False)
@@ -333,6 +364,10 @@ names_now: Callable[[], set[str]] = set
 def routine_command(text: str) -> tuple[str, dict[str, str]] | None:
     """(tool, args) for the four routine commands, or None. No AI: the user's own words decide."""
     t = " ".join(text.split())
+    from delta.core.watch_me import record_command
+
+    if (rec := record_command(t)) is not None:  # "start recording", "stop recording and save as X"
+        return rec
     if m := _SAVE.match(t):
         name = clean_name(m["name"])
         return ("save_routine", {"name": name}) if name else None

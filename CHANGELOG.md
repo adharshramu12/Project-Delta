@@ -7,6 +7,11 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Watch me do it: record a routine by hand.** Say "start recording", do the task yourself in Delta's own
+  browser, then "stop recording and save as timetable". Delta saves each click, each field you typed into and each
+  choice by its name, never by screen position, and "run timetable" repeats it with no AI. What you type into a
+  password, card or one-time-code field is never recorded. Checked in a real browser: six actions done by hand
+  were recorded and then replayed step for step. More: [docs/ROUTINES.md](docs/ROUTINES.md).
 - **Routines: do a task once, then run it again with no AI.** After a task has worked, say "save this as
   timetable"; later "run timetable" repeats the same steps back to back. Measured on a real PC: a task that took 66
   seconds and 16,209 tokens with the AI ran again in 6 seconds with no AI call for its steps. The steps are taken

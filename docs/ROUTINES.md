@@ -15,6 +15,30 @@ Other commands: **my routines** lists them with their steps, **delete routine ti
 a name that exists replaces the old routine. All four work in the app, in the terminal and on Telegram, and none of
 them uses the AI.
 
+## Or show Delta how: record it yourself
+
+You do not have to let the AI do the task first. You can do it by hand and Delta watches.
+
+1. Say **start recording** (or **watch me**). Delta's own browser opens and comes to the front.
+   "start recording on myportal.example" opens that page first.
+2. Do the task there yourself: click, type, choose from lists, move between pages.
+3. Say **stop recording and save as timetable**. Delta shows the steps it kept.
+4. Later: **run timetable**.
+
+"stop recording" with no name shows the steps and asks for one ("save recording as timetable"). "cancel recording"
+throws it away.
+
+What Delta notes is the **name** of each thing you act on: the text of the link or button, the label of the field
+and what you typed, the option you chose. It is not a video and not screen positions, so it still works when the
+window is another size.
+
+- **Passwords are never recorded.** What you type into a password, card or one-time-code field is not sent to Delta
+  at all. Delta's browser stays signed in between runs; if the site asks for the password again, the routine stops
+  there.
+- It works in **Delta's own browser** only, not in your everyday Chrome or Edge, and the routine runs there too.
+- Not recorded yet: tick boxes, drag and drop, typing into rich text boxes (a mail body, a chat box), and anything
+  in another program.
+
 ## What it costs
 
 Measured on a real PC with Groq: "open example.com and click Learn more" took 66 seconds, 5 AI calls and 16,209
