@@ -52,7 +52,7 @@ live: the server's 401 answer, its protected resource metadata and its authoriza
 | Semgrep, Jam, Globalping, Intercom | official | browser sign-in | code scans, bug reports, network checks, support inbox |
 | Apify, Zapier | official | browser sign-in | runs can use your Apify credits or Zapier tasks; each asks first |
 | DeepWiki, Context7, Microsoft Learn, AWS Knowledge, Excalidraw | official | none | public docs and diagrams, no sign-in |
-| Zerodha Kite | official | Kite's own login tool | portfolio and market data never ask; every order tool is off until you switch it on, and each order still needs your yes. Not financial advice |
+| Zerodha Kite | official | Kite's own login tool | portfolio and market data never ask; Delta never trades: every order tool is blocked and cannot be switched on. Not financial advice |
 | Alpaca market data, CoinGecko | official | none | market data only, no trading tools. Not financial advice |
 | Figma (desktop app) | official | none | Figma's remote server only accepts clients in Figma's own list |
 | Files (MCP reference) | reference | none | runs on your PC with Node.js (`npx`), version pinned |

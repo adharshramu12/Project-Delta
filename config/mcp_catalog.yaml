@@ -581,8 +581,8 @@ apps:
     checked: "2026-11-09"
     notes: >-
       Sign in to Kite through its own login tool (Zerodha's page, in your browser). Viewing your portfolio and
-      market data never asks. Every order tool (place, modify or cancel an order or GTT) is off until you switch it
-      on, and even then each order needs your yes: a trade cannot be undone. Not financial advice.
+      market data never asks. Delta never trades: every order tool (place, modify or cancel an order or GTT) is
+      blocked and cannot be switched on. Place trades yourself in Kite. Not financial advice.
     tools:
       read: [get_profile, get_margins, get_holdings, get_mf_holdings, get_positions, get_orders, get_order_history,
              get_order_trades, get_trades, get_gtts, get_quotes, get_ltp, get_ohlc, get_historical_data,

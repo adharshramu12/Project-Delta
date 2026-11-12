@@ -27,6 +27,7 @@ from typing import Any, Literal
 import psutil
 from pydantic import BaseModel, Field, model_validator
 
+from delta.safety.trading import is_trading_place
 from delta.system.logging import log
 from delta.tools import snapshot
 from delta.tools.base import Risk, Tool, ToolResult
@@ -900,7 +901,7 @@ class BrowserClick(_BrowserTool[RefClickArgs]):
     Args = RefClickArgs
 
     def risk_for(self, args: ClickArgs) -> Risk:
-        return click_risk(_click_label(self.mgr, args))
+        return click_risk(_click_label(self.mgr, args), self.mgr.current_url)
 
     def summary(self, args: ClickArgs) -> str:
         ref = getattr(args, "ref", None)
@@ -917,7 +918,8 @@ class BrowserClick(_BrowserTool[RefClickArgs]):
                 except StaleRef as e:
                     return ToolResult(False, str(e))
                 # The approval was decided on the name the agent saw; never click something riskier.
-                if riskier(click_risk(live), click_risk(seen.name)):
+                where = page.url
+                if riskier(click_risk(live, where), click_risk(seen.name, where)):
                     return ToolResult(False, f"element [{ref}] now reads '{live}', not '{seen.name}'; "
                                              "call browser_read to get fresh refs")
                 label = live or seen.name
@@ -996,7 +998,8 @@ class BrowserFill(_BrowserTool[RefFillArgs]):
     def risk_for(self, args: FillArgs) -> Risk:
         # Submitting a search box only runs a search; submitting any other form may send something.
         if args.submit and not SEARCHY.search(_fill_label(self.mgr, args)):
-            return Risk.EXTERNAL
+            # On a trading page the form Enter submits can be an order: never (delta.safety.trading).
+            return Risk.SYSTEM if is_trading_place(self.mgr.current_url) else Risk.EXTERNAL
         return Risk.ACT
 
     def summary(self, args: FillArgs) -> str:
@@ -1202,7 +1205,7 @@ class BrowserPress(_BrowserTool[PressArgs]):
     def risk_for(self, args: PressArgs) -> Risk:
         # Enter right after typing into a search box just searches; elsewhere it can submit a form.
         if args.key.lower() in {"enter", "return"} and not self.mgr.last_fill_was_search:
-            return Risk.EXTERNAL
+            return Risk.SYSTEM if is_trading_place(self.mgr.current_url) else Risk.EXTERNAL
         return Risk.ACT
 
     async def run(self, args: PressArgs) -> ToolResult:

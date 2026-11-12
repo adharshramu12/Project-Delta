@@ -36,6 +36,7 @@ from delta.addons.builtin.mcp_bridge import tool_name
 from delta.connectors.catalog import AppSpec, default_risk
 from delta.connectors.manager import AppManager
 from delta.connectors.store import Connection
+from delta.safety.trading import is_trade_tool, is_trading_place
 from delta.system.logging import log
 from delta.tools.base import Risk, Tool, ToolResult
 
@@ -50,6 +51,10 @@ class FreeArgs(BaseModel):
 
 def resolve_risk(spec: AppSpec, conn: Connection, tool: dict[str, Any]) -> Risk:
     name = str(tool["name"])
+    # A broker's or an exchange's order tools are never usable: not by default, not by the user's own switch
+    # (delta.safety.trading). Reading the account stays as it is.
+    if is_trade_tool(name) and is_trading_place(f"{spec.id} {spec.name} {spec.url} {spec.category}"):
+        return Risk.SYSTEM
     chosen = (conn.choices.get(name) or {}).get("risk")
     if chosen:
         return Risk(chosen)
@@ -64,6 +69,8 @@ def resolve_risk(spec: AppSpec, conn: Connection, tool: dict[str, Any]) -> Risk:
 
 
 def tool_enabled(conn: Connection, tool: dict[str, Any], risk: Risk) -> bool:
+    if risk == Risk.SYSTEM:
+        return False  # never allowed: no switch turns it on
     choice = conn.choices.get(str(tool["name"])) or {}
     if "enabled" in choice:
         return bool(choice["enabled"])

@@ -23,6 +23,7 @@ from typing import Any
 
 import psutil
 
+from delta.safety.trading import is_trading_place
 from delta.system.input_stop import StopRequestedError
 from delta.tools.base import Risk, Tool, ToolResult
 from delta.tools.browser import (
@@ -527,7 +528,7 @@ class UBClick(_UBTool):
     Args = ClickArgs
 
     def risk_for(self, args: ClickArgs) -> Risk:
-        return click_risk(args.text)
+        return click_risk(args.text, self.ub.current_url)
 
     def summary(self, args: ClickArgs) -> str:
         return f"click '{args.text}' on {self.ub.current_url or 'the page'}"
@@ -544,7 +545,10 @@ class UBFill(_UBTool):
     Args = FillArgs
 
     def risk_for(self, args: FillArgs) -> Risk:
-        return Risk.EXTERNAL if args.submit and not SEARCHY.search(args.field) else Risk.ACT
+        if args.submit and not SEARCHY.search(args.field):
+            # On a trading page the form Enter submits can be an order: never (delta.safety.trading).
+            return Risk.SYSTEM if is_trading_place(self.ub.current_url) else Risk.EXTERNAL
+        return Risk.ACT
 
     def summary(self, args: FillArgs) -> str:
         return f"{'fill and submit' if args.submit else 'fill'} '{args.field}' on {self.ub.current_url or 'the page'}"
@@ -565,7 +569,7 @@ class UBPress(_UBTool):
 
     def risk_for(self, args: PressArgs) -> Risk:
         if args.key.lower() in {"enter", "return"} and not self.ub.last_fill_was_search:
-            return Risk.EXTERNAL
+            return Risk.SYSTEM if is_trading_place(self.ub.current_url) else Risk.EXTERNAL
         return Risk.ACT
 
     async def run(self, args: PressArgs) -> ToolResult:

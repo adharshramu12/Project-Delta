@@ -35,7 +35,7 @@ from delta.perception.sources import (
 )
 from delta.system.logging import log
 from delta.tools.base import Risk, Tool, ToolResult
-from delta.tools.desktop import click_risk
+from delta.tools.desktop import _title_of, click_risk
 
 CaptureFn = Callable[[str, str | None], Awaitable[Capture]]
 MIN_UIA_MARKS = 2  # fewer clickable UI Automation elements than this: the app draws its own UI, try OCR
@@ -220,7 +220,7 @@ class ClickMark(Tool[ClickMarkArgs]):
         judge a click_mark like the click itself. The executor checks the real call again after resolving."""
         marks = BOOK.get(task_id_now())
         mark = marks.marks.get(args.mark) if marks is not None else None
-        return click_risk(mark.label) if mark is not None else Risk.ACT
+        return click_risk(mark.label, _title_of(None)) if mark is not None else Risk.ACT
 
     def summary(self, args: ClickMarkArgs) -> str:
         marks = BOOK.get(task_id_now())
@@ -313,7 +313,7 @@ class ClickText(Tool[ClickTextArgs]):
         return self.p.ocr.available()
 
     def risk_for(self, args: ClickTextArgs) -> Risk:
-        return click_risk(args.text)
+        return click_risk(args.text, _title_of(None))
 
     def summary(self, args: ClickTextArgs) -> str:
         return f"click the text '{args.text}'" + (f" in {args.window}" if args.window else "")
