@@ -6,6 +6,21 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.4.2 - 2026-11-12
+
+Teach Delta a task once and it repeats it with no AI, plus much faster answers and a hard rule on trading. In short:
+
+- **Routines** (#71): after a task has worked, "save this as timetable"; later "run timetable" repeats it with no AI.
+- **Watch me do it** (#74): "start recording", do the task yourself in Delta's browser, "stop recording and save
+  as timetable". Passwords are never recorded.
+- **Questions about today's facts in seconds** (#70): "today's stock market", "the weather in X": about 18 seconds
+  with sources, where it took 20 minutes before.
+- **"Open this site" at once** (#69): no AI call for "open youtube.com" or "open gmail".
+- **Delta never trades** (#73): buying, selling and order changes on trading sites and apps are refused in every
+  mode. Looking at your holdings works as before.
+- **Works on a PC that is low on memory** (#70), and stops searching to answer.
+- **A warmer start** (#68): Tri draws itself while Delta opens.
+
 ### Added
 - **Watch me do it: record a routine by hand.** Say "start recording", do the task yourself in Delta's own
   browser, then "stop recording and save as timetable". Delta saves each click, each field you typed into and each
