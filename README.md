@@ -187,12 +187,20 @@ back to the next when one is down, rate limited or out of credits.
 | Cline | Your Cline account, through cline-cli | Free models available |
 | NVIDIA NIM | API key | Free tier |
 | Groq | API key | Free tier |
+| Google Gemini | API key (aistudio.google.com/apikey) | Free tier |
+| OpenRouter | API key (openrouter.ai/keys) | Free models, or your own credits |
 | Nebius Token Factory | API key | Your Nebius credits (pay as you go) |
 | DeepSeek | API key | Low cost |
 | LM Studio, Ollama | Local, on your PC | Free, works offline |
 
 Set them up in Setup, or from Telegram with `/ai`, `/model` and `/keys`. Routes and fallbacks are in
 `config/delta.yaml`.
+
+**Backup AIs, for free plans that run out.** Free keys have daily and per-minute limits. In Apps > AI models, tick
+the AIs you want as backups (for example a free Gemini and a free OpenRouter key). When your main AI is out of
+credits, has used its limit for the day, refuses its key or is down, they answer for as long as it rests, and each
+reply says which AI answered. They are never used otherwise, and only AIs you use with your own API key can be one:
+never the plan of an AI app such as Codex or Claude Code, and never a model on your PC.
 
 ## Docs
 

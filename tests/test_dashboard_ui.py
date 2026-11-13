@@ -176,10 +176,11 @@ def test_the_payload_stays_small():
     running task (what Delta is doing in plain words, a timer, "Still waiting" and the queue notice, about 2.7 KB with
     its styles; the dashboard then ships about 258.3 KB). Then to 270 KB for Tri, Delta's pet (pet.js: an SVG
     triangle drawn in code that reacts to real task events, greets once a day and has an off switch, about 9.8 KB with
-    its styles and moods; the dashboard then ships about 268.4 KB). Lazy loading would not lower this total: it counts
-    every file the dashboard ships."""
+    its styles and moods; the dashboard then ships about 268.4 KB). Then to 275 KB for the Gemini and OpenRouter key
+    rows and the backup-AI choice under Apps > AI models (about 2.2 KB; the dashboard then ships about 271.2 KB).
+    Lazy loading would not lower this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 270_000, total
+    assert total < 275_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 

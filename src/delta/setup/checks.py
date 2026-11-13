@@ -18,6 +18,8 @@ KEY_INFO = {
     "groq_api_key": "Groq (free, fast cloud models)",
     "nvidia_api_key": "NVIDIA NIM (free cloud models)",
     "nebius_api_key": "Nebius Token Factory (your Nebius credits)",
+    "gemini_api_key": "Google Gemini (free cloud key)",
+    "openrouter_api_key": "OpenRouter (free cloud key)",
     "tavily_api_key": "Tavily web search",
     "serpapi_api_key": "SerpAPI web search",
     "telegram_bot_token": "Telegram bot",
@@ -83,6 +85,15 @@ async def validate_key(name: str, value: str) -> tuple[bool, str]:
             elif name == "nebius_api_key":
                 r = await c.get("https://api.tokenfactory.nebius.com/v1/models",
                                 headers={"Authorization": f"Bearer {value}"})
+            elif name == "gemini_api_key":
+                # Google answers 400 (not 401) for a key it does not know, so the body is read below.
+                r = await c.get("https://generativelanguage.googleapis.com/v1beta/openai/models",
+                                headers={"Authorization": f"Bearer {value}"})
+                if r.status_code == 400 and "api key" in r.text.lower():
+                    return False, "The service rejected this key. Check it was copied completely."
+            elif name == "openrouter_api_key":
+                # /models is public, so it proves nothing about the key; /key answers 401 for a key it does not know.
+                r = await c.get("https://openrouter.ai/api/v1/key", headers={"Authorization": f"Bearer {value}"})
             elif name == "telegram_bot_token":
                 # The token becomes part of the address: only the exact shape BotFather gives (digits, a colon,
                 # letters, digits, - and _) is sent, so nothing typed here can change where the request goes.

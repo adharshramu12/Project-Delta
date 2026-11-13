@@ -99,6 +99,7 @@ class ModelRouter:
         self.breakers = {name: CircuitBreaker() for name in providers}
         self.last_provider: str | None = None
         self.why_down: dict[str, str] = {}  # last reason each provider failed, in plain words
+        self.down_kind: dict[str, str] = {}  # the failure kind behind why_down (quota, rate_limit, auth, ...)
         self.skipped: dict[str, str] = {}   # providers passed over since reset_meter(): name -> why
         # Opt-in failover (settings router.fallbacks, empty by default): extra providers of the user's own,
         # tried only when every provider on the route failed because of a rate limit, outage or quota.
@@ -115,6 +116,7 @@ class ModelRouter:
             if callable(refresh := getattr(p, "refresh", None)):
                 refresh()
             self.breakers[name] = CircuitBreaker()
+        self.down_kind.clear()
         self._resting_unreachable.clear()
 
     def _ready(self, name: str, p: Provider) -> bool:
@@ -225,11 +227,20 @@ class ModelRouter:
             p = self.providers[self.preferred]
             ready = p.supports(task)
             why = (self.why_down.get(self.preferred) or "resting after errors") if ready else not_set_up(p)
+            if ready and (extra := self._backups_for_resting_main(task)):
+                errors.append(f"{self.preferred}: {why}")
+                kinds.append(self.down_kind.get(self.preferred, "error"))
+                log.warning("router.fallbacks", task=task, providers=[p.name for p in extra], reason="main resting")
+                resp = await self._walk(extra, messages, tools, task, json_mode, errors, kinds)
+                self.fallback_used = self.last_provider or ""
+                return resp
             msg = self._main_failed(why)
             raise AllProvidersFailedError(msg, ["error" if ready else "not_set_up"],
                                           errors=[f"{self.preferred}: {why}"], user_message=msg)
+        # With backups ready, a long rate-limit wait on the last candidate is not worth it: hand over instead.
+        spare = bool(self._backup_candidates(task, {c.name for c in candidates}))
         try:
-            return await self._walk(candidates, messages, tools, task, json_mode, errors, kinds)
+            return await self._walk(candidates, messages, tools, task, json_mode, errors, kinds, spare=spare)
         except AllProvidersFailedError as e:
             extra = self._fallback_candidates(task, {c.name for c in candidates}, errors, kinds)
             if not extra:
@@ -262,7 +273,22 @@ class ModelRouter:
 
     def _main_failed(self, why: str) -> str:
         return (f"{self.preferred} (your main AI) could not answer: {why.strip().rstrip('.')}. Delta did not "
-                "switch to another AI because fallback is off (Apps > AI models).")
+                "switch to another AI because fallback is off (Apps > AI models). There you can choose backup "
+                "AIs, such as a free Gemini or OpenRouter key, that take over when your main AI runs out.")
+
+    def _backup_candidates(self, task: str, tried: set[str]) -> list[Provider]:
+        """The user's own backup AIs (router.fallbacks) that can answer now, never the ones already tried."""
+        return [p for n in self.fallbacks if n not in tried and (p := self._first(n, task)) is not None]
+
+    def _backups_for_resting_main(self, task: str) -> list[Provider]:
+        """The main AI is resting after it failed (out of credits, rate limited, down or its key refused): the
+        backups answer for as long as it rests. Any other kind of failure is not a reason to switch."""
+        from delta.selfheal.taxonomy import is_outage
+
+        kind = self.down_kind.get(self.preferred, "")
+        if not self.fallbacks or not (is_outage(kind) or kind == "auth"):
+            return []
+        return self._backup_candidates(task, {self.preferred})
 
     def _fallback_candidates(self, task: str, tried: set[str], errors: list[str], kinds: list[str]) -> list[Provider]:
         """router.fallbacks (opt-in), only after outage-type failures: rate limit, unreachable, quota."""
@@ -270,21 +296,16 @@ class ModelRouter:
             return []
         from delta.selfheal.taxonomy import is_outage
 
-        if not all(is_outage(k, e) for k, e in zip(kinds, errors, strict=False)):
+        if not all(is_outage(k, e) or k == "auth" for k, e in zip(kinds, errors, strict=False)):
             return []
-        out = []
-        for name in self.fallbacks:
-            p = self._first(name, task)
-            if p is not None and name not in tried:
-                out.append(p)
-        return out
+        return self._backup_candidates(task, tried)
 
     async def _walk(self, candidates: list[Provider], messages: list[Message], tools: list[dict] | None, task: str,
-                    json_mode: bool, errors: list[str], kinds: list[str]) -> LLMResponse:
+                    json_mode: bool, errors: list[str], kinds: list[str], spare: bool = False) -> LLMResponse:
         for i, p in enumerate(candidates):
             started = time.perf_counter()
             # With nothing left to fall back to, waiting longer beats failing the user's task.
-            max_wait = MAX_RATE_LIMIT_WAIT_S if i < len(candidates) - 1 else LAST_RESORT_WAIT_S
+            max_wait = MAX_RATE_LIMIT_WAIT_S if i < len(candidates) - 1 or spare else LAST_RESORT_WAIT_S
             try:
                 try:
                     resp = await p.complete(task, messages, tools, json_mode)
@@ -306,6 +327,7 @@ class ModelRouter:
             except LLMError as e:
                 reason = str(e).split(": ", 1)[-1]
                 self.why_down[p.name] = reason
+                self.down_kind[p.name] = e.kind
                 self.skipped.setdefault(p.name, reason)
                 if e.kind == "quota":
                     # Out of credits: rest it instead of paying a failed call on every message.
@@ -327,6 +349,7 @@ class ModelRouter:
                 log.warning("router.fallback", provider=p.name, task=task, error=str(e))
                 continue
             self.breakers[p.name].record_success()
+            self.down_kind.pop(p.name, None)
             self._resting_unreachable.discard(p.name)
             self._count(p, resp, messages, tools)
             if self.last_provider != p.name:

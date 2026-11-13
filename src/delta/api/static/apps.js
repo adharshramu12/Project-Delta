@@ -14,7 +14,18 @@
       ...p.options.map(o => h("option", {value: o.name, text: o.label + (o.ready ? "" : " (not ready)")})));
     sel.value = p.preferred;
     $("s_fallback").checked = !!p.fallback;
+    const box = $("s_backups"), picks = (p.backup_choices || []).filter(o => o.name !== p.preferred);
+    $("s_backups_box").hidden = !picks.length;
+    box.replaceChildren(...picks.map(o => h("label", {class: "check"},
+      h("input", {type: "checkbox", value: o.name, checked: (p.backups || []).includes(o.name), disabled: !o.ready && !(p.backups || []).includes(o.name)}),
+      " " + o.label + (o.ready ? "" : " (add its key first)"))));
   }
+  $("s_backups").onchange = async () => {
+    const names = [...$("s_backups").querySelectorAll("input:checked")].map(i => i.value);
+    const r = await api("/api/apps/backups", {method: "PUT", body: JSON.stringify({names})}).catch(e => ({detail: D.plain(e)}));
+    if (r && r.detail) { D.toast({title: "Backups not changed", body: D.detail(r), kind: "danger"}); renderMain(); }
+    else D.toast({title: names.length ? "Backup AIs saved" : "No backup AIs", body: names.length ? "They take over when your main AI runs out." : "Only your main AI answers.", kind: "ok"});
+  };
   $("s_fallback").onchange = async () => {
     const on = $("s_fallback").checked;
     const r = await api("/api/apps/preferred", {method: "PUT", body: JSON.stringify({name: $("s_main").value, fallback: on})}).catch(e => ({detail: D.plain(e)}));

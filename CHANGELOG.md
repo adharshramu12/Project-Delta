@@ -6,6 +6,27 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Added
+- **Google Gemini and OpenRouter as AI providers, and backup AIs that take over when your main AI runs out.**
+  Add a free Gemini key (aistudio.google.com/apikey) or a free OpenRouter key (openrouter.ai/keys) in Settings >
+  Keys or the setup wizard; each is checked before it is saved. Gemini uses the free `gemini-3.8-flash` and also
+  reads screenshots; OpenRouter uses `openrouter/free`, which picks a free model that can use tools (set
+  `openrouter/auto` or any model of yours in `config/delta.yaml` if you have credits). In Apps > AI models, tick
+  **Backup AIs**: when your main AI is out of credits, has used its limit for the day, refuses its key or is down,
+  they answer instead, and each reply says which one. Never an AI app's plan (Codex, Claude Code) and never a model
+  on your PC.
+
+### Fixed
+- **Backup AIs now work on every message, not just the first.** The opt-in `router.fallbacks` list switched to its
+  backups on the first message after the main AI ran out and then failed for the next ten minutes with "your main AI
+  could not answer", because a resting main AI skipped the list. With backups ready, a long rate limit on the main
+  AI also hands over at once instead of waiting up to a minute.
+- **A used-up daily limit no longer costs 15 seconds on every message.** Groq's "(TPD)" was recognised, but not
+  OpenRouter's "free-models-per-day" or Google's "...PerDay...", so each message waited and retried the exhausted
+  provider. A used-up daily limit now counts as out of credits: the provider rests and the next AI answers at once.
+- **A wrong Gemini key is said plainly.** Google answers 400, not 401, for a key it does not know; Delta showed
+  "try again in a minute" or "HTTP 400". It now says the key expired or is invalid.
+
 ## 0.4.2 - 2026-11-12
 
 Teach Delta a task once and it repeats it with no AI, plus much faster answers and a hard rule on trading. In short:
