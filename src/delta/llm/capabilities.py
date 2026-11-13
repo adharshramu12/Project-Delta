@@ -22,6 +22,8 @@ BRAINS = {
     "groq": Brain("Groq cloud model", "strong", 1.3),
     "nim": Brain("NVIDIA NIM cloud model", "strong", 1.3),
     "nebius": Brain("Nebius Token Factory cloud model", "strong", 1.3),
+    "gemini": Brain("Google Gemini cloud model", "strong", 1.3),
+    "openrouter": Brain("an OpenRouter cloud model", "strong", 1.0),  # openrouter/free picks a different model
     "ollama": Brain("a small model on this PC (Ollama)", "small", 0.8),
     "lmstudio": Brain("a small model on this PC (LM Studio)", "small", 0.8),
 }

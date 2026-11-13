@@ -33,6 +33,7 @@ class Provider(Protocol):
 
 # How the user knows each API provider (Settings > Keys); anything else shows its config name.
 DISPLAY_NAMES = {"groq": "Groq", "nim": "NVIDIA", "nvidia": "NVIDIA", "nebius": "Nebius", "deepseek": "DeepSeek",
+                 "gemini": "Gemini", "openrouter": "OpenRouter",
                  "ollama": "Ollama",
                  "lmstudio": "LM Studio"}
 
@@ -443,6 +444,11 @@ class OpenAICompatProvider:
                 kwargs["model"] = model = stand_in
                 resp = await client.chat.completions.create(**kwargs)
         except openai.RateLimitError as e:
+            if is_daily_limit(e):
+                # The day's free quota is gone and no other model of this provider has any left: that is the same
+                # as being out of credits (the provider rests and a backup AI answers), not a pause to wait out.
+                raise LLMError(f"{self.name}: your {display_name(self.name)} limit for today is used up",
+                               kind="quota") from e
             raise LLMError(f"{self.name}: rate limited: {e.message[:200]}", kind="rate_limit",
                            retry_after_s=_retry_after(e)) from e
         except openai.APITimeoutError as e:
@@ -456,6 +462,12 @@ class OpenAICompatProvider:
             raise LLMError(f"{self.name}: HTTP {e.status_code}: {str(e.message)[:200]}", kind="auth") from e
         except openai.APIStatusError as e:
             text = str(e.message).lower()
+            if e.status_code == 400 and self.cfg.secret:
+                # Google answers 400, not 401, for a key it does not know, and wraps the error in a list, which
+                # leaves only "Error code: 400" as the message: the body has the words.
+                said = f"{text} {getattr(e, 'body', '')}".lower()
+                if "api key" in said and ("not valid" in said or "valid api key" in said):
+                    raise LLMError(f"{self.name}: {key_refused(self.name)}", kind="auth") from e
             if e.status_code == 402 or ("insufficient" in text and ("credit" in text or "balance" in text)):
                 raise LLMError(f"{self.name}: your {display_name(self.name)} credits are used up", kind="quota") from e
             if e.status_code == 413 or "too large" in text or "reduce your message size" in text \
@@ -545,9 +557,10 @@ def pick_model(available: list[str], vision: bool = False, exclude: str = "") ->
 
 
 def is_daily_limit(e: Any) -> bool:
-    """Per-day quotas (Groq: TPD/RPD) won't clear by waiting a few seconds."""
-    text = str(e).lower()
-    return "per day" in text or "(tpd)" in text or "(rpd)" in text or "daily" in text
+    """Per-day quotas won't clear by waiting a few seconds. Groq says "(TPD)", OpenRouter "free-models-per-day",
+    Google "GenerateRequestsPerDayPerProjectPerModel-FreeTier": all written differently."""
+    text = f"{e} {getattr(e, 'body', '')}".lower()
+    return any(w in text for w in ("per day", "per-day", "perday", "(tpd)", "(rpd)", "daily"))
 
 
 def _retry_after(e: Any) -> float | None:

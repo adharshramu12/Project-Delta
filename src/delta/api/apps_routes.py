@@ -27,12 +27,17 @@ LABELS = {"claude_code": "Claude Code (your Claude plan)", "codex": "Codex (your
           "cline": "Cline (your Cline account)", "deepseek": "DeepSeek (your API key)",
           "lmstudio": "LM Studio (on this PC)", "ollama": "Ollama (on this PC)",
           "groq": "Groq (free cloud key)", "nim": "NVIDIA NIM (free cloud key)",
-          "nebius": "Nebius Token Factory (your Nebius credits)"}
+          "nebius": "Nebius Token Factory (your Nebius credits)",
+          "gemini": "Google Gemini (free cloud key)", "openrouter": "OpenRouter (free cloud key)"}
 
 
 class PreferredIn(BaseModel):
     name: str
     fallback: bool | None = None  # llm.fallback: other AIs may answer when the main AI fails
+
+
+class BackupsIn(BaseModel):
+    names: list[str] = Field(default_factory=list, max_length=12)
 
 
 class GoogleClientIn(BaseModel):
@@ -67,6 +72,13 @@ def find_lms() -> str | None:
         if (p := Path.home() / ".lmstudio" / "bin" / name).is_file():
             return str(p)
     return None
+
+
+def backup_allowed(c: Any, name: str) -> bool:
+    """A provider that may be a backup AI: an API key of the user's own. Never the AI apps (Claude Code, Codex,
+    Cline: those spend a plan the user did not hand over for this) and never a model that runs on this PC."""
+    p = c.settings.llm.providers.get(name)
+    return p is not None and p.kind == "openai" and not p.local and bool(p.secret)
 
 
 def register(app: FastAPI, c: Container, auth: Any) -> None:
@@ -106,7 +118,24 @@ def register(app: FastAPI, c: Container, auth: Any) -> None:
     async def get_preferred() -> dict[str, Any]:
         ready = set(await asyncio.to_thread(c.router.usable))
         return {"preferred": c.router.preferred, "fallback": c.router.fallback,
-                "options": [{"name": n, "label": LABELS.get(n, n), "ready": n in ready} for n in c.router.providers]}
+                "options": [{"name": n, "label": LABELS.get(n, n), "ready": n in ready} for n in c.router.providers],
+                # Backup AIs: only your own API keys can be one, never an AI app's plan or a model on this PC
+                "backups": list(c.router.fallbacks),
+                "backup_choices": [{"name": n, "label": LABELS.get(n, n), "ready": n in ready}
+                                   for n in c.router.providers if backup_allowed(c, n)]}
+
+    @app.put("/api/apps/backups", dependencies=[Depends(auth)])
+    async def set_backups(body: BackupsIn) -> dict[str, Any]:
+        """The AIs that take over when the main AI runs out of credits or hits its limit (router.fallbacks)."""
+        names = list(dict.fromkeys(body.names))
+        bad = [n for n in names if not backup_allowed(c, n)]
+        if bad:
+            raise HTTPException(400, f"{', '.join(bad)} cannot be a backup AI: only an AI you use with your own API "
+                                     "key can (not an AI app's plan, and not a model on this PC).")
+        await asyncio.to_thread(write_user_settings, c.settings.data_dir, {"router": {"fallbacks": names}})
+        c.settings.router.fallbacks = c.router.fallbacks = names
+        c.audit.record("apps.backups", names=names)
+        return {"ok": True, "backups": names}
 
     @app.put("/api/apps/preferred", dependencies=[Depends(auth)])
     async def set_preferred(body: PreferredIn) -> dict[str, Any]:

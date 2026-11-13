@@ -14,6 +14,8 @@ KNOWN_SECRETS = {
     "groq_api_key": "Groq API key",
     "nvidia_api_key": "NVIDIA NIM API key",
     "nebius_api_key": "Nebius Token Factory API key (tokenfactory.nebius.com)",
+    "gemini_api_key": "Google Gemini API key (aistudio.google.com/apikey, free)",
+    "openrouter_api_key": "OpenRouter API key (openrouter.ai/keys, free tier available)",
     "deepseek_api_key": "DeepSeek API key (platform.deepseek.com; the one DeepSeek Harness uses)",
     "tavily_api_key": "Tavily search API key",
     "serpapi_api_key": "SerpAPI key",

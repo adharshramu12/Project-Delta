@@ -94,16 +94,33 @@ llm:
         chat: openai/gpt-oss-120b     # change to any model in your Token Factory catalogue
         plan: openai/gpt-oss-120b
         verify: openai/gpt-oss-120b
+    gemini:                           # Google Gemini through AI Studio's free tier (OpenAI-compatible API)
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+      secret: gemini_api_key          # a free key: aistudio.google.com/apikey
+      timeout_s: 90
+      models:
+        chat: gemini-3.8-flash        # free tier, strong tool use; "gemini-4-hydrogen" is Google's newest
+        plan: gemini-3.8-flash
+        verify: gemini-3.5-flash-lite # fastest and cheapest of the free models
+        vision: gemini-3.8-flash      # reads screenshots, free
+    openrouter:                       # OpenRouter: one key for hundreds of models, and a free tier with no card
+      base_url: https://openrouter.ai/api/v1
+      secret: openrouter_api_key      # openrouter.ai/keys
+      timeout_s: 120
+      models:
+        chat: openrouter/free         # picks a free model that can use tools; use openrouter/auto if you have credits
+        plan: openrouter/free
+        verify: openrouter/free
   # When you pick a main AI (Apps > AI models), only that AI answers. Set true to let the AIs below answer when
   # it fails (out of credits, key expired, not installed). A job your main AI cannot do at all, such as reading a
   # screenshot with a text-only model, still uses the order below.
   fallback: false
   # Provider order per job. The first healthy, allowed provider wins.
   routes:
-    chat: [ollama, lmstudio, claude_code, codex, cline, deepseek, groq, nim, nebius]
-    plan: [claude_code, codex, cline, deepseek, groq, nim, nebius, lmstudio, ollama]
-    verify: [groq, nim, nebius, deepseek, claude_code, codex, cline, lmstudio, ollama]
-    vision: [ollama, lmstudio, claude_code, codex, nim]
+    chat: [ollama, lmstudio, claude_code, codex, cline, deepseek, groq, nim, gemini, openrouter, nebius]
+    plan: [claude_code, codex, cline, deepseek, groq, nim, gemini, openrouter, nebius, lmstudio, ollama]
+    verify: [groq, nim, gemini, nebius, openrouter, deepseek, claude_code, codex, cline, lmstudio, ollama]
+    vision: [ollama, lmstudio, claude_code, codex, nim, gemini]
 
 search:
   order: [tavily, serpapi, duckduckgo]   # duckduckgo needs no key and is the free fallback

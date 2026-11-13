@@ -121,6 +121,7 @@
     <div class="group-head"><h3 id="h_ai">AI models</h3><p class="muted">Use plans you already pay for, or a free cloud key. Each reply says which AI answered.</p></div>
     <label class="field inline-field">Main AI <small>Does every step. If it fails, you are told why.</small><select id="s_main"></select></label>
     <label class="check"><input type="checkbox" id="s_fallback"> If my main AI fails, let my other AIs answer <small class="muted">(off: only the main AI you picked is used)</small></label>
+    <div class="field" id="s_backups_box" hidden><b>Backup AIs</b> <small class="muted">Take over only when your main AI runs out of credits, hits its limit or is down. Each reply says which AI answered.</small><div class="row" id="s_backups"></div></div>
     <div id="s_appslist" class="cards"></div>
     <div class="row"><button class="btn" id="apps_keys">Add or check a model key</button></div>
     </section>
@@ -323,6 +324,18 @@
     <div class="card-top"><b>Nebius Token Factory</b><span class="pill">Your Nebius credits</span></div>
     <small class="muted">Get a key at <span class="mono">tokenfactory.nebius.com</span></small>
     <div class="inline-form"><input type="password" placeholder="Nebius API key" autocomplete="off" aria-label="Nebius API key"><button class="btn">Check and save</button></div>
+    <div class="msg" role="status"></div>
+    </div>
+    <div class="keyrow card" data-key="gemini_api_key">
+    <div class="card-top"><b>Google Gemini</b><span class="pill">Free</span></div>
+    <small class="muted">Get a key at <span class="mono">aistudio.google.com/apikey</span></small>
+    <div class="inline-form"><input type="password" placeholder="AIza..." autocomplete="off" aria-label="Gemini API key"><button class="btn">Check and save</button></div>
+    <div class="msg" role="status"></div>
+    </div>
+    <div class="keyrow card" data-key="openrouter_api_key">
+    <div class="card-top"><b>OpenRouter</b><span class="pill">Free models</span></div>
+    <small class="muted">Get a key at <span class="mono">openrouter.ai/keys</span></small>
+    <div class="inline-form"><input type="password" placeholder="sk-or-..." autocomplete="off" aria-label="OpenRouter API key"><button class="btn">Check and save</button></div>
     <div class="msg" role="status"></div>
     </div>
     <h3>Or use an AI app you already have <span class="pill">No key needed</span></h3>
