@@ -11,10 +11,11 @@ CASES = {
     "post": "write a LinkedIn post about my launch", "documents": "make a PPT about solar power",
     "schedules": "every day at 9 am check my attendance", "browsers": "use Edge from now on",
     "deep_research": "deep research on the EV market in India",
+    "learning": "learn how GST filing works and remember it",
 }
 TOOL_OF = {"media": "play_youtube", "meetings": "schedule_meeting", "messages": "send_message", "email": "send_email",
            "post": "write_post", "documents": "make_presentation", "schedules": "schedule_task",
-           "browsers": "set_browser", "deep_research": "Deep Research"}
+           "browsers": "set_browser", "deep_research": "Deep Research", "learning": "learn_topic"}
 
 
 def test_every_topic_brings_its_own_examples_and_only_when_asked():

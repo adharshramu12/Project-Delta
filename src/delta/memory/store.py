@@ -65,6 +65,7 @@ MIGRATIONS: list[list[str]] = [
     ],
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
+LEARNED = "learned"  # notes Delta wrote while studying a topic on the web (delta.memory.learn): always untrusted
 _COLS = "id, kind, content, source, updated, origin, trust, task_id, detail, hits, created"
 
 
@@ -111,6 +112,8 @@ class Limits:
     max_item_chars: int = 500
     episode_retention_days: float = 90
     untrusted_retention_days: float = 30
+    learned_retention_days: float = 180  # study notes are kept longer than other outside content
+    learned_max: int = 400               # and never more than this many
 
 
 class MemoryStore:
@@ -127,7 +130,8 @@ class MemoryStore:
     @classmethod
     def from_config(cls, path: Path, cfg: Any) -> MemoryStore:
         return cls(path, Limits(cfg.max_items, cfg.max_item_chars, cfg.episode_retention_days,
-                                cfg.untrusted_retention_days))
+                                cfg.untrusted_retention_days,
+                                getattr(cfg, "learned_retention_days", 180), getattr(cfg, "learned_max", 400)))
 
     def _migrate(self) -> None:
         with self._lock:
@@ -275,8 +279,18 @@ class MemoryStore:
                                             (cut,)).rowcount
             if lim.untrusted_retention_days > 0:
                 cut = (now - timedelta(days=lim.untrusted_retention_days)).isoformat(timespec="seconds")
-                removed += self._db.execute("DELETE FROM memories WHERE trust='untrusted' AND updated < ?",
+                removed += self._db.execute("DELETE FROM memories WHERE trust='untrusted' AND kind != 'learned' "
+                                            "AND updated < ?", (cut,)).rowcount
+            if lim.learned_retention_days > 0:
+                cut = (now - timedelta(days=lim.learned_retention_days)).isoformat(timespec="seconds")
+                removed += self._db.execute("DELETE FROM memories WHERE kind='learned' AND updated < ?",
                                             (cut,)).rowcount
+            extra = int(self._db.execute("SELECT COUNT(*) FROM memories WHERE kind='learned'").fetchone()[0]
+                        ) - lim.learned_max
+            if extra > 0:
+                removed += self._db.execute(
+                    "DELETE FROM memories WHERE id IN (SELECT id FROM memories WHERE kind='learned' "
+                    "ORDER BY updated ASC, id ASC LIMIT ?)", (extra,)).rowcount
             total = int(self._db.execute("SELECT COUNT(*) FROM memories").fetchone()[0])
             over = total - lim.max_items
             for where in ("trust='untrusted'", "kind='episode'", "source != 'user'"):
@@ -349,6 +363,20 @@ class MemoryStore:
         found = [m for _, m in scored[:k]]
         self._mark_hits([m.id for m in found])
         return found
+
+    def studied(self, query: str = "", limit: int = 5) -> builtins.list[str]:
+        """Topics Delta has study notes on (delta.memory.learn), newest first; with a query, only the topics it is
+        about. Only the topic names: each was checked to be the user's own words when it was saved. The notes
+        themselves are untrusted and come back only through recall."""
+        topics: dict[str, None] = {}
+        for m in self._rows(LEARNED):
+            if (found := re.match(r"\[([^\]]{3,80})\] ", m.content)):
+                topics.setdefault(found.group(1))
+        names = list(topics)
+        if query:
+            words = keywords(query)
+            names = [t for t in names if (tw := keywords(t)) and overlap(words, t) >= min(2, len(tw))]
+        return names[:limit]
 
     def context_for(self, query: str, k: int = 6) -> str:
         """Prompt block: recent trusted profile facts + past tasks that really match this request.

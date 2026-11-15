@@ -22,6 +22,7 @@ from delta.llm.cli_providers import CLI_KINDS
 from delta.llm.providers import OpenAICompatProvider, Provider, lmstudio_base_url
 from delta.llm.router import ModelRouter
 from delta.memory.chats import ChatStore
+from delta.memory.learn import LearnTopic
 from delta.memory.skills import SkillStore
 from delta.memory.store import MemoryStore
 from delta.memory.tools import memory_tools, wire_memory_tools
@@ -483,6 +484,8 @@ def build(settings: Settings) -> Container:
     live_channels: dict[str, Any] = {}
     send_file = SendFile(live_channels)
     emergency = EmergencyContacts(data)
+    search = SearchRouter.from_order(settings.search.order)
+    web_answer = WebAnswer(search, router)
     registry = ToolRegistry([
         *filesystem_tools(),
         send_file,
@@ -494,10 +497,12 @@ def build(settings: Settings) -> Container:
         *meeting_tools(),
         *messaging_tools(chats),
         AlertEmergencyContacts(emergency),
-        WebSearch(search := SearchRouter.from_order(settings.search.order)),
+        WebSearch(search),
         FetchPage(),
-        WebAnswer(search, router),  # a current-facts question in one step: search, read, answer
+        web_answer,  # a current-facts question in one step: search, read, answer
         *(memory_tools(memory) if settings.memory.enabled else []),
+        # "learn how X works": study a topic on the web, keep short untrusted notes for later (delta.memory.learn)
+        *([LearnTopic(memory, web_answer, router)] if settings.memory.enabled else []),
     ])
     from delta.tools.email import email_tools, save_draft_tool
 
