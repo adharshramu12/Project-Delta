@@ -43,7 +43,7 @@ If something failed, it tells you plainly instead of pretending.
 - **Gmail drafts with approval.** "Email Ravi that the review moves to 4 pm." Delta drafts it in your voice and shows
   the whole email with every recipient. It sends only when you press Approve, every single time, at every
   permission level. Edit and Cancel send nothing.
-- **43 apps, one click each.** The Apps page is a directory: search, filters by category (Productivity, Email and
+- **65 apps, one click each.** The Apps page is a directory: search, filters by category (Productivity, Email and
   chat, Design, Developer tools, Databases, Websites, Automation, Docs and AI, Finance and markets, Marketing) and a
   details panel for every app saying what it does, how it signs in, where it runs and what asks first. Most connect
   with a browser sign-in and nothing to paste: Notion, Linear, Atlassian, Canva, Todoist, ClickUp, monday.com,
