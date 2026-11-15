@@ -6,6 +6,16 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.4.3 - 2026-11-13
+
+Free AI keys that run out no longer stop Delta. In short:
+
+- **Google Gemini and OpenRouter** (#76): two more AI providers with free keys, added in Settings > Keys or the
+  setup wizard.
+- **Backup AIs** (#76): in Apps > AI models, choose the AIs that take over when your main AI is out of credits, has
+  used its limit for the day, refuses its key or is down. They answer on every message while it rests.
+- **A used-up daily limit no longer costs 15 seconds per message** (#76), and a wrong Gemini key is said plainly.
+
 ### Added
 - **Google Gemini and OpenRouter as AI providers, and backup AIs that take over when your main AI runs out.**
   Add a free Gemini key (aistudio.google.com/apikey) or a free OpenRouter key (openrouter.ai/keys) in Settings >
