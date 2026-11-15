@@ -13,8 +13,9 @@
     return e;
   };
   const LINES = {
-    click: ["Hi! I'm Tri.", "Hehe, that tickles!", "Need anything? Just ask.", "I'm Delta's triangle. Pointy, but friendly.",
-            "Ready when you are!", "You and me: a good team."],
+    click: ["Hi! I'm Tri.", "Hehe, that tickles!", "Ready when you are!"],
+    run: ["Catch me!", "Too slow!", "Over here!"],
+    caught: ["Okay, okay, you got me!", "You win. Again?"],
     done: ["Done!", "Nice, that worked.", "All finished!", "Ta-da!"],
     oops: ["Hmm, that one didn't work.", "Oops. Check what went wrong above."],
     ask: ["I need your answer to carry on."],
@@ -57,16 +58,55 @@
     idleTimer = setTimeout(() => { if (!busy && mood === "idle") set("sleep"); }, 90000);
   }
 
+  // ---- play. A click mostly gets a trick; sometimes Tri runs to another corner ("catch me") and lets itself be
+  // caught on the third try. Left alone, it does a small trick now and then. All of it is CSS classes, and none of
+  // it happens while Delta works, while you type, or with Windows' reduced motion.
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const TRICKS = ["spin", "peek", "wiggle", "hop"], SPOTS = ["spot-left", "spot-top", "spot-mid"];
+  let runs = 0, playTimer = 0;
+  const home = () => { pet.classList.remove(...SPOTS); runs = 0; };
+  const free = () => !busy && !still.matches && !pet.classList.contains("ducked") && !document.hidden;
+  function playLater() {
+    clearTimeout(playTimer);
+    playTimer = setTimeout(() => { if (free() && mood === "idle") set(pick(TRICKS), 1600); playLater(); }, 45000 + Math.random() * 45000);
+  }
   pet.onclick = () => {
-    if (Math.random() < 0.08) { set("laugh", 1400); say(pick(LINES.silly)); return; }
-    set("laugh", 1400); say(pick(LINES.click));
+    if (!free()) { set("laugh", 1400); return; }
+    if (runs >= 2) { home(); set("laugh", 1400); say(pick(LINES.caught)); return; }
+    if (runs || Math.random() < 0.3) {
+      const spot = pick(SPOTS.filter(s => !pet.classList.contains(s)));
+      pet.classList.remove(...SPOTS); pet.classList.add(spot); runs += 1;
+      set("hop", 900); say(pick(LINES.run), 1800); return;
+    }
+    if (Math.random() < 0.25) { set("laugh", 1400); say(pick(Math.random() < 0.3 ? LINES.silly : LINES.click)); return; }
+    set(pick(TRICKS), 1600);
   };
+  // Eyes follow the pointer (one of nine directions, as a class).
+  let lookAt = 0;
+  document.addEventListener("pointermove", e => {
+    if (e.timeStamp - lookAt < 120 || !pet.isConnected) return;
+    lookAt = e.timeStamp;
+    const r = pet.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    pet.dataset.look = (Math.abs(dy) < 60 ? "" : dy < 0 ? "u" : "d") + (Math.abs(dx) < 60 ? "" : dx < 0 ? "l" : "r");
+  }, {passive: true});
+  // Never in the way: while Tri covers a button, link or box of the page, it fades and clicks go through it.
+  const CONTROL = "button,a,input,select,textarea,summary,label,[role=button],[role=tab],[role=switch]";
+  setInterval(() => {
+    if (!pet.isConnected || document.hidden) return;
+    const r = pet.getBoundingClientRect();
+    const covered = [[.5, .5], [.2, .3], [.8, .3], [.2, .85], [.8, .85]].some(([fx, fy]) => {
+      const under = document.elementsFromPoint(r.left + r.width * fx, r.top + r.height * fy).find(n => !pet.contains(n));
+      return !!(under && under.closest(CONTROL));
+    });
+    pet.classList.toggle("aside", covered);
+  }, 400);
 
   // ---- real events only
   D.on("ws", m => {
     if (m.type === "result") {
       busy = false;
       const st = m.result && m.result.status;
+      home();
       if (st === "done") { set("done", 2600); say(pick(LINES.done)); }
       else if (st === "needs_user") { set("curious", 4000); say(pick(LINES.ask)); }
       else if (st === "cancelled") set("idle");
@@ -104,7 +144,7 @@
 
   // ---- on and off (Settings > Look and feel)
   function show(on) {
-    if (on && !pet.isConnected) { document.body.append(pet); restartIdle(); setTimeout(greet, 1500); }
+    if (on && !pet.isConnected) { document.body.append(pet); restartIdle(); playLater(); setTimeout(greet, 1500); }
     if (!on && pet.isConnected) pet.remove();
   }
   const sw = $("s_pet");

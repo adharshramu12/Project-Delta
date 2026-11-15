@@ -6,6 +6,19 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Added
+- **Delta knows its own features.** Asked "what can you do", "what is new" or "how do I set up a daily brief",
+  Delta now answers from a card with its version, what the last four releases added (read from this changelog's
+  "In short" lines, so each release teaches it with no extra step) and where things are in the dashboard. The
+  card is sent only with a question about Delta itself, so other requests cost no extra tokens.
+- **Tri plays.** Its eyes follow your pointer, it does a small trick now and then when nothing is happening, and a
+  click gets a trick or starts "catch me": it runs to another corner and lets itself be caught on the third try.
+  It talks less. None of this happens while Delta works, while you type, or with Windows' reduced motion.
+
+### Fixed
+- **Tri no longer blocks buttons.** When it sits over a button, link or box (the "Run now" buttons on Schedules,
+  for example) it fades and clicks go through it; its speech bubble never takes clicks.
+
 ## 0.4.6 - 2026-11-15
 
 Delta uses fewer AI tokens, so free keys last longer and steps wait less. In short:

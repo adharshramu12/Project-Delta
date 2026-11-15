@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 
 from delta import CREDIT
+from delta.core.about import ABOUT, about_delta
 from delta.core.state import Plan
 from delta.core.style import STYLE_BLOCK, WARMTH_BLOCK
 from delta.llm.providers import extract_json
@@ -146,6 +147,8 @@ def hints_for(text: str, tool_names: list[str] | None = None) -> str:
     """The FAST PATH examples and notes that fit this request ("" when none do). With no request text (a caller
     that only wants the full prompt) every hint is given."""
     found = [body for _, rx, body in _HINT_RES if not text or rx.search(text)]
+    if not text or ABOUT.search(text):  # a question about Delta itself: its version and recent features
+        found.append(about_delta())
     if not found:
         return ""
     return "MORE FAST PATH examples and notes for this request:\n" + "\n".join(found) + "\n\n"
