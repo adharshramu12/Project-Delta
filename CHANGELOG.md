@@ -6,6 +6,13 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.4.6 - 2026-11-15
+
+Delta uses fewer AI tokens, so free keys last longer and steps wait less. In short:
+
+- **File and lookup tasks** (#88): about half the tokens per step.
+- **Every task's planning step** (#89): about 30% smaller.
+
 ### Changed
 - **File and lookup tasks use about half the tokens per step.** A task planned with only file, web-search and
   memory tools was still sent eight helpers for looking at the screen, the browser and the media player, and the
