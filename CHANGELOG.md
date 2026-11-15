@@ -7,6 +7,13 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Delta can study a topic and remember it.** "Learn how UPI Lite works and remember it" makes Delta search,
+  read the best pages and save up to eight short notes with the site each came from (`learn_topic`, one step).
+  Later questions on the topic are answered from the notes. The notes stay on this PC for 180 days
+  (`memory.learned_retention_days`), show on the Memory page and can be deleted there. They are saved without
+  asking, so the safety is in what a note can be: it is stored as outside data that is never an instruction or a
+  fact about you, it comes back only through `recall` with that label, anything that reads like an order, a link
+  or a secret is dropped, and only your own message can start a study (a web page that Delta reads cannot).
 - **Delta knows its own features.** Asked "what can you do", "what is new" or "how do I set up a daily brief",
   Delta now answers from a card with its version, what the last four releases added (read from this changelog's
   "In short" lines, so each release teaches it with no extra step) and where things are in the dashboard. The

@@ -93,6 +93,8 @@ def wire_memory_tools(tools: list[Tool], executor: object) -> None:
     """Give `remember` the executor's taint record and the observation log (call once the executor exists)."""
     observations = getattr(executor, "observations", None)
     for t in tools:
+        if getattr(t, "name", "") == "learn_topic":
+            t.tainted_by = getattr(executor, "tainted_by")  # type: ignore[attr-defined]  # noqa: B009
         if isinstance(t, Remember):
             t.tainted_by = getattr(executor, "tainted_by")  # noqa: B009 - duck-typed ToolExecutor
             if observations is not None:

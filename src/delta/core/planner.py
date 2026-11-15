@@ -133,6 +133,11 @@ schedule_task with text = the user's own words (it confirms the parsed time with
 "private", "scope": "always"}; "do this in Chrome ..." -> plan set_browser with "scope": "this_task" first, then
 the browser steps (the saved choice stays); "let me sign in to my sites" -> open_signin_browser (the user signs in;
 Delta never types passwords there)."""),
+    ("learning", r"learn|study|memori[sz]e|teach yourself|read up on|get to know",
+     """"learn how GST filing works" / "study the new UPI rules and remember them" / "memorise this topic" (the user
+asks YOU to learn something for later) -> learn_topic {"topic": "<2 to 8 words from the user's message>",
+"questions": ["<a search query>", "<a second one>"]} (it searches, reads and saves the notes in one call). When the
+user wants to learn it THEMSELVES, or wants the answer now, it is not this: answer or use web_answer."""),
     ("deep_research", r"research",
      """DEEP RESEARCH ("deep research ...", "research ... in ChatGPT/Gemini") is a TOOL task, never answered from
 memory: the agent asks what it needs, writes an expert brief and starts Deep Research in the user's own

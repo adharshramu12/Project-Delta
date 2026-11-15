@@ -36,7 +36,8 @@ ORIGINS = (USER_MESSAGE, TOOL_RESULT, WEB_READ, FILE, MESSAGE, SCREEN, AGENT_NOT
 # The taint source (the first tool that brought outside content into the task) -> the kind of origin.
 _TAINT_ORIGIN = {
     "browser_read": WEB_READ, "fetch_page": WEB_READ, "web_search": WEB_READ, "helper_read_page": WEB_READ,
-    "parallel_research": WEB_READ, "web_answer": WEB_READ, "read_file": FILE, "read_messages": MESSAGE,
+    "parallel_research": WEB_READ, "web_answer": WEB_READ, "learn_topic": WEB_READ,
+    "read_file": FILE, "read_messages": MESSAGE,
     "read_window": SCREEN,
     "look_at_screen": SCREEN, "look_with_marks": SCREEN, "read_screen_text": SCREEN,
     "attachment": ATTACHMENT, "read_attachment": ATTACHMENT, "look_at_attachment": ATTACHMENT,

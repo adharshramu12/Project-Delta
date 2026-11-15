@@ -94,6 +94,9 @@ class MemoryConfig(BaseModel):
     max_item_chars: int = Field(default=500, ge=80, le=4000)      # longer text is cut before it is stored
     episode_retention_days: float = Field(default=90, ge=0)       # past-task notes older than this go (0 = keep)
     untrusted_retention_days: float = Field(default=30, ge=0)     # notes from outside content go sooner (0 = keep)
+    # Study notes from learn_topic ("learn how X works"): kept longer, and never more than learned_max of them.
+    learned_retention_days: float = Field(default=180, ge=0)
+    learned_max: int = Field(default=400, ge=10, le=5000)
 
 
 class ChannelConfig(BaseModel):
