@@ -6,6 +6,14 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.4.4 - 2026-11-15
+
+Delta is lighter on laptops without a graphics card. In short:
+
+- **Your cloud keys answer first** (#83): a model on this PC is tried first only with an NVIDIA card of 4 GB or more.
+- **Ollama does not load a model when memory is short** (#83).
+- **The dashboard window's storage is cleaned** (#83): hundreds of MB of leftovers are removed each start.
+
 ### Changed
 - **Delta is light on laptops without a graphics card.** In Automatic mode a model on this PC (Ollama, LM Studio)
   used to be tried before your cloud keys. On a laptop with no NVIDIA card that meant loading a 4-7 GB model into
