@@ -6,6 +6,15 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.4.5 - 2026-11-15
+
+Scheduled work that reaches you. In short:
+
+- **Daily briefs** (#85): one tap in Schedules sets up a Markets brief, an AI and tech brief or a Gmail summary.
+- **Results on your phone** (#85): a schedule made on the PC also sends its result to your paired Telegram.
+- **Night tasks are not lost** (#85): a repeating task missed while the PC slept runs when it is on again.
+- **Cleaner research answers** (#86): no long dashes or odd spaces in one-step web answers.
+
 ### Added
 - **Daily briefs in Schedules.** Three one-tap buttons fill the "New schedule" box with a ready schedule you can
   edit before saving: a **Markets brief** (weekday mornings; information only, no buy or sell advice), an **AI and
