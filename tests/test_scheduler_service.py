@@ -139,7 +139,7 @@ async def test_missed_while_off_runs_once_within_grace(tmp_path):
 
 async def test_missed_beyond_grace_is_recorded_and_skipped(tmp_path):
     clock = Clock(T0)
-    s, store, c = make(tmp_path, clock, grace_minutes=60)
+    s, store, c = make(tmp_path, clock, grace_minutes=60, catch_up_hours=0)
     sch = store.add("ERP", "check attendance", Rule("daily", time="09:00"), tz="Asia/Kolkata",
                     owner_channel="telegram", owner_user="42", now=T0 - timedelta(days=1))
     clock.t = sch.next_run + timedelta(hours=3)  # the PC was off all morning
@@ -355,3 +355,17 @@ async def test_a_locked_or_unpaired_phone_gets_nothing(tmp_path):
         clock.t = sch.next_run
         await run_due(s)
         assert c.phone.sent == [] and s.alerts  # type: ignore[attr-defined]
+
+
+async def test_a_daily_task_missed_overnight_runs_when_the_pc_is_on_again_but_a_reminder_does_not(tmp_path):
+    clock = Clock(T0)
+    s, store, c = make(tmp_path, clock)
+    brief = store.add("AI brief", "give me my AI brief", Rule("daily", time="23:00"), tz="Asia/Kolkata", now=T0)
+    note = store.add("call", "call Ravi", Rule("daily", time="23:00"), tz="Asia/Kolkata", kind="reminder", now=T0)
+    clock.t = brief.next_run + timedelta(hours=8)  # asleep all night, opened in the morning
+    await run_due(s)
+    assert [r.text for r, _ in c.calls] == ["give me my AI brief"]
+    assert store.get(note.id).last_status == "missed"
+    clock.t = store.get(brief.id).next_run + timedelta(hours=13)  # away for longer than the catch-up window
+    await run_due(s)
+    assert len(c.calls) == 1 and store.get(brief.id).last_status == "missed"

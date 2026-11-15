@@ -299,6 +299,8 @@ class SchedulerConfig(BaseModel):
     timezone: str = ""  # IANA name like "Asia/Kolkata"; empty = this PC's own time zone
     # results of schedules made on the PC also go to the paired Telegram (not while remote control is locked)
     notify_phone: bool = True
+    # a repeating task missed while the PC was off or asleep still runs once if it is at most this late
+    catch_up_hours: float = Field(default=12, ge=0, le=72)
 
 
 class EngineConfig(BaseModel):

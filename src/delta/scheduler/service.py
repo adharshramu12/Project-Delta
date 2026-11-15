@@ -8,7 +8,8 @@ Every few seconds (or right away when a schedule changes) it looks for due sched
 - reminders skip the AI completely: the message goes straight to the owner.
 - never starts a schedule that is still running (the late run is recorded as skipped).
 - caught up after the PC was off or asleep: a run that is late by no more than the grace window
-  (default 1 hour) runs once; an older one is recorded as missed and the schedule moves on.
+  (default 1 hour; 12 hours for a repeating task such as a daily brief) runs once; an older one is recorded
+  as missed and the schedule moves on.
 - holds task runs during quiet hours and runs them once when quiet hours end (reminders still arrive).
 - runs at most `max_concurrent` scheduled tasks at once (default 1); Delta still does one heavy task at
   a time overall.
@@ -65,10 +66,14 @@ def short(text: str, limit: int = 700) -> str:
 class Scheduler:
     def __init__(self, store: ScheduleStore, *, grace_minutes: float = 60, max_concurrent: int = 1,
                  enabled: bool = True, clock: Callable[[], datetime] = now_utc,
-                 alert: Callable[[str, str], None] | None = None, notify_phone: bool = True) -> None:
+                 alert: Callable[[str, str], None] | None = None, notify_phone: bool = True,
+                 catch_up_hours: float = 12) -> None:
         self.store = store
         self.notify_phone = notify_phone  # results of schedules made on the PC also go to the paired Telegram
         self.grace = timedelta(minutes=max(0.0, grace_minutes))
+        # a repeating task (a daily brief) missed while the PC slept still runs once when it is on again, up to
+        # this late; reminders and one-time tasks keep the short grace, since their time was the point
+        self.catch_up = max(self.grace, timedelta(hours=max(0.0, catch_up_hours)))
         self.enabled = enabled
         self.clock = clock
         self.alert = alert
@@ -142,7 +147,8 @@ class Scheduler:
                 self.store.record_run(s.id, "skipped", "the previous run was still going", due=due, started=now)
                 self.store.set_next(s.id, nxt)
                 continue
-            if not s.held and now - due > self.grace:
+            repeating = s.kind == "task" and s.rule.type != "once"
+            if not s.held and now - due > (self.catch_up if repeating else self.grace):
                 await self._missed(s, due, now)
                 continue
             if s.kind in ("task", "watch") and self._quiet_now(s):
