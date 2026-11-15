@@ -347,11 +347,15 @@ class OpenAICompatProvider:
         if free_gb >= self.cfg.min_free_ram_gb:
             return
         root = self.cfg.base_url.removesuffix("/v1").rstrip("/")
-        with contextlib.suppress(httpx.HTTPError, ValueError):
-            async with httpx.AsyncClient(timeout=3) as client:
+        async with httpx.AsyncClient(timeout=3) as client:
+            with contextlib.suppress(httpx.HTTPError, ValueError, AttributeError):  # LM Studio
                 models = (await client.get(f"{root}/api/v0/models")).json().get("data", [])
-            if any(m.get("id") == model and m.get("state") == "loaded" for m in models):
-                return  # already in memory: answering costs no extra RAM
+                if any(m.get("id") == model and m.get("state") == "loaded" for m in models):
+                    return  # already in memory: answering costs no extra RAM
+            with contextlib.suppress(httpx.HTTPError, ValueError, AttributeError):  # Ollama: what is in memory now
+                running = (await client.get(f"{root}/api/ps")).json().get("models", [])
+                if any(model in (m.get("name"), m.get("model")) for m in running):
+                    return
         raise LLMError(f"{self.name}: only {free_gb:.1f} GB RAM free; loading {model} needs about "
                        f"{self.cfg.min_free_ram_gb:g} GB", kind="unreachable")
 

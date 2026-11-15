@@ -6,6 +6,22 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Changed
+- **Delta is light on laptops without a graphics card.** In Automatic mode a model on this PC (Ollama, LM Studio)
+  used to be tried before your cloud keys. On a laptop with no NVIDIA card that meant loading a 4-7 GB model into
+  RAM and answering slowly while your Gemini, Groq, NVIDIA or OpenRouter key would have answered at once. Now your
+  keys and AI apps come first unless the PC has a graphics card with at least 4 GB; local models stay as the last
+  resort. If you picked Ollama or LM Studio as your main AI, it is still tried first.
+- **Ollama no longer loads a model when the PC is short on memory**: like LM Studio, it needs 6 GB of free RAM
+  (`min_free_ram_gb` in `config/delta.yaml`), unless the model is already loaded. A cloud key answers instead.
+
+### Fixed
+- **The dashboard window's browser profile is now tidied.** It was only checked at start-up, after the window had
+  opened, so it was always "in use" and never trimmed: on a real PC it stayed at 764 MB. Its leftovers (caches,
+  component downloads) are now moved aside in a fraction of a second just before the window opens and deleted in
+  the background; sign-ins, settings and saved page data are kept. Measured on a copy of a real profile: 728 MB
+  down to 96 MB, the window opening as before.
+
 ## 0.4.3 - 2026-11-13
 
 Free AI keys that run out no longer stop Delta. In short:

@@ -10,7 +10,7 @@
   async function renderMain() {
     const p = await api("/api/apps/preferred").catch(() => null); if (!p) return;
     const sel = $("s_main");
-    sel.replaceChildren(h("option", {value: "auto", text: "Automatic (local first, then your plans, then free cloud)"}),
+    sel.replaceChildren(h("option", {value: "auto", text: "Automatic (your plans and keys first; a model on this PC first only with a graphics card)"}),
       ...p.options.map(o => h("option", {value: o.name, text: o.label + (o.ready ? "" : " (not ready)")})));
     sel.value = p.preferred;
     $("s_fallback").checked = !!p.fallback;

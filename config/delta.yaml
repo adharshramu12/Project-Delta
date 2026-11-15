@@ -16,6 +16,7 @@ llm:
       local: true
       native_tools: false   # small Gemma models: Delta uses its JSON tool protocol instead
       keep_alive: 2m        # unload weights from VRAM after 2 idle minutes
+      min_free_ram_gb: 6    # don't load a model when the PC is short on memory (a cloud key answers instead)
       timeout_s: 180
       models:
         chat: gemma3n:e4b   # set to the tag you pulled, e.g. gemma4:e4b

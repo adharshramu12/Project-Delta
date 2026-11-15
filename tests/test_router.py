@@ -74,3 +74,27 @@ async def test_chosen_ai_out_of_credits_is_reported_and_rested():
     assert "credits are used up" in router.fallback_note()  # still explained on the next answer
     router.preferred = "claude_code"
     assert router.fallback_note() == ""
+
+
+async def test_without_a_graphics_card_local_models_come_after_cloud_keys():
+    ollama = FakeProvider("ollama", [text("local")], local=True)
+    groq = FakeProvider("groq", [text("cloud")])
+    router = ModelRouter({"ollama": ollama, "groq": groq}, {"chat": ["ollama", "groq"]}, local_first=lambda: False)
+    assert (await router.complete([], task="chat")).content == "cloud" and ollama.calls == []
+    assert router.usable()[-1] == "ollama"  # still there as the last resort
+
+
+async def test_a_chosen_local_main_ai_is_never_moved():
+    ollama = FakeProvider("ollama", [text("local")], local=True)
+    groq = FakeProvider("groq", [text("cloud")])
+    router = ModelRouter({"ollama": ollama, "groq": groq}, {"chat": ["groq", "ollama"]}, preferred="ollama",
+                         fallback=False, local_first=lambda: False)
+    assert (await router.complete([], task="chat")).content == "local"
+
+
+async def test_local_main_ai_stays_first_with_backups_on():
+    ollama = FakeProvider("ollama", [text("local")], local=True)
+    groq = FakeProvider("groq", [text("cloud")])
+    router = ModelRouter({"ollama": ollama, "groq": groq}, {"chat": ["groq", "ollama"]}, preferred="ollama",
+                         local_first=lambda: False)
+    assert (await router.complete([], task="chat")).content == "local"

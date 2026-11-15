@@ -48,3 +48,38 @@ def test_a_profile_in_use_is_never_touched(tmp_path, monkeypatch):
 def test_both_browsers_start_with_a_capped_disk_cache():
     assert "--disk-cache-size=33554432" in LEAN_WINDOW_FLAGS
     assert "--disk-cache-size=104857600" in chrome_args(Path("x"), 9222)
+
+
+def test_window_leftovers_are_set_aside_before_it_opens_and_deleted_later(tmp_path, monkeypatch):
+    """The window profile was tidied only after the window opened, so it was always in use: 764 MB, never trimmed."""
+    monkeypatch.setattr(storage, "in_use", lambda p: False)
+    win = tmp_path / "app-window"
+    junk = [make(win, rel, mb=1) for rel in ("component_crx_cache", "Default/Cache/Cache_Data")]
+    keep = make(win, "Default/Local Storage/leveldb")
+    assert storage.before_window(tmp_path) == 2
+    assert not any(p.exists() for p in junk) and keep.exists()
+    assert len(list((tmp_path / storage.TRASH).iterdir())) == 2
+    out = storage.tidy(tmp_path)
+    assert out[0].profile == storage.TRASH and out[0].freed_mb > 0
+    assert list((tmp_path / storage.TRASH).iterdir()) == []
+
+
+def test_window_in_use_is_never_touched(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "in_use", lambda p: True)
+    cache = make(tmp_path / "app-window", "component_crx_cache")
+    assert storage.before_window(tmp_path) == 0 and cache.exists()
+
+
+def test_set_aside_never_follows_a_link_out_of_the_profile(tmp_path):
+    outside = make(tmp_path / "precious", "files")
+    prof = tmp_path / "app-window"
+    prof.mkdir()
+    try:
+        (prof / "component_crx_cache").symlink_to(tmp_path / "precious", target_is_directory=True)
+    except OSError:
+        import pytest
+
+        pytest.skip("no symlink rights on this machine")
+    assert storage.set_aside(prof, ("component_crx_cache",), tmp_path) == 0
+    storage.empty_trash(tmp_path)
+    assert outside.exists()
