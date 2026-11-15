@@ -34,7 +34,7 @@
 
   // ---- remote PIN and Telegram
   async function guardCard() {
-    const s = await api("/api/security").catch(() => null); if (!s) return;
+    const s = await api("/api/security").catch(() => null); if (!s || !$("g_state")) return;  // the card is gone when the page was swapped meanwhile
     $("g_state").className = "pill " + (s.locked ? "danger" : s.has_pin ? "ok" : "warn");
     $("g_state").textContent = s.locked ? `Locked: ${s.reason}` : s.has_pin ? "PIN set, protecting phone control" : "No PIN: sensitive phone actions are blocked";
     $("g_save").textContent = s.has_pin ? "Change PIN" : "Set PIN";

@@ -139,7 +139,7 @@ async def test_missed_while_off_runs_once_within_grace(tmp_path):
 
 async def test_missed_beyond_grace_is_recorded_and_skipped(tmp_path):
     clock = Clock(T0)
-    s, store, c = make(tmp_path, clock, grace_minutes=60)
+    s, store, c = make(tmp_path, clock, grace_minutes=60, catch_up_hours=0)
     sch = store.add("ERP", "check attendance", Rule("daily", time="09:00"), tz="Asia/Kolkata",
                     owner_channel="telegram", owner_user="42", now=T0 - timedelta(days=1))
     clock.t = sch.next_run + timedelta(hours=3)  # the PC was off all morning
@@ -327,3 +327,45 @@ def test_autonomy_only_goes_down_and_quiet_hours_wrap_midnight():
     q = QuietHours(enabled=True, start="23:30", end="07:00")
     assert in_quiet_hours(q, datetime(2026, 1, 1, 2, 0)) and not in_quiet_hours(q, datetime(2026, 1, 1, 12, 0))
     assert not in_quiet_hours(QuietHours(), datetime(2026, 1, 1, 2, 0))
+
+
+async def test_a_schedule_made_on_the_pc_also_reaches_the_paired_phone(tmp_path):
+    """A task that ran while the owner was away only showed on the dashboard, even with Telegram paired."""
+    clock = Clock(T0)
+    s, store, c = make(tmp_path, clock, FakeContainer(answer="Attendance is 87%. " + "x" * 1500))
+    c.phone.allowed = ["42"]
+    sch = store.add("Attendance", "check attendance", Rule("once", at="2026-11-06T09:00"), tz="Asia/Kolkata",
+                    owner_channel="api", owner_user="owner", now=T0)
+    clock.t = sch.next_run
+    await run_due(s)
+    (user, text), = c.phone.sent  # one message, the whole answer, no status icon
+    assert user == "42" and text.startswith("**Attendance**") and "Attendance is 87%" in text and len(text) > 1500
+    assert not s.alerts  # type: ignore[attr-defined]  # no PC pop-up on top of the phone message
+    assert next(d for e, d in c.events.seen if e == "schedule.result")["delivered"] == "telegram"
+
+
+async def test_a_locked_or_unpaired_phone_gets_nothing(tmp_path):
+    for allowed, locked, on in ((["42"], True, True), ([], False, True), (["42"], False, False)):
+        clock = Clock(T0)
+        s, store, c = make(tmp_path / f"{locked}{on}{len(allowed)}", clock, notify_phone=on)
+        c.phone.allowed = allowed
+        c.guard = SimpleNamespace(locked=locked)
+        sch = store.add("x", "x", Rule("once", at="2026-11-06T09:00"), tz="Asia/Kolkata", owner_channel="api",
+                        owner_user="owner", now=T0)
+        clock.t = sch.next_run
+        await run_due(s)
+        assert c.phone.sent == [] and s.alerts  # type: ignore[attr-defined]
+
+
+async def test_a_daily_task_missed_overnight_runs_when_the_pc_is_on_again_but_a_reminder_does_not(tmp_path):
+    clock = Clock(T0)
+    s, store, c = make(tmp_path, clock)
+    brief = store.add("AI brief", "give me my AI brief", Rule("daily", time="23:00"), tz="Asia/Kolkata", now=T0)
+    note = store.add("call", "call Ravi", Rule("daily", time="23:00"), tz="Asia/Kolkata", kind="reminder", now=T0)
+    clock.t = brief.next_run + timedelta(hours=8)  # asleep all night, opened in the morning
+    await run_due(s)
+    assert [r.text for r, _ in c.calls] == ["give me my AI brief"]
+    assert store.get(note.id).last_status == "missed"
+    clock.t = store.get(brief.id).next_run + timedelta(hours=13)  # away for longer than the catch-up window
+    await run_due(s)
+    assert len(c.calls) == 1 and store.get(brief.id).last_status == "missed"
