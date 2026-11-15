@@ -20,6 +20,18 @@ from delta.system.logging import log
 from delta.system.secrets import get_secret
 from delta.tools.base import Risk, Tool, ToolResult
 
+# no-break and thin spaces, and special hyphens, that models put between numbers and words
+_ODD_SPACES = {0x00A0: " ", 0x202F: " ", 0x2009: " ", 0x2007: " ", 0x200A: " ", 0x2011: "-", 0x2010: "-"}
+
+
+def clean_answer(text: str) -> str:
+    """The written answer in Delta's one style. A one-step answer is shown as it is (the orchestrator's style check
+    is for agent replies, and a tool's output is normally data), so a research answer kept the model's long dashes
+    and its special spaces and hyphens. The source list below it is never touched."""
+    from delta.core.style import slop_check
+
+    return slop_check(text.translate(_ODD_SPACES), "chat").text
+
 
 @dataclass
 class SearchHit:
@@ -394,4 +406,4 @@ class WebAnswer(Tool[WebAnswerArgs]):
                                     "says:\n\n" + "\n\n".join(parts), evidence)
         if not answer:
             return ToolResult(True, "\n\n".join(parts), evidence)
-        return ToolResult(True, f"{answer}\n\nSources:\n{sources}", {**evidence, "verified": True})
+        return ToolResult(True, f"{clean_answer(answer)}\n\nSources:\n{sources}", {**evidence, "verified": True})
