@@ -13,6 +13,11 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   biggest files in my Downloads folder": 6 tools instead of 14, and each AI call about 8,100 characters of fixed
   text instead of 15,900. On a free key with a per-minute token limit this also means shorter waits between steps.
   Tasks that open apps, click, browse or play media are sent what they were sent before.
+- **Every task's planning step is about 30% smaller.** The planner was sent worked examples for meetings, messages,
+  email, posts, documents, schedules, browser choice, media and deep research with every request, even "what is
+  2+2". Each set is now added only when the request mentions its topic, after the part of the prompt that never
+  changes (so a provider's prompt cache still covers that part). Measured live: about 7,100 characters instead of
+  10,200 for a plain question. All rules and the full tool list are still always sent.
 
 ## 0.4.5 - 2026-11-15
 
