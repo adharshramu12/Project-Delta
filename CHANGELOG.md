@@ -6,6 +6,24 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Added
+- **Daily briefs in Schedules.** Three one-tap buttons fill the "New schedule" box with a ready schedule you can
+  edit before saving: a **Markets brief** (weekday mornings; information only, no buy or sell advice), an **AI and
+  tech brief** (new models, tools, launches and research) and a **Gmail summary** (unread mail grouped by what needs
+  you; nothing is opened, sent or deleted). The news briefs ask for items dated in the last day with their source
+  and date, and never fill in from memory.
+
+### Changed
+- **A scheduled result also reaches your phone.** A schedule made on the PC now sends its result to your paired
+  Telegram too, as one message with the whole answer (up to 3,500 characters) under the schedule's name, with no PC
+  pop-up on top. Nothing is sent while remote control is locked; `scheduler.notify_phone: false` turns it off.
+- **A repeating task missed while the PC slept runs when it is on again**, up to 12 hours late
+  (`scheduler.catch_up_hours`). Before, anything more than an hour late was skipped. Reminders and one-time tasks
+  keep the one-hour rule, since their time was the point.
+
+### Fixed
+- The settings page no longer raises a script error when the page was swapped while its security card was loading.
+
 ## 0.4.4 - 2026-11-15
 
 Delta is lighter on laptops without a graphics card. In short:
