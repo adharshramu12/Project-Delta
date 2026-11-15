@@ -58,43 +58,13 @@ the user stated themselves: preferences, goals, projects, people, habits, how th
 the request itself, guesses, anything one-off, or secrets. Usually it is empty: [].
 
 FAST PATH (saves the user time and tokens): if ONE tool call does the whole request, fill "direct"
-with it and keep steps short. E.g. "play <song> on YouTube" -> {{"tool": "play_youtube", "args":
-{{"query": "<song + movie/artist>"}}}}; "pause the music" -> media_control; "schedule a meeting with
-x@y.com tomorrow 5pm" -> schedule_meeting (start in ISO local time, from Now in ENVIRONMENT below);
-"start a meet and send the link to x@y.com" -> start_meeting with invite; "move my standup to 3pm" /
-"make the review 1 hour" / "cancel the sync" -> edit_meeting (title = the meeting's name; new_start
-is just "HH:MM" when no day is given, so the meeting keeps its own day).
-"send hi to Ravi on WhatsApp" -> send_message (write the text the way the user texts: short, natural);
-"chat with Priya on Telegram for me, be funny" -> chat_for_me (goal and mood from the request).
-"email ravi@x.com about Friday" -> plan draft_email then send_email (never "direct": the user approves each
-email's full draft before it goes); "draft an email in Gmail" -> draft_email then save_email_draft (kept, not sent);
-"write a LinkedIn/Medium/Substack post about X" -> write_post (show the text; Delta never publishes:
-prepare_post only copies it and opens the compose page for the user to press Post);
+with it and keep steps short.
 "today's stock market / the weather in X / the score / the latest news on X / what is new in X / the price of
 X": a question that needs current facts from the web and no clicking -> web_answer {{"question": "<the user's
 question>", "queries": ["<3 to 6 plain words>", "<a second angle, if needed>"]}} (it searches, reads the pages and
 answers with sources in this one call; never plan web_search steps or a browser for such a question);
-"make a PDF/Word report, resume, letter, notes, assignment or invoice" -> make_document;
-"make a presentation / PPT / slides / deck about X" -> make_presentation {{"content": "<the topic and every fact
-the user gave>", "slide_count": <only if the user said>}} (it writes and builds the whole deck itself; gather
-facts first only if the request has none); "make an Excel sheet / spreadsheet / tracker" -> make_spreadsheet
-{{"title": "Monthly budget", "table": "Item,Amount\\nRent,12000\\nFood,6500", "totals": true}} (the real data as
-CSV text, first line = column headings).
-"every day at 9 am check my attendance" / "remind me at 6 pm to call Ravi" / "every Monday 10 am ..." ->
-schedule_task with text = the user's own words (it confirms the parsed time with the user before saving);
-"what's scheduled" -> list_schedules; "pause/delete my attendance check" -> pause_schedule / delete_schedule.
-"use Edge from now on" / "switch to Delta's private browser" -> set_browser {{"choice": "edge"|"chrome"|"default"|
-"private", "scope": "always"}}; "do this in Chrome ..." -> plan set_browser with "scope": "this_task" first, then
-the browser steps (the saved choice stays); "let me sign in to my sites" -> open_signin_browser (the user signs in;
-Delta never types passwords there).
 If the person or app is not clear, ask instead of guessing. Leave it null when the
 job needs several steps or looking at the screen.
-
-DEEP RESEARCH ("deep research ...", "research ... in ChatGPT/Gemini") is a TOOL task, never answered from
-memory: the agent asks what it needs, writes an expert brief and starts Deep Research in the user's own
-ChatGPT or Gemini in the browser (tools: browser_open, browser_read, browser_click, browser_fill).
-Its checkpoints end at "the brief is sent and the app is answering or researching" (Stop button, Researching,
-a reply appearing); the finished report is never a checkpoint, it takes up to 30 minutes.
 
 WEBSITES and web apps (NotebookLM, Gmail, YouTube, any URL), even when the user says "open Chrome":
 plan browser_open/browser_read/browser_click/browser_fill, which read the page as text and click by
@@ -109,7 +79,7 @@ screen (or a file/process): 2-5 of them, each one concrete fact about the END ST
 Constitution", "file C:/Users/x/Desktop/notes.txt exists and contains 'hello'".
 Not checkpoints: "clicked X", "typed Y" (actions are not results).
 
-Skills the agent learned from earlier verified successes on this PC (reuse one when it fits;
+{hints}Skills the agent learned from earlier verified successes on this PC (reuse one when it fits;
 adapt its steps to this request):
 {skills}
 
@@ -117,6 +87,68 @@ ENVIRONMENT: {environment}
 
 What you know about the user:
 {memory}"""
+
+
+# Planner help that is only about some requests: (name, what the request must mention, the text). Each used to sit
+# in PLANNER_PROMPT and was sent with every request (about a quarter of it); now only what matches is added, after
+# the part that never changes (so a provider's prompt cache still covers that part). A request that matches
+# nothing loses only examples: the tool list and every rule are always sent, so the plan is still possible.
+HINTS: tuple[tuple[str, str, str], ...] = (
+    ("media", r"play|pause|resume|song|music|video|youtube|volume|track|playlist|gaana|gana|paata",
+     """"play <song> on YouTube" -> {"tool": "play_youtube", "args":
+{"query": "<song + movie/artist>"}}; "pause the music" -> media_control; """),
+    ("meetings", r"meet|standup|stand-up|sync|calendar|invite|appointment|reschedul|call with",
+     """"schedule a meeting with
+x@y.com tomorrow 5pm" -> schedule_meeting (start in ISO local time, from Now in ENVIRONMENT below);
+"start a meet and send the link to x@y.com" -> start_meeting with invite; "move my standup to 3pm" /
+"make the review 1 hour" / "cancel the sync" -> edit_meeting (title = the meeting's name; new_start
+is just "HH:MM" when no day is given, so the meeting keeps its own day)."""),
+    ("messages", r"whatsapp|telegram|slack|message|msg|text |chat|reply|send .* to|bhej|pampu",
+     """"send hi to Ravi on WhatsApp" -> send_message (write the text the way the user texts: short, natural);
+"chat with Priya on Telegram for me, be funny" -> chat_for_me (goal and mood from the request)."""),
+    ("email", r"e-?mail|gmail|mail ",
+     """"email ravi@x.com about Friday" -> plan draft_email then send_email (never "direct": the user approves each
+email's full draft before it goes); "draft an email in Gmail" -> draft_email then save_email_draft (kept, not
+sent);"""),
+    ("post", r"post|linkedin|medium|substack|blog|article|tweet",
+     """"write a LinkedIn/Medium/Substack post about X" -> write_post (show the text; Delta never publishes:
+prepare_post only copies it and opens the compose page for the user to press Post);"""),
+    ("documents", r"pdf|word|docx?|report|resume|cv|letter|notes|assignment|invoice|presentation"
+     r"|ppt|slides?|deck|excel|sheet|spreadsheet|tracker|budget|table",
+     """"make a PDF/Word report, resume, letter, notes, assignment or invoice" -> make_document;
+"make a presentation / PPT / slides / deck about X" -> make_presentation {"content": "<the topic and every fact
+the user gave>", "slide_count": <only if the user said>} (it writes and builds the whole deck itself; gather
+facts first only if the request has none); "make an Excel sheet / spreadsheet / tracker" -> make_spreadsheet
+{"title": "Monthly budget", "table": "Item,Amount\\nRent,12000\\nFood,6500", "totals": true} (the real data as
+CSV text, first line = column headings)."""),
+    ("schedules", r"every |remind|schedul|daily|weekly|each (?:day|week|morning)|tomorrow|\bat \d"
+     r"|\d ?(?:am|pm)|o'?clock|alarm",
+     """"every day at 9 am check my attendance" / "remind me at 6 pm to call Ravi" / "every Monday 10 am ..." ->
+schedule_task with text = the user's own words (it confirms the parsed time with the user before saving);
+"what's scheduled" -> list_schedules; "pause/delete my attendance check" -> pause_schedule / delete_schedule."""),
+    ("browsers", r"edge|chrome|firefox|brave|browser|sign ?in|log ?in",
+     """"use Edge from now on" / "switch to Delta's private browser" -> set_browser {"choice":
+"edge"|"chrome"|"default"|
+"private", "scope": "always"}; "do this in Chrome ..." -> plan set_browser with "scope": "this_task" first, then
+the browser steps (the saved choice stays); "let me sign in to my sites" -> open_signin_browser (the user signs in;
+Delta never types passwords there)."""),
+    ("deep_research", r"research",
+     """DEEP RESEARCH ("deep research ...", "research ... in ChatGPT/Gemini") is a TOOL task, never answered from
+memory: the agent asks what it needs, writes an expert brief and starts Deep Research in the user's own
+ChatGPT or Gemini in the browser (tools: browser_open, browser_read, browser_click, browser_fill).
+Its checkpoints end at "the brief is sent and the app is answering or researching" (Stop button, Researching,
+a reply appearing); the finished report is never a checkpoint, it takes up to 30 minutes."""),
+)
+_HINT_RES = tuple((name, re.compile(pattern, re.I), text) for name, pattern, text in HINTS)
+
+
+def hints_for(text: str, tool_names: list[str] | None = None) -> str:
+    """The FAST PATH examples and notes that fit this request ("" when none do). With no request text (a caller
+    that only wants the full prompt) every hint is given."""
+    found = [body for _, rx, body in _HINT_RES if not text or rx.search(text)]
+    if not found:
+        return ""
+    return "MORE FAST PATH examples and notes for this request:\n" + "\n".join(found) + "\n\n"
 
 
 # Added to the planner prompt only when parallel read-only helpers are on (helpers.enabled, off by default),
@@ -146,7 +178,8 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
         name=name, credit=CREDIT, style=STYLE_BLOCK, warmth=WARMTH_BLOCK, tools=", ".join(tool_names),
         memory=memory or "(nothing yet)",
         environment=environment,
-        skills="\n".join(s.prompt_line() for s in skills) or "(none yet)")
+        skills="\n".join(s.prompt_line() for s in skills) or "(none yet)",
+        hints=hints_for(text, tool_names))
     if helpers > 0:
         system += HELPERS_NOTE.format(n=helpers)
     resp = await router.complete(
