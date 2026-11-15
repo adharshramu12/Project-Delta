@@ -150,6 +150,12 @@ def _open_app_window(settings: Settings, url: str) -> bool:
     if not edge:
         return False
     profile = settings.data_dir / "app-window"
+    try:  # its leftovers can only be removed while no window uses it, which is now (delta.system.storage)
+        from delta.system.storage import before_window
+
+        before_window(settings.data_dir)
+    except Exception:
+        log.exception("storage.before_window_failed")
     subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}", "--window-size=1180,800",
                       *LEAN_WINDOW_FLAGS],
                      close_fds=True, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))

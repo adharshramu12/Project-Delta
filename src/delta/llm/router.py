@@ -85,6 +85,7 @@ class ModelRouter:
         routes: dict[str, list[str]],
         allow_local: Callable[[], bool] = lambda: True,
         preferred: str = "auto",
+        local_first: Callable[[], bool] = lambda: True,
         fallback: bool = True,
     ) -> None:
         self.providers = providers
@@ -96,6 +97,9 @@ class ModelRouter:
         self.task_models: dict[str, str] = {}  # provider -> model that answered, since reset_meter()
         self.meter: dict[str, int] = {}  # tokens since reset_meter(): input / cached / output / calls
         self.allow_local = allow_local
+        # Automatic mode: a model on this PC before cloud keys and AI apps only when the PC can carry one
+        # (Governor.local_first: a graphics card). Otherwise local models are tried last.
+        self.local_first = local_first
         self.breakers = {name: CircuitBreaker() for name in providers}
         self.last_provider: str | None = None
         self.why_down: dict[str, str] = {}  # last reason each provider failed, in plain words
@@ -176,7 +180,14 @@ class ModelRouter:
             if p.local and callable(ping := getattr(p, "ping", None)) and not ping():
                 continue
             out.append(name)
-        return out
+        return self._local_last(out, lambda n: n != self.preferred
+                                and bool(getattr(self.providers.get(n), "local", False)))
+
+    def _local_last(self, items: list[Any], is_local: Callable[[Any], bool]) -> list[Any]:
+        """Models on this PC after everything else, unless this PC can carry them (or one is the main AI)."""
+        if self.local_first():
+            return items
+        return [i for i in items if not is_local(i)] + [i for i in items if is_local(i)]
 
     def candidates(self, task: str) -> list[Provider]:
         out = []
@@ -195,7 +206,10 @@ class ModelRouter:
                 log.info("router.skip_local", provider=name, reason="governor")
                 continue
             out.append(p)
-        return out
+        if self.strict(task):
+            return out  # the user's own choice of main AI is never moved
+        main = self.providers.get(self.preferred)
+        return self._local_last(out, lambda p: p is not main and bool(p.local))
 
     def _first(self, name: str | None, task: str) -> Provider | None:
         """An opt-in ladder rung (one of the user's own providers) usable for this call right now."""

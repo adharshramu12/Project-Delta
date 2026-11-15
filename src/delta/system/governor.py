@@ -28,6 +28,7 @@ class SystemSensor:
     def __init__(self, watch_gpu: bool = True) -> None:
         self._nvml_handle = None
         self._nvml = None
+        self.vram_gb = 0.0  # the NVIDIA card's memory; 0 = none found (or not looked for)
         if not watch_gpu:  # only local models use the GPU; opening the driver keeps a laptop dGPU awake
             psutil.cpu_percent(None)
             return
@@ -37,6 +38,7 @@ class SystemSensor:
             pynvml.nvmlInit()
             self._nvml = pynvml
             self._nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            self.vram_gb = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle).total / 1e9
         except Exception:
             self._nvml = None
         psutil.cpu_percent(None)  # prime the counter so the first read is meaningful
@@ -79,6 +81,7 @@ class SystemSensor:
 
 
 HealthListener = Callable[[Assessment], Awaitable[None]]
+LOCAL_FIRST_MIN_VRAM_GB = 4.0  # a small local model (4B, 4-bit) fits on a card this size
 
 
 class Governor:
@@ -96,6 +99,12 @@ class Governor:
     def allow_local(self) -> bool:
         """Local GPU inference is allowed only when the machine is healthy."""
         return self.assessment.health == Health.NORMAL
+
+    def local_first(self) -> bool:
+        """May Automatic mode try a model on this PC before the user's cloud keys and AI apps? Only with a graphics
+        card that can carry one. Without, a local model is slow and takes several GB of RAM while the user's key
+        would answer at once: then local models come last (they still answer when nothing else can)."""
+        return float(getattr(self.sensor, "vram_gb", 0.0) or 0.0) >= LOCAL_FIRST_MIN_VRAM_GB
 
     @property
     def health(self) -> Health:
