@@ -93,8 +93,10 @@
   D.on("ws", m => {
     if (m.type === "event" && m.event === "schedule.result") {
       if (D.view === "schedules") refresh();
-      D.toast({title: "Delta: " + m.data.name, body: (m.data.text || "").slice(0, 200), kind: "info"});
-      if (window.Notification && Notification.permission === "granted") new Notification("Delta: " + m.data.name, {body: (m.data.text || "").slice(0, 200)});
+      // the pop-up's title is the schedule's name already, and a pop-up shows text as it is: no name line, no asterisks
+      const body = (m.data.text || "").replace(/^\*\*[^\n]*\*\*\n?/, "").replace(/\*\*/g, "").slice(0, 200);
+      D.toast({title: "Delta: " + m.data.name, body, kind: "info"});
+      if (window.Notification && Notification.permission === "granted") new Notification("Delta: " + m.data.name, {body});
     }
   });
   D.views.schedules = {show: refresh};

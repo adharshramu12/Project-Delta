@@ -183,3 +183,13 @@ def test_low_memory_alone_no_longer_refuses_a_cloud_task():
 
     src = inspect.getsource(orchestrator.Orchestrator._act)
     assert 'all("RAM free" in r for r in why)' in src and "Paused to protect your laptop" in src
+
+
+def test_a_research_answer_has_no_long_dashes_or_odd_spaces():
+    """Seen live in a daily brief: 11 long dashes and 69 special spaces and hyphens in one answer."""
+    from delta.tools.web_search import clean_answer
+
+    out = clean_answer("- Gemini 4 – a multimodal model, announced Nov 14–15 — open‑weight "
+                       "https://example.com/a–b")
+    assert not any(c in out.replace("https://example.com/a–b", "") for c in "–— ‑")
+    assert "14 to 15" in out and "open-weight" in out and "https://example.com/a–b" in out

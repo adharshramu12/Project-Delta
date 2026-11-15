@@ -304,7 +304,7 @@ class Scheduler:
                                                        "schedule_id": s.id})
         if where == "dashboard" and self.alert is not None:
             with contextlib.suppress(Exception):
-                self.alert("Delta: " + s.name[:60], short(text, 200))
+                self.alert("Delta: " + s.name[:60], short(text.removeprefix(f"**{s.name}**").replace("**", ""), 200))
         return where
 
     def _phone_owner(self) -> str:

@@ -369,3 +369,14 @@ async def test_a_daily_task_missed_overnight_runs_when_the_pc_is_on_again_but_a_
     clock.t = store.get(brief.id).next_run + timedelta(hours=13)  # away for longer than the catch-up window
     await run_due(s)
     assert len(c.calls) == 1 and store.get(brief.id).last_status == "missed"
+
+
+async def test_the_pc_pop_up_has_no_markdown_asterisks(tmp_path):
+    clock = Clock(T0)
+    s, store, _ = make(tmp_path, clock)
+    sch = store.add("Brief", "x", Rule("once", at="2026-11-06T09:00"), tz="Asia/Kolkata", owner_channel="api",
+                    owner_user="owner", now=T0)
+    clock.t = sch.next_run
+    await run_due(s)
+    (title, body), = s.alerts  # type: ignore[attr-defined]
+    assert title == "Delta: Brief" and "*" not in body and body.startswith("Attendance is 87%")

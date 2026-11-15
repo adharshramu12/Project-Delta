@@ -23,6 +23,10 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ### Fixed
 - The settings page no longer raises a script error when the page was swapped while its security card was loading.
+- **Research answers follow Delta's writing style.** A one-step web answer (a daily brief, "what is new in X") kept
+  the model's long dashes and special spaces: a live brief had 11 long dashes in it. They are now fixed like in
+  every other reply; the source list is left as it is.
+- A scheduled result's pop-up no longer shows markdown asterisks around the schedule's name.
 
 ## 0.4.4 - 2026-11-15
 
