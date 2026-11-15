@@ -6,6 +6,16 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.4.7 - 2026-11-15
+
+Delta learns, knows itself, and connects to more. In short:
+
+- **Study a topic** (#92): "learn how X works and remember it" saves short notes Delta uses in later tasks.
+- **Delta knows its own features** (#91): ask "what can you do" or "what is new".
+- **22 more apps** (#94): 65 to connect, among them Dropbox, GitLab, WordPress.com, Typeform and Tavily.
+- **Break-in attempt alerts** (#93): you are told when someone keeps trying a wrong key or an unpaired phone.
+- **Tri plays** (#91): it follows your pointer, does tricks, and no longer blocks buttons.
+
 ### Added
 - **22 more apps to connect, 65 in all.** New on the Apps page, each with one-step sign-in in your browser unless
   noted: Dropbox (Files); Attio, Close, Fireflies, Granola, Typeform (Productivity); Gamma, Cloudinary (Design);
