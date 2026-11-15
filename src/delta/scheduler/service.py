@@ -37,6 +37,7 @@ from delta.system.logging import log
 AUTONOMY_ORDER = ["ask-everything", "ask-risky", "trusted", "autopilot"]
 CHECK_EVERY_S = 20.0  # longest sleep between checks: also notices a wake from sleep within 20 s
 SCHEDULED_CHAT = "Scheduled tasks"
+RESULT_CHARS = 3500  # a finished task's answer is sent whole up to here: one Telegram message
 ICON = {"done": "✅", "failed": "❌", "cancelled": "⏹", "needs_user": "❓", "missed": "⏰", "skipped": "⏭",
         "reminder": "⏰"}
 
@@ -64,8 +65,9 @@ def short(text: str, limit: int = 700) -> str:
 class Scheduler:
     def __init__(self, store: ScheduleStore, *, grace_minutes: float = 60, max_concurrent: int = 1,
                  enabled: bool = True, clock: Callable[[], datetime] = now_utc,
-                 alert: Callable[[str, str], None] | None = None) -> None:
+                 alert: Callable[[str, str], None] | None = None, notify_phone: bool = True) -> None:
         self.store = store
+        self.notify_phone = notify_phone  # results of schedules made on the PC also go to the paired Telegram
         self.grace = timedelta(minutes=max(0.0, grace_minutes))
         self.enabled = enabled
         self.clock = clock
@@ -252,8 +254,8 @@ class Scheduler:
 
     @staticmethod
     def _result_text(s: Schedule, res: TaskResult) -> str:
-        if res.status == "done":
-            return f"{ICON['done']} {s.name}\n{short(res.answer)}"
+        if res.status == "done":  # the answer itself, whole, under the schedule's name: nothing else
+            return f"**{s.name}**\n{short(res.answer, RESULT_CHARS)}"
         if res.status == "needs_user":
             return f"{ICON['needs_user']} Scheduled task \"{s.name}\" needs you: {short(res.answer)}"
         if res.status == "cancelled":
@@ -262,10 +264,18 @@ class Scheduler:
 
     # --- delivery ---------------------------------------------------------------------------------------
     async def deliver(self, s: Schedule, text: str, channel: str, user: str, status: str) -> str:
-        """To the chat the schedule came from (Telegram, Slack); always also shown on the dashboard.
-        Returns where it went."""
+        """To the chat the schedule came from (Telegram, Slack); always also shown on the dashboard. A schedule
+        made on the PC also goes to the owner's paired Telegram (one message, no PC pop-up on top), so a task
+        that ran while they were away reaches them. Returns where it went."""
         where = "dashboard"
         c = self.c
+        local = not is_remote(channel)
+        if local and (owner := self._phone_owner()):
+            try:
+                await c.live_channels["telegram"].send_text(owner, text)
+                where = "telegram"
+            except Exception as e:
+                log.warning("scheduler.deliver_failed", channel="telegram", error=str(e))
         if c is not None and is_remote(channel):
             ch = getattr(c, "live_channels", {}).get(channel)
             send = getattr(ch, "send_text", None)
@@ -280,7 +290,7 @@ class Scheduler:
                 await c.events.publish("schedule.result", schedule_id=s.id, name=s.name, status=status,
                                        text=text, delivered=where)
             chats = getattr(c, "chats", None)
-            if chats is not None and where == "dashboard":
+            if chats is not None and (where == "dashboard" or local):
                 with contextlib.suppress(Exception):
                     found = next((ch for ch in chats.list(SCHEDULED_CHAT) if ch.title == SCHEDULED_CHAT), None)
                     chat_id = (found or chats.create(SCHEDULED_CHAT)).id
@@ -290,3 +300,17 @@ class Scheduler:
             with contextlib.suppress(Exception):
                 self.alert("Delta: " + s.name[:60], short(text, 200))
         return where
+
+    def _phone_owner(self) -> str:
+        """The paired Telegram user who gets results of schedules made on the PC; "" when there is none, the
+        setting is off, or remote control is locked (a locked phone gets nothing)."""
+        c = self.c
+        if c is None or not self.notify_phone:
+            return ""
+        ch = getattr(c, "live_channels", {}).get("telegram")
+        allowed = list(getattr(ch, "allowed", None) or [])
+        if not allowed or not callable(getattr(ch, "send_text", None)):
+            return ""
+        if getattr(getattr(c, "guard", None), "locked", False):
+            return ""
+        return str(allowed[0])

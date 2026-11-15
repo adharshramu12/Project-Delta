@@ -18,7 +18,7 @@ def attach(settings: Settings, registry: Any, approvals: Any) -> tuple[Scheduler
     cfg = settings.scheduler
     store = ScheduleStore(settings.data_dir / "schedules.db", cfg.history_limit)
     scheduler = Scheduler(store, grace_minutes=cfg.grace_minutes, max_concurrent=cfg.max_concurrent,
-                          enabled=cfg.enabled, alert=notify)
+                          enabled=cfg.enabled, alert=notify, notify_phone=cfg.notify_phone)
     ctx = ScheduleContext(store, scheduler, approvals, timezone=cfg.timezone)
     for tool in schedule_tools(ctx):
         registry.register(tool)
