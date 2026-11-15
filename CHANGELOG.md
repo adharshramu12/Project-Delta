@@ -21,6 +21,11 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 - **Tri plays.** Its eyes follow your pointer, it does a small trick now and then when nothing is happening, and a
   click gets a trick or starts "catch me": it runs to another corner and lets itself be caught on the third try.
   It talks less. None of this happens while Delta works, while you type, or with Windows' reduced motion.
+- **Delta tells you when someone is trying to get in.** It already refused them; now you hear about it. Five
+  requests to Delta on this PC with a wrong or missing key within 5 minutes, or three messages to your Telegram bot
+  from someone who is not paired within 10 minutes, raise one alert: a Windows notification, a line on the
+  dashboard, an entry in the audit log and a message to your paired phone (not while remote control is locked).
+  The same kind of alert then stays quiet for half an hour. Nothing new is blocked or allowed by this.
 
 ### Fixed
 - **Tri no longer blocks buttons.** When it sits over a button, link or box (the "Run now" buttons on Schedules,

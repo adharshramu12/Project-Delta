@@ -129,6 +129,7 @@ class Container:
     chats: ChatStore | None = None  # separate conversations (dashboard sidebar)
     live_channels: dict[str, Any] = field(default_factory=dict)  # running chat channels, by name
     guard: Any = None  # RemoteGuard: PIN and lock for remote control
+    watch: Any = None  # delta.safety.watch.IntrusionWatch: tells the owner about repeated refused attempts
     emergency: Any = None  # EmergencyContacts (encrypted)
     running: asyncio.Task[Any] | None = None  # the task being worked on now (any channel can stop it)
     scheduler: Any = None  # delta.scheduler.service.Scheduler (its loop starts in `delta run`)
@@ -653,4 +654,7 @@ def build(settings: Settings) -> Container:
 
     container.updates = UpdateService(settings)  # only looks; nothing is fetched until `delta run` starts it
     scheduler.bind(container)
+    from delta.safety.watch import IntrusionWatch
+
+    container.watch = IntrusionWatch(container, alert=notify)  # repeated refused attempts: the owner is told
     return container
