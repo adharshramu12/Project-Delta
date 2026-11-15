@@ -170,8 +170,21 @@ def create_app(c: Container, token: str) -> FastAPI:
     running: set[asyncio.Task[None]] = set()
     bearer = HTTPBearer(auto_error=False)
 
+    async def bind_watch() -> None:
+        # auth runs in a worker thread: the watch needs the server's loop to message the paired phone from there
+        if (watch := getattr(c, "watch", None)) is not None:
+            watch.loop = asyncio.get_running_loop()
+
+    app.router.on_startup.append(bind_watch)
+
+    def refused() -> None:
+        """A request without the right token: counted, so the owner hears about repeated tries (safety.watch)."""
+        if (watch := getattr(c, "watch", None)) is not None:
+            watch.note("api_token")
+
     def auth(cred: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:  # noqa: B008
         if not cred or not same_token(cred.credentials, token):
+            refused()
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "bad token")
 
     async def on_event(event: str, data: dict[str, Any]) -> None:
@@ -552,6 +565,7 @@ def create_app(c: Container, token: str) -> FastAPI:
     @app.websocket("/api/ws")
     async def ws(socket: WebSocket) -> None:
         if not same_token(socket.query_params.get("token", ""), token):
+            refused()
             await socket.close(code=4401)
             return
         await socket.accept()

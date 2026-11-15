@@ -221,6 +221,12 @@ class TelegramChannel(PCMenu):
         self._pair_fails = 0
         return code
 
+    def _stranger(self, uid: Any) -> None:
+        """Someone who is not paired wrote: counted, so the owner hears about repeated tries (delta.safety.watch).
+        Not while a pairing code is waiting: then it is most likely the owner connecting a phone."""
+        if self._code is None and (watch := getattr(self.c, "watch", None)) is not None:
+            watch.note("telegram_stranger", str(uid))
+
     async def _try_pair(self, update: Any, text: str) -> None:
         """A not-yet-allowed user wrote: pair them if they sent exactly the current code, else explain how."""
         uid = str(update.effective_user.id)
@@ -270,6 +276,7 @@ class TelegramChannel(PCMenu):
     async def _start_cmd(self, update: Any, ctx: Any) -> None:
         uid = update.effective_user.id
         if not is_allowed(uid, self.allowed):
+            self._stranger(uid)
             await self._try_pair(update, " ".join(ctx.args or []))  # "/start 123456" from a t.me link
             return
         await update.message.reply_text(f"Δ {self.c.settings.agent.name} here. Tell me what to do.")
@@ -470,6 +477,7 @@ class TelegramChannel(PCMenu):
         user = update.effective_user
         if not is_allowed(user.id, self.allowed):
             log.warning("telegram.rejected", user=user.id)
+            self._stranger(user.id)
             await self._try_pair(update, update.message.text)
             return
         from delta.control import stop_command
