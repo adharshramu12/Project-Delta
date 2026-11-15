@@ -437,6 +437,13 @@ ALWAYS_TOOLS = {"path_info", "read_file", "list_dir", "search_files", "web_searc
                 "list_windows", "read_window", "focus_window", "look_at_screen", "browser_read",
                 "media_status", "do_actions", "scroll",
                 "find_app_tool", "use_app_tool"}  # connected apps: only offered while an app is connected
+# A task planned with only these never touches the screen, a browser or a player, so the helpers for looking at
+# them are left out: measured on a "biggest files in Downloads" task, they were 8 of its 14 tools and brought the
+# website, desktop and media rules with them on every step (about 40% of each call).
+QUIET_TOOLS = {"path_info", "read_file", "list_dir", "search_files", "write_file", "edit_file", "make_dir",
+               "move_path", "web_search", "web_answer", "fetch_page", "recall", "remember"}
+QUIET_HELPERS = {"path_info", "read_file", "list_dir", "search_files", "web_search", "recall",
+                 "find_app_tool", "use_app_tool"}
 BROWSER_TOOLS = BROWSER_ACTIONS | {"browser_read"}
 ATTACHMENT_TOOLS = {"read_attachment", "look_at_attachment"}
 SCREEN_TOOLS = {"click_element", "click_at", "type_text", "press_keys", "set_field"}
@@ -1053,7 +1060,8 @@ class Orchestrator:
         specs = self.executor.registry.specs()
         if not wanted:
             return specs
-        keep = set(wanted) | ALWAYS_TOOLS
+        quiet = set(wanted) <= QUIET_TOOLS and not WEBSITE.search(request)
+        keep = set(wanted) | (QUIET_HELPERS if quiet else ALWAYS_TOOLS)
         if (req := CURRENT_REQUEST.get()) and req.channel in ("telegram", "slack"):
             keep |= {"send_file", "search_files"}  # away from the PC: "send me that file" must always work
         if req is not None and req.attachment_context:

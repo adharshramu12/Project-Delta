@@ -6,6 +6,14 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Changed
+- **File and lookup tasks use about half the tokens per step.** A task planned with only file, web-search and
+  memory tools was still sent eight helpers for looking at the screen, the browser and the media player, and the
+  rules that go with them, on every step. They are now left out for such tasks. Measured live on "list the three
+  biggest files in my Downloads folder": 6 tools instead of 14, and each AI call about 8,100 characters of fixed
+  text instead of 15,900. On a free key with a per-minute token limit this also means shorter waits between steps.
+  Tasks that open apps, click, browse or play media are sent what they were sent before.
+
 ## 0.4.5 - 2026-11-15
 
 Scheduled work that reaches you. In short:
