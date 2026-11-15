@@ -175,3 +175,25 @@ async def test_several_matches_become_a_question_with_choices(tmp_path):
     r = await orch.run(TaskRequest("send me the daddy image"))
     assert r.status == "needs_user" and r.answer == "I found two daddy photos in Pictures. Which one should I send?"
     assert r.options == ["daddy.jpg", "daddy birthday 2025.png"] and r.asked_about == "send me the daddy image"
+
+
+def test_a_file_or_lookup_task_is_not_sent_the_screen_browser_and_media_helpers(tmp_path, monkeypatch):
+    """Measured: "biggest files in Downloads" carried 8 screen helpers and their rules on every step."""
+    from delta.core.orchestrator import ACTOR_PROMPT, ALWAYS_TOOLS, fit_rules
+
+    orch, _, _ = make(tmp_path, {})
+    every = sorted(ALWAYS_TOOLS | {"click_at", "browser_open", "write_file", "open_app"})
+    monkeypatch.setattr(orch.executor.registry, "specs", lambda: [{"function": {"name": n}} for n in every])
+
+    def names(wanted, text):
+        return {s["function"]["name"] for s in orch._tool_specs(wanted, text)}
+
+    quiet = names(["list_dir"], "list the three biggest files in my Downloads folder")
+    assert {"list_dir", "path_info", "read_file", "web_search"} <= quiet
+    assert not {"read_window", "look_at_screen", "browser_read", "media_status", "do_actions", "scroll"} & quiet
+    rules = fit_rules(ACTOR_PROMPT, quiet)
+    assert "- Websites:" not in rules and "- Desktop apps:" not in rules and "- Songs/videos:" not in rules
+    assert "KEEP GOING" in rules and "NEVER GUESS" in rules  # safety and asking-first rules always stay
+    # anything that can touch the screen, and any request about a website, keeps the helpers as before
+    assert {"read_window", "look_at_screen"} <= names(["open_app"], "open Notepad")
+    assert "browser_read" in names(["web_search"], "check the price on amazon.in")
