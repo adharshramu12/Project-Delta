@@ -178,9 +178,11 @@ def test_the_payload_stays_small():
     triangle drawn in code that reacts to real task events, greets once a day and has an off switch, about 9.8 KB with
     its styles and moods; the dashboard then ships about 268.4 KB). Then to 275 KB for the Gemini and OpenRouter key
     rows and the backup-AI choice under Apps > AI models (about 2.2 KB; the dashboard then ships about 271.2 KB).
+    Then to 279 KB for Tri's play (stepping aside when it covers a control, eyes that follow the pointer, idle tricks
+    and the "catch me" game, about 3.6 KB with its styles).
     Lazy loading would not lower this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 275_000, total
+    assert total < 279_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 
