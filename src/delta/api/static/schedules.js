@@ -14,6 +14,18 @@
     text, h("div", {class: "row"}, h("button", {type: "submit", class: "btn primary"}, "Preview")));
   const preview = h("div", {id: "schedpreview", class: "card preview", role: "status", hidden: true});
   const list = h("div", {class: "table-list", role: "list"});
+  // Daily briefs: one tap fills the box with a ready schedule; the user edits it (their stocks, their time) and previews.
+  let briefName = "";  // a brief keeps its short title as the schedule's name (it heads the result message)
+  const briefs = h("div", {class: "row briefs", role: "group", "aria-label": "Daily briefs"});
+  form.insertBefore(briefs, form.lastChild);
+  api("/api/schedules/briefs").then(items => {
+    if (!Array.isArray(items) || !items.length) return;
+    briefs.append(h("span", {class: "muted small", text: "Daily briefs:"}), ...items.map(b => {
+      const c = btn(b.title, () => { text.value = b.text; briefName = b.title; text.rows = 6; text.focus(); }, "sm");
+      c.title = b.about;
+      return c;
+    }));
+  }).catch(() => {});
   box.append(form, preview, h("h3", {class: "list-title", text: "Scheduled"}), list);
   let loaded = false;
 
@@ -67,9 +79,9 @@
     preview.className = "card preview";
     const save = btn("Save schedule", async () => {
       save.disabled = true;
-      const s = await call("/api/schedules", {method: "POST", body: JSON.stringify({text: t, confirm: true})});
+      const s = await call("/api/schedules", {method: "POST", body: JSON.stringify(briefName ? {text: t, name: briefName, confirm: true} : {text: t, confirm: true})});
       if (s.detail) { preview.className = "card preview error"; preview.replaceChildren(icon("alert"), h("span", {text: D.detail(s)})); return; }
-      preview.hidden = true; text.value = ""; D.toast({title: "Schedule saved", body: p.plain, kind: "ok"}); refresh();
+      preview.hidden = true; text.value = ""; briefName = ""; text.rows = 2; D.toast({title: "Schedule saved", body: p.plain, kind: "ok"}); refresh();
     }, "primary");
     preview.replaceChildren(h("p", {class: "small muted", text: "Delta understood:"}), h("p", {class: "preview-plain", text: `${p.plain} (${p.tz_label})`}),
       h("div", {class: "row"}, save, btn("Cancel", () => { preview.hidden = true; })));

@@ -5,6 +5,7 @@ here; phones go through the agent tools, where Remote Guard asks for the PIN.
 
   GET    /api/schedules                list (with recent runs)
   GET    /api/schedules/{id}           one, with its run history
+  GET    /api/schedules/briefs         ready-made daily briefs that fill the create box
   POST   /api/schedules/preview        {"text"} -> the parsed schedule in plain words, nothing saved
   POST   /api/schedules                {"text", "name"?, "confirm": true} -> saved
   PATCH  /api/schedules/{id}           {"enabled"?, "name"?, "prompt"?, "text"? (new timing)}
@@ -22,6 +23,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from delta.scheduler.briefs import BRIEFS
 from delta.scheduler.parse import ParseError, parse_schedule
 from delta.scheduler.rules import describe, fmt_when, iso, next_run, now_utc, zone_label
 from delta.scheduler.store import Schedule
@@ -83,6 +85,11 @@ def register(app: FastAPI, c: Any, auth: Callable[..., None]) -> None:
             s.history = sch.store.history(s.id, 5)
             out.append(as_json(s))
         return out
+
+    @app.get("/api/schedules/briefs", dependencies=[Depends(auth)])
+    async def list_briefs() -> list[dict[str, str]]:
+        """Ready-made daily briefs for the "New schedule" box (delta.scheduler.briefs)."""
+        return [b.public() for b in BRIEFS]
 
     @app.get("/api/schedules/{sid}", dependencies=[Depends(auth)])
     async def get_schedule(sid: str) -> dict[str, Any]:
