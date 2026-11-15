@@ -7,6 +7,15 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **22 more apps to connect, 65 in all.** New on the Apps page, each with one-step sign-in in your browser unless
+  noted: Dropbox (Files); Attio, Close, Fireflies, Granola, Typeform (Productivity); Gamma, Cloudinary (Design);
+  WordPress.com, Sanity (Websites); Bitly, PostHog, Mixpanel, Amplitude (Marketing); Make, Tavily, and Exa and
+  trivago with no sign-in (Automation and web data); Hex (Databases); GitLab, Buildkite (Developer tools);
+  Cloudflare Docs with no sign-in (Docs and AI). Each was checked on 15 November 2026: the vendor's own server
+  answered with its sign-in details, and the vendor's own documentation names that address. A real sign-in with
+  each app was not done (it needs an account with each), so an app that only accepts approved clients may still
+  refuse; the Apps page says so if it does. As with every connected app, tools that change or send something ask
+  first.
 - **Delta can study a topic and remember it.** "Learn how UPI Lite works and remember it" makes Delta search,
   read the best pages and save up to eight short notes with the site each came from (`learn_topic`, one step).
   Later questions on the topic are answered from the notes. The notes stay on this PC for 180 days

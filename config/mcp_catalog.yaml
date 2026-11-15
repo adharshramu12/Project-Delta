@@ -22,7 +22,7 @@
 #        when you tick "trust this app's read-only labels" for that app.
 
 version: 1
-checked: "2026-11-09"
+checked: "2026-11-15"
 
 apps:
   notion:
@@ -670,3 +670,289 @@ apps:
     notes: Version pinned from PyPI on the checked date. Needs uv (uvx).
     tools:
       read: [fetch]
+
+  dropbox:
+    name: Dropbox
+    category: Files
+    publisher: Dropbox
+    status: official
+    description: Search, read and organise the files and folders in your Dropbox.
+    transport: http
+    url: https://mcp.dropbox.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://help.dropbox.com/integrations/set-up-MCP-server
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  attio:
+    name: Attio
+    category: Productivity
+    publisher: Attio
+    status: official
+    description: Search and update people, companies, deals and notes in your Attio CRM.
+    transport: http
+    url: https://mcp.attio.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.attio.com/mcp/overview
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  close:
+    name: Close
+    category: Productivity
+    publisher: Close
+    status: official
+    description: Look up and update leads, contacts, opportunities and activities in Close CRM.
+    transport: http
+    url: https://mcp.close.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://help.close.com/integrations/close-mcp-server
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  fireflies:
+    name: Fireflies
+    category: Productivity
+    publisher: Fireflies.ai
+    status: official
+    description: Search your meeting transcripts and read summaries and action items.
+    transport: http
+    url: https://api.fireflies.ai/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.fireflies.ai/getting-started/mcp-configuration
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  granola:
+    name: Granola
+    category: Productivity
+    publisher: Granola
+    status: official
+    description: Find your meetings and read their notes and transcripts.
+    transport: http
+    url: https://mcp.granola.ai/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.granola.ai/help-center/sharing/integrations/mcp
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  typeform:
+    name: Typeform
+    category: Productivity
+    publisher: Typeform
+    status: official
+    description: Create and edit forms and read their responses.
+    transport: http
+    url: https://api.typeform.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://www.typeform.com/developers/mcp/
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  gamma:
+    name: Gamma
+    category: Design
+    publisher: Gamma
+    status: official
+    description: Generate presentations, documents and web pages in Gamma.
+    transport: http
+    url: https://mcp.gamma.app/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://developers.gamma.app/mcp/gamma-mcp-server
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  cloudinary:
+    name: Cloudinary
+    category: Design
+    publisher: Cloudinary
+    status: official
+    description: Upload, search, transform and manage images and videos in Cloudinary.
+    transport: http
+    url: https://asset-management.mcp.cloudinary.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://cloudinary.com/documentation/cloudinary_llm_mcp
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  wordpress:
+    name: WordPress.com
+    category: Websites
+    publisher: Automattic
+    status: official
+    description: Read and manage the posts, pages and settings of your WordPress.com sites.
+    transport: http
+    url: https://public-api.wordpress.com/wpcom/v2/mcp/v1
+    auth: {type: oauth, client: dynamic}
+    docs: https://wordpress.com/support/mcp/
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  sanity:
+    name: Sanity
+    category: Websites
+    publisher: Sanity
+    status: official
+    description: Query and edit the content, schemas and releases of your Sanity projects.
+    transport: http
+    url: https://mcp.sanity.io
+    auth: {type: oauth, client: dynamic}
+    docs: https://www.sanity.io/docs/ai/mcp-server
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  bitly:
+    name: Bitly
+    category: Marketing and launches
+    publisher: Bitly
+    status: official
+    description: Create short links and QR codes and read their click statistics.
+    transport: http
+    url: https://api-ssl.bitly.com/v4/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://dev.bitly.com/bitly-mcp/
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  posthog:
+    name: PostHog
+    category: Marketing and launches
+    publisher: PostHog
+    status: official
+    description: Query product analytics, feature flags, experiments and errors in PostHog.
+    transport: http
+    url: https://mcp.posthog.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://posthog.com/docs/model-context-protocol
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  mixpanel:
+    name: Mixpanel
+    category: Marketing and launches
+    publisher: Mixpanel
+    status: official
+    description: Ask questions about your product's events, funnels and retention in Mixpanel.
+    transport: http
+    url: https://mcp.mixpanel.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.mixpanel.com/docs/mcp
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  amplitude:
+    name: Amplitude
+    category: Marketing and launches
+    publisher: Amplitude
+    status: official
+    description: Search and read charts, dashboards, experiments and user data in Amplitude.
+    transport: http
+    url: https://mcp.amplitude.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://amplitude.com/docs/amplitude-ai/amplitude-mcp
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  make:
+    name: Make
+    category: Automation and web data
+    publisher: Make
+    status: official
+    description: Run your Make scenarios as tools and manage them from Delta.
+    transport: http
+    url: https://mcp.make.com
+    auth: {type: oauth, client: dynamic}
+    docs: https://developers.make.com/mcp-server
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  tavily:
+    name: Tavily
+    category: Automation and web data
+    publisher: Tavily
+    status: official
+    description: Web search, page extraction, crawling and site mapping built for AI agents.
+    transport: http
+    url: https://mcp.tavily.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.tavily.com/documentation/mcp
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  exa:
+    name: Exa
+    category: Automation and web data
+    publisher: Exa
+    status: official
+    description: Search the web, and find code examples and company information.
+    transport: http
+    url: https://mcp.exa.ai/mcp
+    auth: {type: none}
+    docs: https://exa.ai/docs/get-started/exa-mcp
+    checked: "2026-11-15"
+    notes: Answers without signing in (rate limited by Exa). Its sign-in for higher limits is not set up here.
+
+  trivago:
+    name: trivago
+    category: Automation and web data
+    publisher: trivago
+    status: official
+    description: Search hotels and other places to stay, with prices and ratings.
+    transport: http
+    url: https://mcp.trivago.com/mcp
+    auth: {type: none}
+    docs: https://mcp.trivago.com/docs
+    checked: "2026-11-15"
+    notes: Works without signing in. Search only; bookings are completed on trivago's partner sites, never by Delta.
+
+  hex:
+    name: Hex
+    category: Databases
+    publisher: Hex
+    status: official
+    description: Search your Hex projects and ask questions of your data.
+    transport: http
+    url: https://app.hex.tech/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://learn.hex.tech/docs/api-integrations/mcp-server
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  gitlab:
+    name: GitLab
+    category: Developer tools
+    publisher: GitLab
+    status: official
+    description: Read and manage issues, merge requests and pipelines on GitLab.com.
+    transport: http
+    url: https://gitlab.com/api/v4/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://docs.gitlab.com/user/model_context_protocol/mcp_server/
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata. For GitLab.com; a self-managed GitLab is added as a custom server.
+
+  buildkite:
+    name: Buildkite
+    category: Developer tools
+    publisher: Buildkite
+    status: official
+    description: Read pipelines, builds, jobs and logs in Buildkite.
+    transport: http
+    url: https://mcp.buildkite.com/mcp
+    auth: {type: oauth, client: dynamic}
+    docs: https://buildkite.com/docs/apis/mcp-server
+    checked: "2026-11-15"
+    notes: Hosted server. Dynamic client registration and PKCE (S256) confirmed in its authorization server metadata.
+
+  cloudflare_docs:
+    name: Cloudflare Docs
+    category: Docs and AI
+    publisher: Cloudflare
+    status: official
+    description: Search Cloudflare's developer documentation.
+    transport: http
+    url: https://docs.mcp.cloudflare.com/mcp
+    auth: {type: none}
+    docs: https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/
+    checked: "2026-11-15"
+    notes: Works without signing in (public documentation).
