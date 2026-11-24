@@ -67,13 +67,17 @@ def test_system_home_and_delta_folders_cannot_be_projects(tmp_path, monkeypatch)
         d.mkdir()
     monkeypatch.setenv("SystemRoot", str(tmp_path / "win"))
     (tmp_path / "sys" / "LOCALAPPDATA").mkdir(parents=True)
-    for bad in (data, app, data / "..", tmp_path / "win", tmp_path / "sys" / "LOCALAPPDATA", Path.home(),
-                Path(Path.home().anchor)):
+    allowed = [tmp_path]
+    for bad in (data, app, data / "..", tmp_path / "win", tmp_path / "sys" / "LOCALAPPDATA", tmp_path):
         with pytest.raises(JailError):
-            check_project_root(bad, data, app)
+            check_project_root(bad, data, app, allowed)
+    for elsewhere in (Path.home().parent, Path(Path.home().anchor), tmp_path.parent / "other"):
+        with pytest.raises(JailError, match="outside the folders Delta Build may use"):
+            check_project_root(elsewhere, data, app, allowed)
     with pytest.raises(JailError, match="not a folder"):
-        check_project_root(tmp_path / "missing", data, app)
-    assert check_project_root(tmp_path / "ok", data, app) == (tmp_path / "ok").resolve()
+        check_project_root(tmp_path / "missing", data, app, allowed)
+    assert check_project_root(tmp_path / "ok", data, app, allowed) == (tmp_path / "ok").resolve()
+    assert check_project_root(Path.home() / "Documents", data, app) == (Path.home() / "Documents").resolve()         or not (Path.home() / "Documents").is_dir()
 
 
 def test_edits_are_exact_and_every_change_can_be_undone(proj):
@@ -145,6 +149,7 @@ async def test_the_service_runs_logs_to_memory_refuses_a_second_run_and_undoes(t
     c = SimpleNamespace(events=SimpleNamespace(publish=publish), audit=SimpleNamespace(record=lambda *a, **k: None),
                         router=router)
     s = Studio(c, tmp_path / "data", tmp_path / "app", root)
+    s.allowed = [tmp_path]
     p = s.create("My App")
     assert Path(p.path) == (root / "My App").resolve()
     (root / "My App" / "x.txt").write_text("x")
@@ -196,6 +201,7 @@ def _service(tmp_path, replies):
     c = SimpleNamespace(events=SimpleNamespace(publish=publish), audit=SimpleNamespace(record=lambda *a, **k: None),
                         router=FakeRouter(replies))
     s = Studio(c, tmp_path / "data", tmp_path / "app", tmp_path / "projects")
+    s.allowed = [tmp_path]
     return s, s.create("calc"), published
 
 

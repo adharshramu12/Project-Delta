@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import mimetypes
 import re
 import sys
 import threading
@@ -33,6 +32,17 @@ from delta.system import proctree
 from delta.system.logging import log
 from delta.tools.shell import scrubbed_env
 
+# What the static preview serves, by extension; anything else is sent as plain bytes (never run by the browser).
+TYPES = {".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
+         ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+         ".json": "application/json; charset=utf-8", ".txt": "text/plain; charset=utf-8",
+         ".md": "text/plain; charset=utf-8",
+         ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+         ".webp": "image/webp", ".ico": "image/x-icon", ".avif": "image/avif", ".woff": "font/woff",
+         ".woff2": "font/woff2",
+         ".ttf": "font/ttf", ".otf": "font/otf", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".mp4": "video/mp4",
+         ".webm": "video/webm", ".pdf": "application/pdf", ".wasm": "application/wasm", ".xml": "application/xml",
+         ".map": "application/json; charset=utf-8"}
 START_WAIT_S = 90       # how long a dev server gets to print its address and answer
 LOG_LINES = 300
 LOCAL_URL = re.compile(r"https?://(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):(\d{2,5})[^\s\"'<>]*", re.I)
@@ -64,10 +74,9 @@ def _static_handler(root: Path) -> type[BaseHTTPRequestHandler]:
                 self.send_error(404, "Not found in this project")
                 return
             data = found[0].read_bytes()
-            kind = mimetypes.guess_type(found[0].name)[0] or "application/octet-stream"
+            kind = TYPES.get(found[0].suffix.lower(), "application/octet-stream")
             self.send_response(200)
-            self.send_header("Content-Type", kind + ("; charset=utf-8" if kind.startswith("text/") or
-                                                    kind in ("application/javascript", "application/json") else ""))
+            self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")

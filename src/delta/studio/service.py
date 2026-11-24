@@ -30,10 +30,13 @@ class StudioError(ValueError):
 
 
 class Studio:
-    def __init__(self, c: Any, data_dir: Path, app_root: Path, projects_home: Path) -> None:
+    def __init__(self, c: Any, data_dir: Path, app_root: Path, projects_home: Path,
+                 extra_folders: list[Path] | None = None) -> None:
         self.c = c
         self.data_dir, self.app_root = data_dir, app_root
         self.projects_home = projects_home  # where "New project" folders are made (Documents/Delta Projects)
+        # where a project may be (delta.studio.jail.check_project_root)
+        self.allowed = [Path.home(), projects_home, *(extra_folders or [])]
         self.store = StudioStore(data_dir / "studio")
         self._runs: dict[str, asyncio.Task[None]] = {}
         # Commands waiting for the user's yes: ask id -> (project id, what is asked, the answer to come)
@@ -46,7 +49,7 @@ class Studio:
         if p is None:
             raise StudioError("That project is not in the list.")
         try:
-            root = check_project_root(p.path, self.data_dir, self.app_root)
+            root = check_project_root(p.path, self.data_dir, self.app_root, self.allowed)
         except JailError as e:
             raise StudioError(f"The project folder cannot be used: {e}") from e
         return p, root
@@ -59,14 +62,14 @@ class Studio:
         if folder.exists() and any(folder.iterdir()):
             raise StudioError(f"{folder} already exists and is not empty: open it as an existing project instead.")
         folder.mkdir(parents=True, exist_ok=True)
-        root = check_project_root(folder, self.data_dir, self.app_root)
+        root = check_project_root(folder, self.data_dir, self.app_root, self.allowed)
         p = self.store.add(clean, root)
         self._audit("studio.project_created", project=p.id, path=str(root))
         return p
 
     def open(self, path: str, name: str = "") -> Project:
         try:
-            root = check_project_root(path, self.data_dir, self.app_root)
+            root = check_project_root(path, self.data_dir, self.app_root, self.allowed)
         except JailError as e:
             raise StudioError(str(e)) from e
         p = self.store.add(name or root.name, root)

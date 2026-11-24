@@ -18,7 +18,6 @@ is milestone 3.
 from __future__ import annotations
 
 import asyncio
-import re
 import sys
 import time
 from dataclasses import dataclass
@@ -32,22 +31,26 @@ MAX_TIMEOUT_S = 900
 OUTPUT_CHARS = 8_000    # the end of the output is what the model gets
 MAX_COMMAND = 2_000
 
-REFUSED = re.compile(
-    r"\b(format(-volume)?|diskpart|bcdedit|shutdown|restart-computer|stop-computer|reg(\.exe)?\s+(add|delete|import)|"
-    r"(set|new|remove)-itemproperty\s+.*hk(lm|cu)|net\s+(user|localgroup)|(new|remove|set)-localuser|"
-    r"netsh\s+advfirewall|set-netfirewall|schtasks|register-scheduledtask|sc(\.exe)?\s+(create|delete|config)|"
-    r"set-executionpolicy|taskkill|stop-process|cipher\s+/w|vssadmin|wmic|mklink|icacls|takeown|"
-    r"invoke-expression|iex)\b"
-    r"|(curl|wget|iwr|invoke-webrequest|irm|invoke-restmethod)\b[^|;&]*\|\s*(sh|bash|iex|powershell|pwsh|python)\b"
-    # a delete with any argument that starts outside the project: a drive, the root, home, or the parent folder.
-    # Windows switches (/s, /q) are single letters after a slash and are not paths.
-    r"|\b(rm|del|erase|rmdir|rd|ri|remove-item)\b[^;&|]*?[\s=]['\"]?"
-    r"([a-z]:|[\\/](?![a-z](\s|$))|~|\$home|\$env:|%userprofile%|%systemroot%|\.\.)",
-    re.I)
-SENDS = re.compile(r"\b(git\s+push|npm\s+publish|yarn\s+publish|pnpm\s+publish|twine\s+upload|"
-                   r"cargo\s+publish|docker\s+push|gh\s+(release|pr|repo)\b|vercel|netlify\s+deploy|firebase\s+deploy|"
-                   r"scp|rsync|ftp|curl\s+.*(-T|--upload-file|-d|--data|-F)|invoke-webrequest\s+.*-method\s+(post|put))\b",
-                   re.I)
+# Programs that act on the whole PC: refused wherever they appear as a word of the command.
+REFUSED_WORDS = {"format", "format-volume", "diskpart", "bcdedit", "shutdown", "restart-computer", "stop-computer",
+                 "new-localuser", "remove-localuser", "set-localuser", "set-netfirewallrule", "set-netfirewallprofile",
+                 "schtasks", "register-scheduledtask", "set-executionpolicy", "taskkill", "stop-process", "vssadmin",
+                 "wmic", "mklink", "icacls", "takeown", "invoke-expression", "iex"}
+# ... and these when followed by the given next word.
+REFUSED_PAIRS = {("reg", "add"), ("reg", "delete"), ("reg", "import"), ("reg.exe", "add"), ("reg.exe", "delete"),
+                 ("reg.exe", "import"), ("net", "user"), ("net", "localgroup"), ("netsh", "advfirewall"),
+                 ("sc", "create"), ("sc", "delete"), ("sc", "config"), ("sc.exe", "create"), ("sc.exe", "delete"),
+                 ("sc.exe", "config"), ("cipher", "/w")}
+REGISTRY_EDITS = {"set-itemproperty", "new-itemproperty", "remove-itemproperty", "new-item", "remove-item"}
+DOWNLOADERS = {"curl", "curl.exe", "wget", "iwr", "invoke-webrequest", "irm", "invoke-restmethod"}
+SHELLS = {"sh", "bash", "iex", "invoke-expression", "powershell", "pwsh", "python", "python3", "cmd"}
+DELETERS = {"rm", "del", "erase", "rmdir", "rd", "ri", "remove-item"}
+OUTSIDE = ("~", "$home", "$env:", "%userprofile%", "%systemroot%", "..")
+SENDING_PAIRS = {("git", "push"), ("npm", "publish"), ("yarn", "publish"), ("pnpm", "publish"), ("twine", "upload"),
+                 ("cargo", "publish"), ("docker", "push"), ("gh", "release"), ("gh", "pr"), ("gh", "repo"),
+                 ("netlify", "deploy"), ("firebase", "deploy")}
+SENDING_WORDS = {"vercel", "scp", "rsync", "ftp", "sftp"}
+UPLOAD_FLAGS = {"-t", "--upload-file", "-d", "--data", "--data-binary", "-f", "--form"}
 
 
 @dataclass
@@ -70,11 +73,78 @@ def check(command: str) -> tuple[str, bool]:
         return "The command is empty.", False
     if len(text) > MAX_COMMAND:
         return f"The command is longer than {MAX_COMMAND} characters.", False
-    if REFUSED.search(text):
+    if _refused(text):
         return ("Delta Build never runs this: it acts on the whole PC or on files outside a project "
                 "(disks, shutdown, registry, accounts, firewall, scheduled tasks, other processes, or deleting outside "
                 "the project). Run it yourself if you really need it."), False
-    return "", bool(SENDS.search(text))
+    return "", _sends(text)
+
+
+def _segments(text: str) -> list[list[str]]:
+    """The command split into its parts (at ; & | and newlines), each a list of lower-case words without quotes."""
+    out: list[list[str]] = []
+    part: list[str] = []
+    word = ""
+    for ch in text.lower():
+        if ch in ";&|\n":
+            if word:
+                part.append(word)
+            if part:
+                out.append(part)
+            part, word = [], ""
+            if ch == "|":
+                out.append(["|"])
+        elif ch.isspace():
+            if word:
+                part.append(word)
+            word = ""
+        elif ch not in "'\"`()":
+            word += ch
+    if word:
+        part.append(word)
+    if part:
+        out.append(part)
+    return out
+
+
+def _outside_path(arg: str) -> bool:
+    """An argument that starts outside the project: a drive, the root, home or the parent folder. Windows switches
+    (/s, /q: a slash and one letter) are not paths."""
+    a = arg.split("=", 1)[-1]
+    if len(a) >= 2 and a[0].isalpha() and a[1] == ":":
+        return True
+    if a[:1] in ("/", "\\"):
+        return not (len(a) == 2 and a[1].isalpha())
+    return a.startswith(OUTSIDE)
+
+
+def _refused(text: str) -> bool:
+    segs = _segments(text)
+    for i, words in enumerate(segs):
+        for j, w in enumerate(words):
+            if w in REFUSED_WORDS or (j + 1 < len(words) and (w, words[j + 1]) in REFUSED_PAIRS):
+                return True
+            if w in REGISTRY_EDITS and any(x.startswith(("hklm", "hkcu", "registry::")) for x in words[j + 1:]):
+                return True
+        if words and words[0] in DELETERS and any(_outside_path(a) for a in words[1:] if not a.startswith("-")):
+            return True
+        if words and words[0] in DOWNLOADERS and i + 2 < len(segs) and segs[i + 1] == ["|"] \
+                and segs[i + 2] and segs[i + 2][0] in SHELLS:
+            return True
+    return False
+
+
+def _sends(text: str) -> bool:
+    for words in _segments(text):
+        for j, w in enumerate(words):
+            if w in SENDING_WORDS or (j + 1 < len(words) and (w, words[j + 1]) in SENDING_PAIRS):
+                return True
+        if words and words[0] in DOWNLOADERS and any(x in UPLOAD_FLAGS for x in words[1:]):
+            return True
+        if words and words[0] in ("invoke-webrequest", "iwr", "invoke-restmethod", "irm") and \
+                any(x in ("post", "put") for x in words[1:]):
+            return True
+    return False
 
 
 def _tail(text: str) -> str:

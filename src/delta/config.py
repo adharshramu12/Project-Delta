@@ -295,6 +295,9 @@ class StudioConfig(BaseModel):
     """Delta Build, the Build panel: a coding agent for the user's own projects (delta.studio)."""
     enabled: bool = True
     projects_folder: str = ""  # where "New project" makes folders; empty = Documents\Delta Projects
+    # Projects must be inside your own folder (C:\Users\<you>) or Delta's projects folder; list others here
+    # (a code folder on another drive, for example).
+    extra_folders: list[str] = Field(default_factory=list)
 
 
 class SchedulerConfig(BaseModel):

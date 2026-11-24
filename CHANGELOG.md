@@ -20,6 +20,10 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
     a sandboxed frame on another origin, so it can never read the dashboard, its key or its storage.
   - A preview stops with Stop preview, when another one starts, when the project is removed, and when Delta shuts
     down (the dev server and everything it started).
+  - **Projects live in your own folder.** A Build project must now be inside your user folder (Documents, Desktop,
+    Music…) or Delta's projects folder. Another place, such as a code folder on another drive, is added under
+    `studio.extra_folders` in settings. Found by GitHub's code scanner, which also led to checking commands word by
+    word (no slow patterns on long input) and to the preview sending file types from a fixed list only.
 - **Build runs commands, tests and builds, and fixes what fails** (milestone 2). Delta can now run a command in the
   project folder: tests, a build, a type check, installing packages. After changing code it runs the project's
   checks; if they fail it reads the error, fixes the cause and runs them again, at most 3 rounds, and it never
