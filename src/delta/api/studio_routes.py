@@ -9,6 +9,8 @@ Telegram or Slack. Live progress arrives on the dashboard's one WebSocket as stu
   POST   /api/studio/projects/{id}/run       {"text"} start a request
   POST   /api/studio/projects/{id}/answer    {"id", "allow", "always"?} the user's answer to a command
   POST   /api/studio/projects/{id}/disallow  {"command"} stop always-allowing a command
+  POST   /api/studio/projects/{id}/preview   {"command"?} start the live preview (none = serve the folder)
+  DELETE /api/studio/projects/{id}/preview   stop it        GET .../preview   its address and latest output
   POST   /api/studio/projects/{id}/stop
   POST   /api/studio/projects/{id}/undo      put back the files of the latest request
   GET    /api/studio/projects/{id}/diff      ?turn=  what a request changed
@@ -40,6 +42,10 @@ class AnswerIn(BaseModel):
 
 class CommandIn(BaseModel):
     command: str = Field(max_length=2000)
+
+
+class PreviewIn(BaseModel):
+    command: str = Field(default="", max_length=2000)
 
 
 class RunIn(BaseModel):
@@ -78,7 +84,31 @@ def register(app: FastAPI, c: Any, auth: Callable[..., None]) -> None:
 
     @app.delete("/api/studio/projects/{pid}", dependencies=[Depends(auth)])
     async def forget(pid: str) -> dict[str, bool]:
-        return {"ok": bool(safe(lambda: studio().forget(pid)))}
+        try:
+            return {"ok": await studio().forget(pid)}
+        except StudioError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/studio/projects/{pid}/preview", dependencies=[Depends(auth)])
+    async def start_preview(pid: str, body: PreviewIn) -> dict[str, Any]:
+        """Started by the user from the Build page: their own action, so no second question."""
+        from delta.studio.commands import check
+
+        command = " ".join(body.command.split())
+        if command and (why := check(command)[0]):
+            raise HTTPException(400, why)
+        try:
+            return (await studio().start_preview(pid, command)).public()
+        except (StudioError, RuntimeError, OSError) as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.delete("/api/studio/projects/{pid}/preview", dependencies=[Depends(auth)])
+    async def stop_preview(pid: str) -> dict[str, bool]:
+        return {"ok": await studio().stop_preview(pid)}
+
+    @app.get("/api/studio/projects/{pid}/preview", dependencies=[Depends(auth)])
+    async def preview_logs(pid: str) -> dict[str, Any]:
+        return studio().preview_logs(pid)
 
     @app.get("/api/studio/projects/{pid}/file", dependencies=[Depends(auth)])
     async def read(pid: str, path: str) -> dict[str, Any]:

@@ -7,6 +7,23 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Build shows your project live** (milestone 3). A Preview button, and Delta itself, can show the project's page
+  inside the Build page: a plain HTML, CSS and JavaScript project is shown as it is (Delta serves the folder), and an
+  app with a dev server (`npm run dev`, Vite, Next.js, Flask…) is started in the project folder with your OK and
+  shown at the address it prints. Delta then loads the page to check it works, and reads the dev server's output when
+  something breaks. Toolbar: Reload, Open in browser, Output, Stop preview. Live: "Show me the app in the live
+  preview" opened the to-do app inside Build, and adding a task inside the preview worked.
+  - The preview listens on this PC only (`127.0.0.1`), not on your network. When Delta serves the folder it serves
+    only files inside the project, never secret files or `.git`, and only reads (no uploads). A dev server's address
+    is taken only when it is on this PC.
+  - The dashboard now allows frames from this PC (`127.0.0.1` and `localhost`) and nothing else. The preview runs in
+    a sandboxed frame on another origin, so it can never read the dashboard, its key or its storage.
+  - A preview stops with Stop preview, when another one starts, when the project is removed, and when Delta shuts
+    down (the dev server and everything it started).
+  - **Projects live in your own folder.** A Build project must now be inside your user folder (Documents, Desktop,
+    Music…) or Delta's projects folder. Another place, such as a code folder on another drive, is added under
+    `studio.extra_folders` in settings. Found by GitHub's code scanner, which also led to checking commands word by
+    word (no slow patterns on long input) and to the preview sending file types from a fixed list only.
 - **Build runs commands, tests and builds, and fixes what fails** (milestone 2). Delta can now run a command in the
   project folder: tests, a build, a type check, installing packages. After changing code it runs the project's
   checks; if they fail it reads the error, fixes the cause and runs them again, at most 3 rounds, and it never

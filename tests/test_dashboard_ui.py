@@ -91,7 +91,10 @@ def test_the_page_has_a_strict_content_security_policy(client):
     assert csp == CSP
     rules = dict(part.strip().split(" ", 1) for part in csp.split(";"))
     assert rules["script-src"] == "'self'" and rules["default-src"] == "'self'" and rules["style-src"] == "'self'"
-    assert "unsafe-inline" not in csp and "unsafe-eval" not in csp and "http" not in csp
+    assert "unsafe-inline" not in csp and "unsafe-eval" not in csp
+    # the only web addresses allowed: frames from this PC (Build's live preview), nothing for scripts or styles
+    assert rules["frame-src"] == "blob: http://127.0.0.1:* http://localhost:*"
+    assert "http" not in csp.replace(rules["frame-src"], "")
     assert rules["frame-ancestors"] == "'none'" and rules["base-uri"] == "'none'"
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["cache-control"] == "no-store"
@@ -184,9 +187,11 @@ def test_the_payload_stays_small():
     about 11.9 KB with its styles).
     Then to 296 KB for Build's command step (the approval card, Passed/Failed output and always-allowed commands,
     about 2.6 KB with its styles).
+    Then to 300 KB for Build's live preview (the preview pane with its toolbar and the dev server setup, about
+    3.8 KB with its styles).
     Lazy loading would not lower this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 296_000, total
+    assert total < 300_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 
