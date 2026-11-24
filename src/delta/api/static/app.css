@@ -681,3 +681,7 @@ dialog::backdrop{background:var(--overlay)}
 .st-hint{margin:auto 0}
 @media (max-width:1100px){.st-grid{grid-template-columns:220px minmax(0,1fr);height:auto}.st-chat{grid-column:1/-1;height:520px}}
 @media (max-width:760px){.st-grid{grid-template-columns:1fr}.st-view{max-height:60vh}}
+.st-ask-card{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3);border:1px solid var(--accent);border-radius:var(--r-md);background:var(--surface)}
+.st-ask-card.sends{border-color:var(--warn)}
+.st-out summary{cursor:pointer;color:var(--ok)}.st-out summary.bad{color:var(--danger)}.st-out .st-code{max-height:240px;margin-top:4px}
+.st-allowed{margin-top:var(--s2)}.st-allowed .row{align-items:center;justify-content:space-between;gap:var(--s2)}

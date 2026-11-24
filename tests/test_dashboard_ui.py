@@ -182,9 +182,11 @@ def test_the_payload_stays_small():
     and the "catch me" game, about 3.6 KB with its styles).
     Then to 292 KB for the Build panel (studio.js: projects, files, the diff view and the chat with the coding agent,
     about 11.9 KB with its styles).
+    Then to 296 KB for Build's command step (the approval card, Passed/Failed output and always-allowed commands,
+    about 2.6 KB with its styles).
     Lazy loading would not lower this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 292_000, total
+    assert total < 296_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 

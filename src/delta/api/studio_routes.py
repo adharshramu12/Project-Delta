@@ -7,6 +7,8 @@ Telegram or Slack. Live progress arrives on the dashboard's one WebSocket as stu
   DELETE /api/studio/projects/{id}           remove from the list (the files stay)
   GET    /api/studio/projects/{id}/file      ?path=  one file's text
   POST   /api/studio/projects/{id}/run       {"text"} start a request
+  POST   /api/studio/projects/{id}/answer    {"id", "allow", "always"?} the user's answer to a command
+  POST   /api/studio/projects/{id}/disallow  {"command"} stop always-allowing a command
   POST   /api/studio/projects/{id}/stop
   POST   /api/studio/projects/{id}/undo      put back the files of the latest request
   GET    /api/studio/projects/{id}/diff      ?turn=  what a request changed
@@ -28,6 +30,16 @@ from delta.studio.service import Studio, StudioError
 class ProjectIn(BaseModel):
     name: str = Field(default="", max_length=80)
     path: str = Field(default="", max_length=1000)
+
+
+class AnswerIn(BaseModel):
+    id: str = Field(max_length=40)
+    allow: bool
+    always: bool = False
+
+
+class CommandIn(BaseModel):
+    command: str = Field(max_length=2000)
 
 
 class RunIn(BaseModel):
@@ -75,6 +87,15 @@ def register(app: FastAPI, c: Any, auth: Callable[..., None]) -> None:
     @app.post("/api/studio/projects/{pid}/run", dependencies=[Depends(auth)])
     async def run(pid: str, body: RunIn) -> dict[str, str]:
         return {"turn": safe(lambda: studio().start(pid, body.text))}
+
+    @app.post("/api/studio/projects/{pid}/answer", dependencies=[Depends(auth)])
+    async def answer(pid: str, body: AnswerIn) -> dict[str, bool]:
+        return {"ok": bool(safe(lambda: studio().answer(pid, body.id, body.allow, body.always)))}
+
+    @app.post("/api/studio/projects/{pid}/disallow", dependencies=[Depends(auth)])
+    async def disallow(pid: str, body: CommandIn) -> dict[str, bool]:
+        safe(lambda: studio().disallow(pid, body.command))
+        return {"ok": True}
 
     @app.post("/api/studio/projects/{pid}/stop", dependencies=[Depends(auth)])
     async def stop(pid: str) -> dict[str, bool]:
