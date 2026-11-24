@@ -180,9 +180,11 @@ def test_the_payload_stays_small():
     rows and the backup-AI choice under Apps > AI models (about 2.2 KB; the dashboard then ships about 271.2 KB).
     Then to 279 KB for Tri's play (stepping aside when it covers a control, eyes that follow the pointer, idle tricks
     and the "catch me" game, about 3.6 KB with its styles).
+    Then to 292 KB for the Build panel (studio.js: projects, files, the diff view and the chat with the coding agent,
+    about 11.9 KB with its styles).
     Lazy loading would not lower this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 279_000, total
+    assert total < 292_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 

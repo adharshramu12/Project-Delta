@@ -22,6 +22,7 @@
   <nav class="nav" aria-label="Sections">
     <button class="nav-item" data-go="chat" title="Chat (Alt+1)"><span data-icon="chat"></span><span class="label">Chat</span><span class="badge" id="nb_chat" hidden></span></button>
     <button class="nav-item" data-go="tasks" title="Tasks (Alt+2)"><span data-icon="tasks"></span><span class="label">Tasks</span><span class="badge warn" id="nb_tasks" hidden></span></button>
+    <button class="nav-item" data-go="build" title="Build (Alt+8)"><span data-icon="code"></span><span class="label">Build</span></button>
     <button class="nav-item" data-go="apps" title="Apps (Alt+3)"><span data-icon="apps"></span><span class="label">Apps</span></button>
     <button class="nav-item" data-go="schedules" title="Schedules (Alt+4)"><span data-icon="clock"></span><span class="label">Schedules</span></button>
     <button class="nav-item" data-go="documents" title="Documents (Alt+5)"><span data-icon="doc"></span><span class="label">Documents</span></button>
@@ -133,6 +134,10 @@
     </section>
 
     <!-- Schedules -->
+    <section class="view view-build" data-view="build" aria-label="Build" hidden>
+    <header class="view-head"><div><h2>Build</h2><p class="muted">Build and improve your own projects with Delta: it reads the code, makes the changes and remembers the project. It works only inside the project's folder.</p></div></header>
+    <div id="studio" class="view-body"></div>
+    </section>
     <section class="view" data-view="schedules" aria-label="Schedules" hidden>
     <header class="view-head"><div><h2>Schedules</h2><p class="muted">Reminders and tasks that run by themselves. You see the plain-words schedule before anything is saved.</p></div></header>
     <div id="schedules" class="view-body"></div>
@@ -416,6 +421,7 @@
 <script src="/ui/setup.js"></script>
 <script src="/ui/updates.js"></script>
 <script src="/ui/tour.js"></script>
+<script src="/ui/studio.js"></script>
 <script src="/ui/pet.js"></script>
 <script src="/ui/main.js"></script>
 </body>

@@ -1,0 +1,170 @@
+// Build: Delta Build, a coding agent for the user's own projects (delta.studio). Three columns: projects and
+// files, the open file or a change's diff, and the chat with the agent. Live steps arrive as studio.* events on the
+// dashboard's one connection. Everything shown from a project is set as text (never as HTML).
+(() => {
+  "use strict";
+  const D = window.Delta, {api, h, icon, btn} = D;
+  const box = document.getElementById("studio");
+  if (!box) return;
+  const call = (path, opts) => api(path, opts).catch(e => ({detail: D.plain(e)}));
+  const enc = encodeURIComponent;
+  let current = null, project = null, running = false, steps = null;
+  let showing = ["memory"];  // what the middle column shows, so a refresh shows it again with the new content
+
+  // ---- layout
+  const side = h("aside", {class: "st-side", "aria-label": "Projects and files"});
+  const viewer = h("section", {class: "st-view", "aria-label": "File or change"});
+  const log = h("div", {class: "st-log", role: "log", "aria-live": "polite"});
+  const input = h("textarea", {class: "st-input", rows: 3, placeholder: "Describe what to build or change…", "aria-label": "Request"});
+  const send = h("button", {type: "submit", class: "btn primary"}, icon("send"), "Send");
+  const stopBtn = h("button", {type: "button", class: "btn", hidden: true}, icon("stop"), "Stop");
+  const form = h("form", {class: "st-ask"}, input, h("div", {class: "row"}, send, stopBtn,
+    h("span", {class: "muted small", text: "Delta changes files only inside this project. Every request can be undone."})));
+  const chat = h("section", {class: "st-chat", "aria-label": "Chat with Delta Build"}, log, form);
+  box.append(h("div", {class: "st-grid"}, side, viewer, chat));
+
+  // ---- projects
+  async function home() {
+    current = null; project = null; showing = ["memory"];
+    const o = await call("/api/studio");
+    if (o.detail) { side.replaceChildren(D.failed(D.detail(o), home)); return; }
+    const name = h("input", {class: "input", placeholder: "New project name", "aria-label": "New project name", maxlength: 60});
+    const path = h("input", {class: "input", placeholder: "C:\\path\\to\\your\\project", "aria-label": "Existing project folder"});
+    const add = async (body) => {
+      const r = await call("/api/studio/projects", {method: "POST", body: JSON.stringify(body)});
+      if (r.detail) { D.toast({title: "Not opened", body: D.detail(r), kind: "danger"}); return; }
+      open(r.id);
+    };
+    side.replaceChildren(
+      h("h3", {class: "list-title", text: "Projects"}),
+      ...(o.projects.length ? o.projects.map(p => h("button", {type: "button", class: "st-proj" + (p.exists ? "" : " gone"), onclick: () => open(p.id)},
+        h("b", {text: p.name}), h("span", {class: "muted small", text: p.exists ? p.path : "Folder not found: " + p.path}),
+        p.running ? h("span", {class: "pill accent", text: "Working"}) : null)) : [h("p", {class: "muted small", text: "No projects yet."})]),
+      h("h3", {class: "list-title", text: "New project"}),
+      h("form", {class: "st-form", onsubmit: e => { e.preventDefault(); if (name.value.trim()) add({name: name.value}); }},
+        name, h("small", {class: "muted", text: `Made in ${o.home}`}), h("button", {type: "submit", class: "btn"}, icon("plus"), "Create")),
+      h("h3", {class: "list-title", text: "Open an existing project"}),
+      h("form", {class: "st-form", onsubmit: e => { e.preventDefault(); if (path.value.trim()) add({path: path.value}); }},
+        path, h("small", {class: "muted", text: "Paste the folder's path (in File Explorer: right-click the folder, Copy as path)."}),
+        h("button", {type: "submit", class: "btn"}, icon("external"), "Open")));
+    viewer.replaceChildren(D.empty({ic: "spark", title: "Build with Delta",
+      body: "Create a project or open one you have. Then tell Delta what to build: it reads the code, makes the changes and keeps notes about the project for next time."}));
+    log.replaceChildren(); setRunning(false); form.hidden = true;
+  }
+
+  async function open(pid, keepView) {
+    const p = await call(`/api/studio/projects/${enc(pid)}`);
+    if (p.detail) { D.toast({title: "Not opened", body: D.detail(p), kind: "danger"}); home(); return; }
+    current = pid; project = p; form.hidden = false;
+    setRunning(p.running);
+    renderSide();
+    if (!keepView) showMemory(); else refreshView();
+    renderHistory();
+  }
+
+  function renderSide() {
+    const p = project;
+    const files = p.tree.filter(f => !f.endsWith("/"));
+    side.replaceChildren(
+      h("div", {class: "row st-head"}, btn("All projects", home, "sm"), h("b", {class: "st-name", text: p.name})),
+      h("p", {class: "muted small st-path", text: p.path}),
+      h("div", {class: "row"},
+        btn("Project memory", showMemory, "sm"),
+        btn("Undo last request", async () => {
+          if (!await D.confirm({title: "Undo the last request?", body: "The files it changed go back to how they were before it.", ok: "Undo"})) return;
+          const r = await call(`/api/studio/projects/${enc(current)}/undo`, {method: "POST"});
+          if (r.detail) D.toast({title: "Nothing undone", body: D.detail(r), kind: "warn"});
+          else { D.toast({title: "Undone", body: `${r.restored.length} file(s) put back.`, kind: "ok"}); open(current); }
+        }, "sm"),
+        btn("Remove", async () => {
+          if (!await D.confirm({title: `Remove "${p.name}" from Build?`, body: "Its files stay on your PC; only Delta's chat and undo history for it are deleted.", ok: "Remove", danger: true})) return;
+          const r = await call(`/api/studio/projects/${enc(current)}`, {method: "DELETE"});
+          if (r.detail) D.toast({title: "Not removed", body: D.detail(r), kind: "danger"}); else home();
+        }, "sm danger-outline")),
+      h("h3", {class: "list-title", text: `Files (${files.length}${p.tree.length >= 400 ? "+" : ""})`}),
+      h("div", {class: "st-tree", role: "list"}, ...(files.length ? files.map(f => h("button", {type: "button", role: "listitem", class: "st-file",
+        title: f, onclick: () => showFile(f)}, h("span", {class: "st-dir", text: f.includes("/") ? f.slice(0, f.lastIndexOf("/") + 1) : ""}),
+        h("span", {text: f.slice(f.lastIndexOf("/") + 1)}))) : [h("p", {class: "muted small", text: "No files yet."})])));
+  }
+
+  // ---- viewer
+  function code(text) { return h("pre", {class: "st-code"}, h("code", {text})); }
+  function refreshView() {
+    const [kind, arg] = showing;
+    if (kind === "file") showFile(arg); else if (kind === "diff") showDiff(arg); else showMemory();
+  }
+  function showMemory() {
+    showing = ["memory"];
+    viewer.replaceChildren(h("div", {class: "st-vhead"}, h("b", {text: "Project memory"}), h("span", {class: "muted small", text: ".delta/PROJECT.md"})),
+      project.memory ? code(project.memory) : D.empty({ic: "memory", title: "No project memory yet",
+        body: "After the first request Delta writes down what the project is, how to run it, decisions and next steps, and reads it again every time."}));
+  }
+  async function showFile(rel) {
+    showing = ["file", rel];
+    const f = await call(`/api/studio/projects/${enc(current)}/file?path=${enc(rel)}`);
+    if (f.detail) { viewer.replaceChildren(D.failed(D.detail(f), () => showFile(rel))); return; }
+    viewer.replaceChildren(h("div", {class: "st-vhead"}, h("b", {text: f.path}), h("span", {class: "muted small", text: D.bytes(f.size)})),
+      f.binary ? h("p", {class: "muted", text: "A binary file: not shown."}) : code(f.text + (f.cut ? "\n… (shortened)" : "")));
+  }
+  async function showDiff(turn) {
+    showing = ["diff", turn];
+    const d = await call(`/api/studio/projects/${enc(current)}/diff?turn=${enc(turn)}`);
+    if (d.detail) { D.toast({title: "Not shown", body: D.detail(d), kind: "warn"}); return; }
+    viewer.replaceChildren(h("div", {class: "st-vhead"}, h("b", {text: "What this request changed"})),
+      ...d.map(f => h("div", {class: "st-diff"}, h("div", {class: "row"}, h("b", {text: f.path}), h("span", {class: "pill", text: f.kind})),
+        h("pre", {class: "st-code"}, ...f.diff.split("\n").map(line => h("span", {class: line.startsWith("+") && !line.startsWith("+++") ? "add"
+          : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : "", text: line + "\n"}))))));
+  }
+
+  // ---- chat
+  function bubble(m) {
+    const changed = Object.entries(m.changed || {});
+    return h("div", {class: "st-msg " + m.role},
+      h("div", {class: "st-text", text: m.text}),
+      changed.length ? h("div", {class: "st-changed"}, h("span", {class: "muted small", text: `${changed.length} file(s): ` + changed.map(([f, k]) => `${f} (${k})`).join(", ")}),
+        m.turn ? btn("See changes", () => showDiff(m.turn), "sm") : null) : null,
+      m.status && m.status !== "done" ? h("span", {class: "pill warn", text: D.words(m.status)}) : null);
+  }
+  function renderHistory() {
+    log.replaceChildren(...(project.history.length ? project.history.map(bubble)
+      : [h("p", {class: "muted small st-hint", text: "Try: \"Make a simple to-do web app in plain HTML, CSS and JavaScript\" or \"Explain this project and suggest the next three improvements\"."})]));
+    if (running) log.append(steps = h("div", {class: "st-steps"}, h("span", {class: "muted small", text: "Working…"})));
+    log.scrollTop = log.scrollHeight;
+  }
+  function setRunning(on) {
+    running = on; send.disabled = on; stopBtn.hidden = !on; input.disabled = on;
+  }
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text || !current) return;
+    setRunning(true);
+    const r = await call(`/api/studio/projects/${enc(current)}/run`, {method: "POST", body: JSON.stringify({text})});
+    if (r.detail) { setRunning(false); D.toast({title: "Not started", body: D.detail(r), kind: "danger"}); return; }
+    input.value = "";
+    project.history.push({role: "user", text});
+    renderHistory();
+  };
+  input.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); } });
+  stopBtn.onclick = () => call(`/api/studio/projects/${enc(current)}/stop`, {method: "POST"});
+
+  const LABEL = {list_files: "Looked at the files", read_file: "Read", search: "Searched for", write_file: "Wrote", edit_file: "Edited",
+    delete_file: "Deleted", update_memory: "Updated the project memory"};
+  D.on("ws", m => {
+    if (m.type !== "event" || !String(m.event).startsWith("studio.") || !m.data || m.data.project !== current) return;
+    const d = m.data;
+    if (m.event === "studio.done") { setRunning(false); open(current, true); return; }
+    if (!steps) { steps = h("div", {class: "st-steps"}); log.append(steps); }
+    if (m.event === "studio.tool") {
+      const a = d.args || {};
+      steps.append(h("div", {class: "st-step"}, icon("circle"), h("span", {text: `${LABEL[d.tool] || d.tool} ${a.path || a.query || a.folder || ""}`.trim()})));
+    } else if (m.event === "studio.tool_done" && !d.ok) {
+      steps.append(h("div", {class: "st-step bad"}, icon("alert"), h("span", {class: "small", text: d.summary})));
+    } else if (m.event === "studio.note") {
+      steps.append(h("div", {class: "st-note", text: d.text}));
+    }
+    log.scrollTop = log.scrollHeight;
+  });
+
+  D.views.build = {show: () => (current ? open(current, true) : home())};
+})();

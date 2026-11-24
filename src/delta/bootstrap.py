@@ -129,6 +129,7 @@ class Container:
     chats: ChatStore | None = None  # separate conversations (dashboard sidebar)
     live_channels: dict[str, Any] = field(default_factory=dict)  # running chat channels, by name
     guard: Any = None  # RemoteGuard: PIN and lock for remote control
+    studio: Any = None  # delta.studio.service.Studio: the Build panel's coding agent (separate from tasks)
     watch: Any = None  # delta.safety.watch.IntrusionWatch: tells the owner about repeated refused attempts
     emergency: Any = None  # EmergencyContacts (encrypted)
     running: asyncio.Task[Any] | None = None  # the task being worked on now (any channel can stop it)
@@ -657,4 +658,13 @@ def build(settings: Settings) -> Container:
     from delta.safety.watch import IntrusionWatch
 
     container.watch = IntrusionWatch(container, alert=notify)  # repeated refused attempts: the owner is told
+    if settings.studio.enabled:  # the Build panel: its own module, data and runs (delta.studio)
+        from pathlib import Path
+
+        from delta.config import REPO_ROOT, known_folder
+        from delta.studio.service import Studio
+
+        folder = settings.studio.projects_folder
+        home = Path(folder) if folder else Path(known_folder("Documents")) / "Delta Projects"
+        container.studio = Studio(container, data, REPO_ROOT, home)
     return container
