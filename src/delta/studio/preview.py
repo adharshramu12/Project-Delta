@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import re
 import sys
 import threading
@@ -50,31 +51,39 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
 def _static_handler(root: Path) -> type[BaseHTTPRequestHandler]:
+    base = os.path.realpath(root)
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "DeltaPreview"
         sys_version = ""
 
-        def _file(self) -> tuple[Path, str] | None:
+        def _file(self) -> str | None:
+            """The real path of the requested file inside the project, or None. The project check is done here, in
+            this function, as well as by the jail (secret files, .git): resolve, then it must start with the root."""
             rel = unquote(urlsplit(self.path).path).lstrip("/") or "index.html"
-            try:
-                path, rel = check_file(root, rel)
-            except JailError:
+            if "\x00" in rel:
                 return None
-            if path.is_dir():
-                path = path / "index.html"
-                try:
-                    path, rel = check_file(root, path.relative_to(root).as_posix())
-                except (JailError, ValueError):
+            real = os.path.realpath(os.path.join(base, rel))
+            if not real.startswith(base + os.sep):
+                return None
+            if os.path.isdir(real):
+                real = os.path.realpath(os.path.join(real, "index.html"))
+                if not real.startswith(base + os.sep):
                     return None
-            return (path, rel) if path.is_file() else None
+            try:
+                check_file(root, os.path.relpath(real, base))  # secret files and .git are never served
+            except (JailError, ValueError):
+                return None
+            return real if os.path.isfile(real) else None
 
         def _send(self, body: bool) -> None:
             found = self._file()
             if found is None:
                 self.send_error(404, "Not found in this project")
                 return
-            data = found[0].read_bytes()
-            kind = TYPES.get(found[0].suffix.lower(), "application/octet-stream")
+            with open(found, "rb") as f:
+                data = f.read()
+            kind = TYPES.get(os.path.splitext(found)[1].lower(), "application/octet-stream")
             self.send_response(200)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(data)))
