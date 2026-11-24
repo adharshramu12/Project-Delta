@@ -291,6 +291,12 @@ class TourConfig(BaseModel):
     done: bool = False
 
 
+class StudioConfig(BaseModel):
+    """Delta Build, the Build panel: a coding agent for the user's own projects (delta.studio)."""
+    enabled: bool = True
+    projects_folder: str = ""  # where "New project" makes folders; empty = Documents\Delta Projects
+
+
 class SchedulerConfig(BaseModel):
     """Scheduled tasks and reminders (delta.scheduler). Runs only while the background service is on."""
     enabled: bool = True
@@ -478,6 +484,7 @@ class Settings(BaseModel):
     writer: WriterConfig = Field(default_factory=WriterConfig)
     academy: AcademyConfig = Field(default_factory=AcademyConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    studio: StudioConfig = Field(default_factory=StudioConfig)
     updates: UpdatesConfig = Field(default_factory=UpdatesConfig)
     tour: TourConfig = Field(default_factory=TourConfig)
     engine: EngineConfig = Field(default_factory=EngineConfig)

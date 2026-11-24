@@ -44,6 +44,7 @@
     "arrow-up": [P("M12 19V5M6 11l6-6 6 6")],
     edit: [P("M12 20h8.5M16.5 3.5a2.1 2.1 0 1 1 3 3L7.5 18.5l-4 1 1-4z")],
     play: [["circle", {cx: 12, cy: 12, r: 8.5}], P("M10 8.8v6.4l5-3.2z")],
+    code: [P("M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5M13.5 4.5l-3 15")],
     send: [P("M21 3 10.5 13.5M21 3l-6.5 18-4-7.5-7.5-4z")],
     video: [["rect", {x: 3, y: 6.5, width: 12.5, height: 11, rx: 2}], P("m15.5 10.5 5-3v9l-5-3")],
     refresh: [P("M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4")],
@@ -223,7 +224,7 @@
 
   // ---- views
   const views = {};
-  const TITLES = {chat: "Chat", tasks: "Tasks", apps: "Apps", schedules: "Schedules", documents: "Documents", memory: "Memory", settings: "Settings"};
+  const TITLES = {chat: "Chat", tasks: "Tasks", apps: "Apps", schedules: "Schedules", documents: "Documents", memory: "Memory", settings: "Settings", build: "Build"};
   let view = "";
   function go(name, opts) {
     if (!TITLES[name]) name = "chat";

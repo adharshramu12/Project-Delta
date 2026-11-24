@@ -1,0 +1,168 @@
+"""Delta Build: the folder jail, the coding tools, undo, project memory, and the agent loop with a fake model."""
+
+import asyncio
+import os
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from delta.llm.schemas import LLMResponse, ToolCall
+from delta.studio import agent
+from delta.studio.jail import JailError, check_file, check_project_root, inside
+from delta.studio.service import Studio, StudioError
+from delta.studio.store import StudioStore
+from delta.studio.tools import Workspace
+
+
+@pytest.fixture(autouse=True)
+def _neutral_appdata(tmp_path, monkeypatch):
+    """pytest's temporary folders live under AppData, which is never allowed to hold a project."""
+    for var in ("LOCALAPPDATA", "APPDATA", "ProgramData"):
+        monkeypatch.setenv(var, str(tmp_path / "sys" / var))
+
+
+@pytest.fixture
+def proj(tmp_path):
+    root = tmp_path / "work" / "app"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "main.py").write_text("print('hi')\n", encoding="utf-8")
+    (root / ".env").write_text("API_KEY=secret\n", encoding="utf-8")
+    (root / "node_modules" / "x").mkdir(parents=True)
+    store = StudioStore(tmp_path / "data" / "studio")
+    turn = store.new_turn("p1", "test")
+    return Workspace(root.resolve(), store, "p1", turn), store, root.resolve()
+
+
+def test_paths_outside_the_project_and_secret_files_are_refused(proj, tmp_path):
+    ws, _store, root = proj
+    (tmp_path / "work" / "other.txt").write_text("not yours", encoding="utf-8")
+    for bad in ("../other.txt", "..\\other.txt", str(tmp_path / "work" / "other.txt"), "src/../../other.txt"):
+        with pytest.raises(JailError, match="outside the project"):
+            inside(root, bad)
+    for secret in (".env", "config/.env.local", "keys/server.pem", "id_rsa", "service-account-prod.json"):
+        with pytest.raises(JailError, match="secrets"):
+            check_file(root, secret)
+    with pytest.raises(JailError, match="git's own"):
+        check_file(root, ".git/config")
+    assert "API_KEY" not in ws.search("API_KEY")  # its name may show in the list; its content never does
+    assert "node_modules" not in ws.list_files()
+
+
+def test_a_link_out_of_the_project_is_refused(proj, tmp_path):
+    _ws, _store, root = proj
+    outside = tmp_path / "secret_dir"
+    outside.mkdir()
+    try:
+        os.symlink(outside, root / "link", target_is_directory=True)
+    except OSError:
+        pytest.skip("no symlink rights on this machine")
+    with pytest.raises(JailError, match="outside the project"):
+        check_file(root, "link/stolen.txt")
+
+
+def test_system_home_and_delta_folders_cannot_be_projects(tmp_path, monkeypatch):
+    data, app = tmp_path / "data", tmp_path / "app"
+    for d in (data, app, tmp_path / "ok", tmp_path / "win"):
+        d.mkdir()
+    monkeypatch.setenv("SystemRoot", str(tmp_path / "win"))
+    (tmp_path / "sys" / "LOCALAPPDATA").mkdir(parents=True)
+    for bad in (data, app, data / "..", tmp_path / "win", tmp_path / "sys" / "LOCALAPPDATA", Path.home(),
+                Path(Path.home().anchor)):
+        with pytest.raises(JailError):
+            check_project_root(bad, data, app)
+    with pytest.raises(JailError, match="not a folder"):
+        check_project_root(tmp_path / "missing", data, app)
+    assert check_project_root(tmp_path / "ok", data, app) == (tmp_path / "ok").resolve()
+
+
+def test_edits_are_exact_and_every_change_can_be_undone(proj):
+    ws, store, root = proj
+    assert "1\tprint('hi')" in ws.read_file("src/main.py")
+    with pytest.raises(JailError, match="not found"):
+        ws.edit_file("src/main.py", "print('bye')", "x")
+    ws.edit_file("src/main.py", "print('hi')", "print('hello')")
+    ws.edit_file("src/main.py", "print('hello')", "print('hello world')")
+    ws.write_file("src/new.py", "x = 1\n")
+    ws.delete_file("src/new.py")
+    ws.write_file("README.md", "# app\n")
+    assert ws.changed == {"src/main.py": "changed", "README.md": "created"}
+    turn, restored = store.undo("p1", root, check_file)
+    assert turn is not None and set(restored) == {"src/main.py", "src/new.py", "README.md"}
+    assert (root / "src" / "main.py").read_text(encoding="utf-8") == "print('hi')\n"
+    assert not (root / "README.md").exists() and not (root / "src" / "new.py").exists()
+    assert store.undo("p1", root, check_file) == (None, [])
+
+
+def test_memory_is_kept_short_in_the_project(proj):
+    ws, _store, root = proj
+    ws.update_memory("\n".join(f"line {i}" for i in range(200)))
+    text = (root / ".delta" / "PROJECT.md").read_text(encoding="utf-8")
+    assert text.count("\n") == 80 and ws.memory().startswith("line 0")
+
+
+class FakeRouter:
+    def __init__(self, replies):
+        self.replies, self.seen = list(replies), []
+
+    async def complete(self, messages, tools=None, task="chat"):
+        self.seen.append(messages[0]["content"])
+        return self.replies.pop(0)
+
+
+async def test_the_agent_reads_edits_and_answers_and_a_bad_tool_call_is_reported_back(proj):
+    ws, _store, root = proj
+    router = FakeRouter([
+        LLMResponse("", [ToolCall("1", "read_file", {"path": "src/main.py"}),
+                         ToolCall("2", "read_file", {"path": "../../escape.txt"})]),
+        LLMResponse("Changing the greeting.", [ToolCall("3", "edit_file", {
+            "path": "src/main.py", "old_text": "print('hi')", "new_text": "print('hello')"})]),
+        LLMResponse("Changed src/main.py to say hello. Run: python src/main.py"),
+    ])
+    events = []
+
+    async def emit(name, data):
+        events.append((name, data))
+
+    res = await agent.run(router, ws, "app", "say hello instead", [], emit)
+    assert res.answer.startswith("Changed src/main.py") and res.steps == 3
+    assert (root / "src" / "main.py").read_text(encoding="utf-8") == "print('hello')\n"
+    bad = [d for n, d in events if n == "studio.tool_done" and not d["ok"]]
+    assert len(bad) == 1 and "outside the project" in bad[0]["summary"]
+    assert "main.py" in router.seen[0] and "Project memory" in router.seen[0]
+
+
+async def test_the_service_runs_logs_to_memory_refuses_a_second_run_and_undoes(tmp_path):
+    root = tmp_path / "projects"
+    published = []
+
+    async def publish(event, **data):
+        published.append(event)
+
+    page = {"path": "index.html", "content": "<h1>hi</h1>"}
+    router = FakeRouter([LLMResponse("", [ToolCall("1", "write_file", page)]),
+                         LLMResponse("Made index.html.")])
+    c = SimpleNamespace(events=SimpleNamespace(publish=publish), audit=SimpleNamespace(record=lambda *a, **k: None),
+                        router=router)
+    s = Studio(c, tmp_path / "data", tmp_path / "app", root)
+    p = s.create("My App")
+    assert Path(p.path) == (root / "My App").resolve()
+    (root / "My App" / "x.txt").write_text("x")
+    with pytest.raises(StudioError, match="not empty"):
+        s.create("My App")
+    (root / "My App" / "x.txt").unlink()
+    turn = s.start(p.id, "make a page")
+    with pytest.raises(StudioError, match="still working"):
+        s.start(p.id, "again")
+    for _ in range(100):
+        if not s.running(p.id):
+            break
+        await asyncio.sleep(0.02)
+    assert (root / "My App" / "index.html").read_text() == "<h1>hi</h1>"
+    assert "## Log" in (root / "My App" / ".delta" / "PROJECT.md").read_text() and "studio.done" in published
+    assert [d["kind"] for d in s.diff(p.id, turn) if d["path"] == "index.html"] == ["created"]
+    summary = s.summary(p.id)
+    assert "index.html" in summary["tree"] and summary["history"][-1]["text"] == "Made index.html."
+    assert s.undo(p.id)["restored"] and not (root / "My App" / "index.html").exists()
+    with pytest.raises(StudioError):
+        s.read(p.id, "../../outside.txt")

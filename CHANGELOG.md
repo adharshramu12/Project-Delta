@@ -6,6 +6,25 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Added
+- **Build: a coding agent for your own projects** (milestone 1). A new Build page next to Chat. Create a project or
+  open a folder you already have, then tell Delta what to build or change: it reads the code, plans, and edits or
+  creates the files, using your own AI keys and apps (Claude Code, Codex, Gemini, Groq and the rest, with your
+  backup AIs). It keeps a project memory in `.delta/PROJECT.md` (what the project is, how to run it, decisions and
+  next steps) and reads it again on every request, so it picks up where it left off. Each request shows which files
+  it changed, with a diff, and **Undo last request** puts them back.
+  - **Separate from Delta's agent:** its own module (`delta.studio`), page, routes and data folder, and its own
+    runs, so a Build request never waits for a Delta task or holds one up. It shares only your AI keys, the live
+    connection and the audit log.
+  - **Locked to the project folder:** paths are checked after links are resolved, so nothing outside the folder
+    can be read or written. A drive, your home folder, Windows, the program folders, AppData and Delta's own folders
+    cannot be a project. Files with secrets (`.env`, keys, certificates, credentials) are never read or changed,
+    and `.git` is never touched.
+  - **Not yet:** running commands, tests and previews (milestones 2 and 3), and using Claude Code or Codex as the
+    whole coding engine (milestone 4). Until then Delta tells you the command to run.
+  - Measured live with Codex as the main AI: a to-do web app (3 files and the project memory) in 90 seconds, and a
+    follow-up change across 4 files in 51 seconds that kept the memory up to date; Undo put all 4 files back.
+
 ## 0.4.7 - 2026-11-15
 
 Delta learns, knows itself, and connects to more. In short:

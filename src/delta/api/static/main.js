@@ -127,10 +127,10 @@
   $("shutdown").onclick = D.shutdown;
 
   // ---- keyboard
-  const ORDER = ["chat", "tasks", "apps", "schedules", "documents", "memory", "settings"];
+  const ORDER = ["chat", "tasks", "apps", "schedules", "documents", "memory", "settings", "build"];
   document.addEventListener("keydown", e => {
     if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") { e.preventDefault(); toggleSidebar(); }
-    else if (e.altKey && !e.ctrlKey && /^[1-7]$/.test(e.key)) { e.preventDefault(); D.go(ORDER[Number(e.key) - 1]); }
+    else if (e.altKey && !e.ctrlKey && /^[1-8]$/.test(e.key)) { e.preventDefault(); D.go(ORDER[Number(e.key) - 1]); }
     else if (e.key === "Escape") {
       const si = $("sysinfo"); if (!si) return;  // the Updating screen replaced the dashboard
       if (!si.hidden) { si.hidden = true; $("st_conn").focus(); }

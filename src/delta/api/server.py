@@ -513,6 +513,7 @@ def create_app(c: Container, token: str) -> FastAPI:
     from delta.api.schedule_routes import register as register_schedules
     from delta.api.settings_routes import register as register_settings
     from delta.api.setup_routes import register as register_setup
+    from delta.api.studio_routes import register as register_studio
 
     register_setup(app, c, auth)
     register_settings(app, c, auth)
@@ -525,6 +526,7 @@ def create_app(c: Container, token: str) -> FastAPI:
     register_documents(app, c, auth)
 
     register_schedules(app, c, auth)
+    register_studio(app, c, auth)  # the Build panel (delta.studio)
     from delta.api.connectors_routes import register as register_connectors
 
     register_connectors(app, c, auth)  # connected apps (delta.connectors): the Apps page
