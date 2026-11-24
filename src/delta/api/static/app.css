@@ -685,6 +685,7 @@ dialog::backdrop{background:var(--overlay)}
 .st-view:has(.st-frame){display:flex;flex-direction:column}.st-view:has(.st-frame) .st-frame{flex:1}
 .st-pbar{align-items:center;gap:var(--s2);margin-bottom:var(--s2);flex-wrap:wrap}.st-url{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px}
 .st-logs{max-height:200px;margin-bottom:var(--s2)}.st-err{color:var(--danger);white-space:pre-wrap}.st-gap{margin-top:var(--s4)}
+.st-engine{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s2)}.st-engine select{flex:1;height:30px}
 .st-ask-card{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3);border:1px solid var(--accent);border-radius:var(--r-md);background:var(--surface)}
 .st-ask-card.sends{border-color:var(--warn)}
 .st-out summary{cursor:pointer;color:var(--ok)}.st-out summary.bad{color:var(--danger)}.st-out .st-code{max-height:240px;margin-top:4px}

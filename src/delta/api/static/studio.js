@@ -68,6 +68,14 @@
     side.replaceChildren(
       h("div", {class: "row st-head"}, btn("All projects", home, "sm"), h("b", {class: "st-name", text: p.name})),
       h("p", {class: "muted small st-path", text: p.path}),
+      p.engines && p.engines.claude_code ? h("label", {class: "st-engine small"}, "Engine",
+        h("select", {class: "input", "aria-label": "Who writes the code", onchange: async e => {
+          const r = await call(`/api/studio/projects/${enc(current)}/engine`, {method: "POST", body: JSON.stringify({engine: e.target.value})});
+          if (r.detail) { D.toast({title: "Not changed", body: D.detail(r), kind: "warn"}); e.target.value = p.engine; return; }
+          p.engine = r.engine;
+          D.toast({title: "Engine changed", body: r.engine === "claude_code" ? "Claude Code writes the code, with your Claude plan. It edits files only; for commands and previews switch back to Delta." : "Delta's own engine writes the code.", kind: "ok"});
+        }}, h("option", {value: "delta", selected: p.engine !== "claude_code", text: "Delta (your AI keys)"}),
+          h("option", {value: "claude_code", selected: p.engine === "claude_code", text: "Claude Code (your Claude plan)"}))) : h("span", null),
       h("div", {class: "row"},
         btn("Preview", () => (project.preview ? showPreview(project.preview) : previewSetup()), "sm primary", "play"),
         btn("Project memory", showMemory, "sm"),

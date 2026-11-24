@@ -374,3 +374,153 @@ async def test_the_agent_previews_a_plain_project_and_checks_it(tmp_path):
     assert s.summary(p.id)["preview"]["url"] == shown[0]["url"]
     await s.close()
     assert s.summary(p.id)["preview"] is None
+
+
+# ---- milestone 4: Claude Code as the engine, kept in the project by Delta's guard -----------------------------
+
+def _hook(tmp_path, event):
+    import json
+    import subprocess
+    import sys
+
+    root = tmp_path / "proj"
+    root.mkdir(exist_ok=True)
+    (root / "a.py").write_text("x = 1\n", encoding="utf-8")
+    store = StudioStore(tmp_path / "store")
+    turn = store.new_turn("p1", "t")
+    args = ["--root", str(root), "--store", str(tmp_path / "store"), "--project", "p1", "--turn", turn.id]
+    r = subprocess.run([sys.executable, "-m", "delta.studio.hook", *args], input=json.dumps(event),
+                       capture_output=True, text=True)
+    return r.returncode, r.stderr, store, turn
+
+
+def test_the_guard_keeps_claude_code_in_the_project_and_backs_up_before_a_change(tmp_path):
+    ok = [("Read", {"file_path": "a.py"}), ("Glob", {"pattern": "**/*.py"}), ("Grep", {"pattern": "x", "path": "."})]
+    for tool, data in ok:
+        assert _hook(tmp_path, {"tool_name": tool, "tool_input": data})[0] == 0, tool
+    for tool, data in (("Read", {"file_path": "../outside.txt"}), ("Read", {"file_path": ".env"}),
+                       ("Write", {"file_path": ".git/config", "content": "x"}), ("Bash", {"command": "dir"}),
+                       ("WebFetch", {"url": "https://example.com"}), ("Grep", {"pattern": "x", "path": ".."}),
+                       ("Glob", {"pattern": "../**/*"})):
+        code, err, *_ = _hook(tmp_path, {"tool_name": tool, "tool_input": data})
+        assert code == 2 and err.strip(), (tool, data)
+    code, _err, store, turn = _hook(tmp_path, {"tool_name": "Edit", "tool_input": {"file_path": "a.py"}})
+    assert code == 0 and store.turns("p1")[0].id == turn.id and store.turns("p1")[0].changed == ["a.py"]
+    assert store.original("p1", turn.id, "a.py").replace(b"\r\n", b"\n") == b"x = 1\n"
+    assert _hook(tmp_path, {"tool_name": "Read", "tool_input": "not a dict"})[0] == 2  # bad input: refused
+
+
+async def test_claude_code_runs_through_the_guard_and_its_changes_can_be_undone(tmp_path, monkeypatch):
+    import json
+    import sys
+
+    from delta.studio import claude_engine
+
+    fake = str(Path(__file__).parent / "fake_claude.py")
+    monkeypatch.setattr(claude_engine, "executable", lambda: "claude")
+    monkeypatch.setattr(claude_engine, "argv", lambda exe, settings, model="": [sys.executable, fake, "--settings",
+                                                                                 settings])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-leak")
+    monkeypatch.setenv("PYTHONPATH", str(Path(__file__).parents[1] / "src"))
+    s, p, published = _service(tmp_path, [])
+    root = Path(p.path)
+    (root / "hello.py").write_text("def greet():\n    return 'hi'\n", encoding="utf-8")
+    (root / ".env").write_text("SECRET=abc\n", encoding="utf-8")
+    (root.parent / "outside.txt").write_text("not yours", encoding="utf-8")
+    s.set_engine(p.id, "claude_code")
+    turn = s.start(p.id, "change the greeting")
+    await _wait(s, p.id)
+    answer = json.loads(s.store.history(p.id)[-1]["text"])
+    assert answer["allowed"] == {"read": True, "outside": False, "env": False, "edit": True, "write": True,
+                                 "bash": False}
+    assert answer["key_leaked"] is False
+    assert "hello there" in (root / "hello.py").read_text() and (root / "new.py").exists()
+    assert s.store.history(p.id)[-1]["changed"] == {"hello.py": "changed", "new.py": "created"}
+    steps = [d["tool"] for e, d in published if e == "studio.tool"]
+    assert steps[:2] == ["read_file", "read_file"] and "edit_file" in steps
+    assert {d["path"] for d in s.diff(p.id, turn)} >= {"hello.py", "new.py"}
+    assert set(s.undo(p.id)["restored"]) >= {"hello.py", "new.py"}
+    assert (root / "hello.py").read_text() == "def greet():\n    return 'hi'\n" and not (root / "new.py").exists()
+
+
+def test_the_engine_is_a_project_setting_and_must_be_installed(tmp_path, monkeypatch):
+    from delta.studio import claude_engine
+
+    s, p, _ = _service(tmp_path, [])
+    monkeypatch.setattr(claude_engine, "executable", lambda: None)
+    with pytest.raises(StudioError, match="not installed"):
+        s.set_engine(p.id, "claude_code")
+    monkeypatch.setattr(claude_engine, "executable", lambda: "claude")
+    with pytest.raises(StudioError):
+        s.set_engine(p.id, "gpt")
+    s.set_engine(p.id, "claude_code")
+    assert s.store.get(p.id).engine == "claude_code" and s.summary(p.id)["engines"] == {"claude_code": True}
+
+
+# ---- free keys running out --------------------------------------------------------------------------------------
+
+def _router_service(tmp_path, providers, preferred, fallback):
+    from fakes import FakeProvider  # noqa: F401  (the providers below are FakeProviders)
+
+    from delta.llm.router import ModelRouter
+
+    published = []
+
+    async def publish(event, **data):
+        published.append((event, data))
+
+    router = ModelRouter(providers, {"chat": list(providers)}, preferred=preferred, fallback=fallback)
+    c = SimpleNamespace(events=SimpleNamespace(publish=publish), audit=SimpleNamespace(record=lambda *a, **k: None),
+                        router=router)
+    s = Studio(c, tmp_path / "data", tmp_path / "app", tmp_path / "projects")
+    return s, s.create("demo"), router
+
+
+async def test_a_build_request_moves_to_the_next_free_key_when_one_runs_out(tmp_path):
+    from fakes import FakeProvider
+
+    from delta.llm.schemas import LLMError
+
+    groq = FakeProvider("groq", [LLMError("groq: daily token limit reached", kind="quota")])
+    gemini = FakeProvider("gemini", [LLMResponse("Done with Gemini.")])
+    s, p, router = _router_service(tmp_path, {"groq": groq, "gemini": gemini}, "groq", fallback=False)
+    router.fallbacks = ["gemini"]  # the user's backup AI (Apps > AI models)
+    s.start(p.id, "say hi")
+    await _wait(s, p.id)
+    last = s.store.history(p.id)[-1]
+    assert last["status"] == "done" and last["text"] == "Done with Gemini." and gemini.calls
+
+
+async def test_when_every_ai_is_out_the_user_is_told_plainly_what_to_do(tmp_path):
+    from fakes import FakeProvider
+
+    from delta.llm.schemas import LLMError
+
+    groq = FakeProvider("groq", [LLMError("groq: daily token limit reached", kind="quota")] * 3)
+    gemini = FakeProvider("gemini", [LLMError("gemini: quota exceeded for today", kind="quota")] * 3)
+    s, p, router = _router_service(tmp_path, {"groq": groq, "gemini": gemini}, "groq", fallback=False)
+    router.fallbacks = ["gemini"]
+    s.start(p.id, "say hi")
+    await _wait(s, p.id)
+    last = s.store.history(p.id)[-1]
+    assert last["status"] == "failed"
+    text = last["text"]
+    assert text.startswith("All your AIs are out of credit or at their limit")
+    assert "- groq: out of credit" in text and "- gemini: out of credit" in text
+    assert "backup AIs" in text and "Settings > Keys" in text and "task 'chat'" not in text
+
+
+async def test_a_blocked_action_is_shown_as_delta_s_reason_not_the_hook_command():
+    from delta.studio.agent import RunResult
+    from delta.studio.claude_engine import _handle
+
+    seen = []
+
+    async def emit(name, data):
+        seen.append(data)
+
+    event = {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "is_error": True,
+             "content": 'PreToolUse:Read hook error: ["C:/py.exe" -m delta.studio.hook --root "C:/p"]: '
+                        "../x.txt is outside the project."}]}}
+    await _handle(event, RunResult(""), {"t1": "Read"}, emit)
+    assert seen[0]["summary"] == "Blocked by Delta: ../x.txt is outside the project."

@@ -14,7 +14,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from delta.studio import agent, commands, preview
+from delta.core.orchestrator import friendly_model_error
+from delta.llm.schemas import LLMError
+from delta.studio import agent, claude_engine, commands, preview
 from delta.studio.jail import MEMORY_FILE, JailError, check_file, check_project_root
 from delta.studio.store import Project, StudioStore
 from delta.studio.tools import Workspace
@@ -88,6 +90,7 @@ class Studio:
         ws = Workspace(root, self.store, pid, _NoTurn())  # type: ignore[arg-type]
         return {**p.public(), "running": pid in self._runs, "tree": ws.tree(depth=6),
                 "asks": [ask for owner, ask, fut in self._asks.values() if owner == pid and not fut.done()],
+                "engines": {"claude_code": claude_engine.executable() is not None},
                 "preview": pv.public() if (pv := self._previews.get(pid)) is not None and pv.alive else None,
                 "memory": ws.memory(), "history": self.store.history(pid),
                 "turns": [t.__dict__ for t in self.store.turns(pid)[:10]]}
@@ -168,13 +171,23 @@ class Studio:
         started = time.monotonic()
         status, answer = "done", ""
         try:
-            res = await agent.run(self.c.router, ws, p.name, request, history, emit, runner=runner)
+            if p.engine == "claude_code":
+                res = await claude_engine.run(root, self.store.root, p.id, turn.id, request, history, emit)
+                ws.changed.update(self._engine_changes(p.id, turn.id, root))
+            else:
+                res = await agent.run(self.c.router, ws, p.name, request, history, emit, runner=runner)
             answer = res.answer
             status = "done" if not res.stopped else "stopped"
         except asyncio.CancelledError:
+            if p.engine == "claude_code":
+                ws.changed.update(self._engine_changes(p.id, turn.id, root))
             self._drop_asks(p.id)
             status, answer = "cancelled", "Stopped. " + ("The files changed so far can be undone." if ws.changed
                                                          else "Nothing was changed.")
+        except LLMError as e:  # no AI could answer: every key and backup is out of credit, at its limit or down
+            log.warning("studio.no_ai", project=p.id, error=str(e)[:300])
+            status = "failed"
+            answer = no_ai_message(e)
         except Exception as e:
             log.exception("studio.run_failed", project=p.id)
             status = "failed"
@@ -315,6 +328,26 @@ class Studio:
             with contextlib.suppress(Exception):
                 await self.stop_preview(pid)
 
+    def _engine_changes(self, pid: str, turn_id: str, root: Path) -> dict[str, str]:
+        """What Claude Code changed, from the backups its guard made: a backed-up file now missing was deleted."""
+        out = {}
+        for rel, kind in self.store.changed_in(pid, turn_id).items():
+            out[rel] = "deleted" if kind == "changed" and not (root / rel).exists() else kind
+        return {rel: kind for rel, kind in out.items() if not (kind == "created" and not (root / rel).exists())}
+
+    def set_engine(self, pid: str, engine: str) -> dict[str, Any]:
+        self._project(pid)
+        if pid in self._runs:
+            raise StudioError("Wait for the running request to finish before changing the engine.")
+        if engine == "claude_code" and claude_engine.executable() is None:
+            raise StudioError("Claude Code is not installed on this PC.")
+        try:
+            self.store.set_engine(pid, engine)
+        except ValueError as e:
+            raise StudioError("Choose Delta or Claude Code.") from e
+        self._audit("studio.engine", project=pid, engine=engine)
+        return {"engine": engine}
+
     def answer(self, pid: str, ask_id: str, allow: bool, always: bool = False) -> bool:
         """The user's answer to a command waiting in the Build page."""
         found = self._asks.get(ask_id)
@@ -348,6 +381,28 @@ class Studio:
     def _audit(self, event: str, **data: Any) -> None:
         with contextlib.suppress(Exception):
             self.c.audit.record(event, **data)
+
+
+def no_ai_message(e: LLMError) -> str:
+    """Every AI the user has is out of credit, at its limit or down: say which, why, and what to do, in plain words."""
+    errors = list(getattr(e, "errors", []) or [])
+    kinds = list(getattr(e, "kinds", []) or [])
+    lines = []
+    for err, kind in zip(errors, kinds, strict=False):
+        name, _, why = err.partition(": ")
+        why = why.split(". ")[0][:120] or kind
+        tag = {"quota": "out of credit or at its limit for today", "rate_limit": "busy (too many requests just now)",
+               "auth": "its key was refused", "unreachable": "not running or not reachable"}.get(kind, "failed")
+        lines.append(f"- {name}: {tag} ({why})")
+    limited = bool(kinds) and all(k in ("quota", "rate_limit", "unreachable") for k in kinds)
+    head = ("All your AIs are out of credit or at their limit right now, so this request stopped:" if limited and lines
+            else friendly_model_error(e) if not lines else "No AI could answer, so this request stopped:")
+    return "\n".join([head, *lines, "",
+                      "Files changed before it stopped are kept and can be undone. What you can do:",
+                      "- Wait and send it again: free limits reset (per minute, or each day).",
+                      "- Add backup AIs (Apps > AI models): Delta moves to the next one by itself when one runs out.",
+                      "- Add another free key (Settings > Keys): Gemini, Groq, NVIDIA and OpenRouter all have one.",
+                      "- Or switch this project's engine to Claude Code, which uses your Claude plan."])
 
 
 class _NoTurn:
