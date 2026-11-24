@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from delta.studio import agent, commands
+from delta.studio import agent, commands, preview
 from delta.studio.jail import MEMORY_FILE, JailError, check_file, check_project_root
 from delta.studio.store import Project, StudioStore
 from delta.studio.tools import Workspace
@@ -38,6 +38,7 @@ class Studio:
         self._runs: dict[str, asyncio.Task[None]] = {}
         # Commands waiting for the user's yes: ask id -> (project id, what is asked, the answer to come)
         self._asks: dict[str, tuple[str, dict[str, Any], asyncio.Future[tuple[bool, bool]]]] = {}
+        self._previews: dict[str, preview.Preview] = {}  # project id -> its running preview
 
     # ---- projects
     def _project(self, pid: str) -> tuple[Project, Path]:
@@ -72,9 +73,10 @@ class Studio:
         self._audit("studio.project_opened", project=p.id, path=str(root))
         return p
 
-    def forget(self, pid: str) -> bool:
+    async def forget(self, pid: str) -> bool:
         if pid in self._runs:
             raise StudioError("Stop the running request first.")
+        await self.stop_preview(pid)
         return self.store.forget(pid)
 
     def summary(self, pid: str) -> dict[str, Any]:
@@ -83,6 +85,7 @@ class Studio:
         ws = Workspace(root, self.store, pid, _NoTurn())  # type: ignore[arg-type]
         return {**p.public(), "running": pid in self._runs, "tree": ws.tree(depth=6),
                 "asks": [ask for owner, ask, fut in self._asks.values() if owner == pid and not fut.done()],
+                "preview": pv.public() if (pv := self._previews.get(pid)) is not None and pv.alive else None,
                 "memory": ws.memory(), "history": self.store.history(pid),
                 "turns": [t.__dict__ for t in self.store.turns(pid)[:10]]}
 
@@ -155,7 +158,9 @@ class Studio:
                        on_change=lambda rel, kind: self._audit("studio.file", project=p.id, path=rel, change=kind))
 
         async def runner(tool: str, args: dict[str, Any]) -> str:
-            return await self._command(p.id, root, args, emit)
+            if tool == "run_command":
+                return await self._command(p.id, root, args, emit)
+            return await self._preview_tool(p.id, root, tool, args, emit)
 
         started = time.monotonic()
         status, answer = "done", ""
@@ -204,26 +209,9 @@ class Studio:
         if why_refused:
             self._audit("studio.command_refused", project=pid, command=command[:300])
             return f"ERROR: {why_refused}"
-        p = self.store.get(pid)
-        if sends or p is None or command not in p.allowed:
-            ask_id = uuid.uuid4().hex[:12]
-            ask = {"id": ask_id, "command": command, "why": str(args.get("why") or "")[:200], "sends": sends}
-            fut: asyncio.Future[tuple[bool, bool]] = asyncio.get_running_loop().create_future()
-            self._asks[ask_id] = (pid, ask, fut)
-            await emit("studio.approve", ask)
-            try:
-                allow, always = await asyncio.wait_for(asyncio.shield(fut), ASK_TIMEOUT_S)
-            except TimeoutError:
-                allow, always = False, False
-            finally:
-                self._asks.pop(ask_id, None)
-            await emit("studio.approved", {"id": ask_id, "allow": allow})
-            self._audit("studio.command_answer", project=pid, command=command[:300], allow=allow, always=always)
-            if not allow:
-                return ("ERROR: the user did not allow this command. Carry on without it, and tell them what to run "
-                        "themselves if it matters.")
-            if always and not sends:
-                self.store.allow(pid, command)
+        if not await self._approved(pid, command, str(args.get("why") or ""), sends, emit):
+            return ("ERROR: the user did not allow this command. Carry on without it, and tell them what to run "
+                    "themselves if it matters.")
         await emit("studio.command", {"command": command})
         outcome = await commands.run(command, root, float(args.get("timeout_s") or commands.DEFAULT_TIMEOUT_S))
         self._audit("studio.command", project=pid, command=command[:300], exit=outcome.exit_code,
@@ -232,6 +220,97 @@ class Studio:
                                            "timed_out": outcome.timed_out, "seconds": round(outcome.seconds, 1),
                                            "tail": outcome.output[-1500:]})
         return outcome.for_model()
+
+    async def _approved(self, pid: str, command: str, why: str, sends: bool, emit: Any, kind: str = "command") -> bool:
+        """The user's yes for a command (asked in the Build page), unless it is always allowed in this project."""
+        p = self.store.get(pid)
+        if not sends and p is not None and command in p.allowed:
+            return True
+        ask_id = uuid.uuid4().hex[:12]
+        ask = {"id": ask_id, "command": command, "why": why[:200], "sends": sends, "kind": kind}
+        fut: asyncio.Future[tuple[bool, bool]] = asyncio.get_running_loop().create_future()
+        self._asks[ask_id] = (pid, ask, fut)
+        await emit("studio.approve", ask)
+        try:
+            allow, always = await asyncio.wait_for(asyncio.shield(fut), ASK_TIMEOUT_S)
+        except TimeoutError:
+            allow, always = False, False
+        finally:
+            self._asks.pop(ask_id, None)
+        await emit("studio.approved", {"id": ask_id, "allow": allow})
+        self._audit("studio.command_answer", project=pid, command=command[:300], allow=allow, always=always,
+                    kind=kind)
+        if allow and always and not sends:
+            self.store.allow(pid, command)
+        return allow
+
+    # ---- live preview (milestone 3)
+    async def _preview_tool(self, pid: str, root: Path, tool: str, args: dict[str, Any], emit: Any) -> str:
+        if tool == "start_preview":
+            command = " ".join(str(args.get("command") or "").split())
+            if command:
+                why_refused, sends = commands.check(command)
+                if why_refused:
+                    return f"ERROR: {why_refused}"
+                why = str(args.get("why") or "start the dev server for the live preview")
+                if not await self._approved(pid, command, why, sends, emit, kind="preview"):
+                    return "ERROR: the user did not allow starting this server. Tell them the command instead."
+            try:
+                started = await self.start_preview(pid, command, emit)
+            except (RuntimeError, OSError, StudioError) as e:
+                return f"ERROR: {e}"
+            return (f"The preview is running at {started.url} and is shown to the user.\n"
+                    + await preview.page_check(started.url))
+        pv = self._previews.get(pid)
+        if tool == "stop_preview":
+            await self.stop_preview(pid, emit)
+            return "stopped" if pv else "there was no preview running"
+        if pv is None or not pv.alive:
+            return "ERROR: no preview is running. Start one with start_preview."
+        if tool == "check_preview":
+            path = str(args.get("path") or "").lstrip("/")
+            return await preview.page_check(pv.url + path)
+        return pv.tail(int(args.get("lines") or 60)) or "(no output yet)"  # preview_logs
+
+    async def start_preview(self, pid: str, command: str = "", emit: Any = None) -> preview.Preview:
+        """Start (or restart) the project's preview. Without a command, Delta serves the folder itself."""
+        _, root = self._project(pid)
+        await self.stop_preview(pid, emit)
+        pv = await preview.start_server(command, root) if command else preview.start_static(root)
+        self._previews[pid] = pv
+        self._audit("studio.preview", project=pid, kind=pv.kind, url=pv.url, command=command[:300])
+        if emit is not None:
+            await emit("studio.preview", pv.public())
+        else:
+            await self._publish(pid, "studio.preview", pv.public())
+        return pv
+
+    async def stop_preview(self, pid: str, emit: Any = None) -> bool:
+        pv = self._previews.pop(pid, None)
+        if pv is None:
+            return False
+        await pv.stop()
+        if emit is not None:
+            await emit("studio.preview", {"alive": False})
+        else:
+            await self._publish(pid, "studio.preview", {"alive": False})
+        return True
+
+    def preview_logs(self, pid: str) -> dict[str, Any]:
+        pv = self._previews.get(pid)
+        return {"preview": pv.public() if pv else None, "logs": pv.tail(200) if pv else ""}
+
+    async def _publish(self, pid: str, event: str, data: dict[str, Any]) -> None:
+        with contextlib.suppress(Exception):
+            await self.c.events.publish(event, project=pid, **data)
+
+    async def close(self) -> None:
+        """At Delta's shutdown: stop every run and preview."""
+        for task in list(self._runs.values()):
+            task.cancel()
+        for pid in list(self._previews):
+            with contextlib.suppress(Exception):
+                await self.stop_preview(pid)
 
     def answer(self, pid: str, ask_id: str, allow: bool, always: bool = False) -> bool:
         """The user's answer to a command waiting in the Build page."""

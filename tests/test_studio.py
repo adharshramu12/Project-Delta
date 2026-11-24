@@ -262,3 +262,107 @@ async def test_stop_ends_a_running_command(tmp_path):
     assert s.stop(p.id)
     await _wait(s, p.id)
     assert not s.running(p.id) and s.store.history(p.id)[-1]["status"] == "cancelled"
+
+
+# ---- milestone 3: live preview --------------------------------------------------------------------------------
+
+def test_the_static_preview_serves_the_project_only_and_never_secrets(tmp_path):
+    import urllib.error
+    import urllib.request
+
+    from delta.studio import preview
+
+    root = (tmp_path / "site").resolve()
+    (root / "css").mkdir(parents=True)
+    (root / "index.html").write_text("<title>Hi</title><h1>Hello</h1>", encoding="utf-8")
+    (root / "css" / "a.css").write_text("h1{color:red}", encoding="utf-8")
+    (root / ".env").write_text("KEY=secret", encoding="utf-8")
+    (tmp_path / "outside.txt").write_text("not yours", encoding="utf-8")
+    pv = preview.start_static(root)
+    try:
+        assert pv.url.startswith("http://127.0.0.1:")
+
+        def get(path):
+            try:
+                with urllib.request.urlopen(pv.url + path, timeout=5) as r:
+                    return r.status, r.read().decode(), r.headers.get("Content-Type", "")
+            except urllib.error.HTTPError as e:
+                return e.code, "", ""
+
+        status, body, kind = get("")
+        assert status == 200 and "<h1>Hello</h1>" in body and kind.startswith("text/html")
+        assert get("css/a.css")[0] == 200
+        for bad in (".env", "%2e%2e/outside.txt", "..%2foutside.txt", "css/../../outside.txt", ".git/config"):
+            assert get(bad)[0] == 404, bad
+        req = urllib.request.Request(pv.url, data=b"x", method="POST")
+        try:
+            urllib.request.urlopen(req, timeout=5)
+            raise AssertionError("POST was accepted")
+        except urllib.error.HTTPError as e:
+            assert e.code == 501
+    finally:
+        asyncio.run(pv.stop())
+
+
+def test_only_an_address_on_this_pc_is_taken_from_a_dev_servers_output():
+    from delta.studio.preview import local_url
+
+    assert local_url("  \x1b[32m➜\x1b[39m  Local:   http://localhost:5173/") == "http://localhost:5173/"
+    assert local_url("Running on http://127.0.0.1:5000 (Press CTRL+C)") == "http://127.0.0.1:5000/"
+    assert local_url("ready - started server on 0.0.0.0:3000, url: http://0.0.0.0:3000") == "http://localhost:3000/"
+    assert local_url("Network: http://192.168.1.5:5173/") == ""
+    assert local_url("see https://evil.example:8080/ for docs") == ""
+    assert local_url("http://localhost:80/") == ""  # a system port is never used
+
+
+async def test_a_dev_server_starts_is_found_and_stops_with_the_preview(tmp_path):
+    from delta.studio import preview
+
+    root = (tmp_path / "app").resolve()
+    root.mkdir()
+    (root / "index.html").write_text("<title>Dev</title>ok", encoding="utf-8")
+    import sys
+
+    port = 18000 + os.getpid() % 1000
+    python = sys.executable.replace("\\", "/")
+    cmd = (f"& '{python}' -u -c \"print('Serving on http://127.0.0.1:{port}/', flush=True); import http.server; "
+           f"http.server.ThreadingHTTPServer(('127.0.0.1', {port}), "
+           f"http.server.SimpleHTTPRequestHandler).serve_forever()\"")
+    if os.name != "nt":
+        cmd = f"'{python}' -u -m http.server {port} --bind 127.0.0.1"
+    pv = await preview.start_server(cmd, root, wait_s=30)
+    try:
+        assert pv.url == f"http://127.0.0.1:{port}/" and pv.alive
+        assert "title: Dev" in await preview.page_check(pv.url)
+        assert "Serving on" in pv.tail()
+    finally:
+        await pv.stop()
+    assert not pv.alive
+    assert not await preview.answers(pv.url, tries=2)
+
+
+async def test_a_dev_server_that_never_shows_an_address_is_stopped_with_its_output(tmp_path):
+    from delta.studio import preview
+
+    root = (tmp_path / "app").resolve()
+    root.mkdir()
+    with pytest.raises(RuntimeError, match="did not start") as e:
+        await preview.start_server("python -c \"print('compile error in App.jsx line 3')\"", root, wait_s=15)
+    assert "compile error in App.jsx" in str(e.value)
+
+
+async def test_the_agent_previews_a_plain_project_and_checks_it(tmp_path):
+    s, p, published = _service(tmp_path, [
+        LLMResponse("", [ToolCall("1", "write_file", {"path": "index.html", "content": "<title>Shop</title>Hi"})]),
+        LLMResponse("", [ToolCall("2", "start_preview", {})]),
+        LLMResponse("Here it is."),
+    ])
+    s.start(p.id, "make a page and show it")
+    await _wait(s, p.id)
+    shown = [d for e, d in published if e == "studio.preview"]
+    assert shown and shown[0]["alive"] and shown[0]["kind"] == "static"
+    checked = [d for e, d in published if e == "studio.tool_done" and d["tool"] == "start_preview"]
+    assert checked and checked[0]["ok"]
+    assert s.summary(p.id)["preview"]["url"] == shown[0]["url"]
+    await s.close()
+    assert s.summary(p.id)["preview"] is None

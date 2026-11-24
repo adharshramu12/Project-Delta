@@ -69,6 +69,7 @@
       h("div", {class: "row st-head"}, btn("All projects", home, "sm"), h("b", {class: "st-name", text: p.name})),
       h("p", {class: "muted small st-path", text: p.path}),
       h("div", {class: "row"},
+        btn("Preview", () => (project.preview ? showPreview(project.preview) : previewSetup()), "sm primary", "play"),
         btn("Project memory", showMemory, "sm"),
         btn("Undo last request", async () => {
           if (!await D.confirm({title: "Undo the last request?", body: "The files it changed go back to how they were before it.", ok: "Undo"})) return;
@@ -96,7 +97,46 @@
   function code(text) { return h("pre", {class: "st-code"}, h("code", {text})); }
   function refreshView() {
     const [kind, arg] = showing;
-    if (kind === "file") showFile(arg); else if (kind === "diff") showDiff(arg); else showMemory();
+    if (kind === "file") showFile(arg); else if (kind === "diff") showDiff(arg);
+    else if (kind === "preview" && project.preview) showPreview(project.preview); else showMemory();
+  }
+  // ---- live preview: the project's page in a sandboxed frame (the dashboard allows frames from this PC only)
+  function previewSetup(error) {
+    showing = ["setup"];
+    const cmd = h("input", {class: "input", placeholder: "npm run dev", "aria-label": "Dev server command"});
+    const start = async command => {
+      viewer.replaceChildren(h("p", {class: "muted", text: command ? `Starting "${command}"… (up to 90 seconds)` : "Starting…"}));
+      const r = await call(`/api/studio/projects/${enc(current)}/preview`, {method: "POST", body: JSON.stringify({command})});
+      if (r.detail) { previewSetup(D.detail(r)); return; }
+      project.preview = r; showPreview(r);
+    };
+    viewer.replaceChildren(h("div", {class: "st-vhead"}, h("b", {text: "Live preview"})),
+      error ? h("pre", {class: "st-code st-err", text: error}) : null,
+      h("p", {class: "small", text: "A plain HTML, CSS and JavaScript project: Delta shows the folder as it is."}),
+      btn("Show the project", () => start(""), "primary", "play"),
+      h("p", {class: "small st-gap", text: "An app with a dev server (React, Vite, Next.js, Flask…): enter the command that starts it. It runs in the project folder until you stop it."}),
+      h("form", {class: "row", onsubmit: e => { e.preventDefault(); if (cmd.value.trim()) start(cmd.value.trim()); }},
+        cmd, h("button", {type: "submit", class: "btn"}, "Start")));
+  }
+  function showPreview(pv) {
+    showing = ["preview"];
+    const frame = h("iframe", {class: "st-frame", src: pv.url, title: "Live preview of the project",
+      sandbox: "allow-scripts allow-forms allow-same-origin allow-modals allow-popups", referrerpolicy: "no-referrer"});
+    const logs = h("pre", {class: "st-code st-logs", hidden: true});
+    viewer.replaceChildren(
+      h("div", {class: "row st-pbar"}, h("span", {class: "pill ok", text: pv.kind === "static" ? "Serving the folder" : "Dev server"}),
+        h("code", {class: "small st-url", text: pv.url}),
+        btn("Reload", () => { frame.src = pv.url + (pv.url.includes("?") ? "&" : "?") + "r=" + Date.now(); }, "sm", "refresh"),
+        h("a", {class: "btn sm", href: pv.url, target: "_blank", rel: "noopener noreferrer"}, icon("external"), "Open in browser"),
+        pv.kind === "server" ? btn("Output", async () => {
+          const r = await call(`/api/studio/projects/${enc(current)}/preview`);
+          logs.textContent = r.logs || "(no output)"; logs.hidden = !logs.hidden;
+        }, "sm") : null,
+        btn("Stop preview", async () => {
+          await call(`/api/studio/projects/${enc(current)}/preview`, {method: "DELETE"});
+          project.preview = null; showMemory();
+        }, "sm danger-outline")),
+      logs, frame);
   }
   function showMemory() {
     showing = ["memory"];
@@ -171,11 +211,18 @@
   }
 
   const LABEL = {list_files: "Looked at the files", read_file: "Read", search: "Searched for", write_file: "Wrote", edit_file: "Edited",
-    delete_file: "Deleted", update_memory: "Updated the project memory", run_command: "Wants to run"};
+    delete_file: "Deleted", update_memory: "Updated the project memory", run_command: "Wants to run",
+    start_preview: "Started the live preview", check_preview: "Checked the preview", preview_logs: "Read the preview's output",
+    stop_preview: "Stopped the preview"};
   D.on("ws", m => {
     if (m.type !== "event" || !String(m.event).startsWith("studio.") || !m.data || m.data.project !== current) return;
     const d = m.data;
     if (m.event === "studio.done") { setRunning(false); open(current, true); return; }
+    if (m.event === "studio.preview") {
+      project.preview = d.alive ? d : null;
+      if (d.alive) showPreview(d); else if (showing[0] === "preview") showMemory();
+      return;
+    }
     if (!steps) { steps = h("div", {class: "st-steps"}); log.append(steps); }
     if (m.event === "studio.tool") {
       const a = d.args || {};

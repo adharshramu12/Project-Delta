@@ -64,6 +64,24 @@ SPECS: list[dict[str, Any]] = [
                                "timeout_s": {"type": "integer", "description": "Seconds, default 180, at most 900"}},
                               ["command"])}},
     {"type": "function", "function": {
+        "name": "start_preview", "description": "Show the project's page live to the user. Without a command, Delta "
+        "serves the folder as it is (plain HTML/CSS/JS: no build step). With a command, it starts the project's dev "
+        "server (e.g. 'npm run dev') after the user approves it, and waits for the address it prints. Returns the "
+        "address and what the page shows.",
+        "parameters": _schema({"command": {"type": "string", "description": "The dev server command; empty for a "
+                                                                          "plain HTML project"},
+                               "why": {"type": "string"}}, [])}},
+    {"type": "function", "function": {
+        "name": "check_preview", "description": "Load a page of the running preview and return its status, title "
+        "and text, to check your change works.",
+        "parameters": _schema({"path": {"type": "string", "description": "e.g. 'about.html'; empty = the home page"}},
+                              [])}},
+    {"type": "function", "function": {
+        "name": "preview_logs", "description": "The latest output of the running dev server (errors appear here).",
+        "parameters": _schema({"lines": {"type": "integer"}}, [])}},
+    {"type": "function", "function": {
+        "name": "stop_preview", "description": "Stop the running preview.", "parameters": _schema({}, [])}},
+    {"type": "function", "function": {
         "name": "update_memory", "description": f"Replace the project memory ({MEMORY_FILE}): what the project "
         "is, its stack and how to run it, decisions made, and the next steps. Keep it short (at most 80 lines).",
         "parameters": _schema({"content": {"type": "string"}}, ["content"])}},
@@ -221,5 +239,6 @@ class Workspace:
                          if k in SPECS_ARGS[name]}))
 
 
-ASYNC_TOOLS = {"run_command"}  # run by the service (it waits for the user's yes), not by the workspace
+# Run by the service, not the workspace: they wait for the user's yes or for a running preview.
+ASYNC_TOOLS = {"run_command", "start_preview", "check_preview", "preview_logs", "stop_preview"}
 SPECS_ARGS = {s["function"]["name"]: set(s["function"]["parameters"]["properties"]) for s in SPECS}

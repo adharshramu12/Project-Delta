@@ -32,9 +32,12 @@ STATIC = Path(__file__).parent / "static"
 ASSET_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}
 ASSETS = {p.name: p for p in STATIC.iterdir() if p.suffix in ASSET_TYPES} if STATIC.is_dir() else {}
 # The dashboard runs only its own files: no inline scripts, nothing from other sites. Blob URLs are the
-# screenshots and document previews it fetched with the token; ws: is its own live connection.
+# screenshots and document previews it fetched with the token; ws: is its own live connection. Frames may also show
+# pages served on this PC (127.0.0.1, localhost): Build's live preview of the user's project, in a sandboxed frame.
+# A frame on another port is another origin: it can never read the dashboard, its token or its storage.
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self'; "
-       "frame-src blob:; object-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+       "frame-src blob: http://127.0.0.1:* http://localhost:*; object-src 'self' blob:; base-uri 'none'; "
+       "form-action 'self'; frame-ancestors 'none'")
 
 
 SEND_TIMEOUT_S = 2.0  # one stalled dashboard (asleep laptop, full network buffer) must never hold up the rest

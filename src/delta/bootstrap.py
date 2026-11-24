@@ -667,4 +667,5 @@ def build(settings: Settings) -> Container:
         folder = settings.studio.projects_folder
         home = Path(folder) if folder else Path(known_folder("Documents")) / "Delta Projects"
         container.studio = Studio(container, data, REPO_ROOT, home)
+        container.closers.append(("studio", container.studio.close))  # runs and live previews stop with Delta
     return container
