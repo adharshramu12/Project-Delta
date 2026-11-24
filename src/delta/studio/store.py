@@ -29,6 +29,7 @@ class Project:
     created: float
     opened: float
     last_run: float = 0.0
+    allowed: list[str] = field(default_factory=list)  # commands the user said "always allow" for, exactly
 
     def public(self) -> dict[str, Any]:
         return asdict(self)
@@ -60,7 +61,8 @@ class StudioStore:
         for item in raw if isinstance(raw, list) else []:
             try:
                 p = Project(**{k: item[k] for k in ("id", "name", "path", "created", "opened")},
-                            last_run=float(item.get("last_run", 0)))
+                            last_run=float(item.get("last_run", 0)),
+                            allowed=[str(c) for c in item.get("allowed", []) if isinstance(c, str)][:50])
             except (KeyError, TypeError, ValueError):
                 continue
             out[p.id] = p
@@ -103,6 +105,16 @@ class StudioStore:
                 p.last_run = time.time()
             else:
                 p.opened = time.time()
+            self._save(projects)
+
+    def allow(self, pid: str, command: str, on: bool = True) -> None:
+        """Remember (or forget) that this exact command may run in this project without asking."""
+        with self._lock:
+            projects = self._load()
+            if (p := projects.get(pid)) is None:
+                return
+            p.allowed = [c for c in p.allowed if c != command] + ([command] if on else [])
+            p.allowed = p.allowed[-50:]
             self._save(projects)
 
     def forget(self, pid: str) -> bool:

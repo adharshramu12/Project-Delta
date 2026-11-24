@@ -10,15 +10,17 @@ import asyncio
 import contextlib
 import difflib
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
-from delta.studio import agent
+from delta.studio import agent, commands
 from delta.studio.jail import MEMORY_FILE, JailError, check_file, check_project_root
 from delta.studio.store import Project, StudioStore
 from delta.studio.tools import Workspace
 from delta.system.logging import log
 
+ASK_TIMEOUT_S = 600  # a command nobody answers in 10 minutes is taken as "no"
 DIFF_CHARS = 60_000
 VIEW_CHARS = 200_000
 
@@ -34,6 +36,8 @@ class Studio:
         self.projects_home = projects_home  # where "New project" folders are made (Documents/Delta Projects)
         self.store = StudioStore(data_dir / "studio")
         self._runs: dict[str, asyncio.Task[None]] = {}
+        # Commands waiting for the user's yes: ask id -> (project id, what is asked, the answer to come)
+        self._asks: dict[str, tuple[str, dict[str, Any], asyncio.Future[tuple[bool, bool]]]] = {}
 
     # ---- projects
     def _project(self, pid: str) -> tuple[Project, Path]:
@@ -78,6 +82,7 @@ class Studio:
         self.store.touch(pid)
         ws = Workspace(root, self.store, pid, _NoTurn())  # type: ignore[arg-type]
         return {**p.public(), "running": pid in self._runs, "tree": ws.tree(depth=6),
+                "asks": [ask for owner, ask, fut in self._asks.values() if owner == pid and not fut.done()],
                 "memory": ws.memory(), "history": self.store.history(pid),
                 "turns": [t.__dict__ for t in self.store.turns(pid)[:10]]}
 
@@ -148,13 +153,18 @@ class Studio:
 
         ws = Workspace(root, self.store, p.id, turn,
                        on_change=lambda rel, kind: self._audit("studio.file", project=p.id, path=rel, change=kind))
+
+        async def runner(tool: str, args: dict[str, Any]) -> str:
+            return await self._command(p.id, root, args, emit)
+
         started = time.monotonic()
         status, answer = "done", ""
         try:
-            res = await agent.run(self.c.router, ws, p.name, request, history, emit)
+            res = await agent.run(self.c.router, ws, p.name, request, history, emit, runner=runner)
             answer = res.answer
             status = "done" if not res.stopped else "stopped"
         except asyncio.CancelledError:
+            self._drop_asks(p.id)
             status, answer = "cancelled", "Stopped. " + ("The files changed so far can be undone." if ws.changed
                                                          else "Nothing was changed.")
         except Exception as e:
@@ -185,6 +195,62 @@ class Studio:
             ws.write_file(MEMORY_FILE, "\n".join(head + log_lines) + "\n")
         except Exception:
             log.exception("studio.memory_log_failed")
+
+    # ---- commands (milestone 2)
+    async def _command(self, pid: str, root: Path, args: dict[str, Any], emit: Any) -> str:
+        """Run one command for the agent: refused, asked, or allowed; then run in the project folder."""
+        command = " ".join(str(args.get("command") or "").split())
+        why_refused, sends = commands.check(command)
+        if why_refused:
+            self._audit("studio.command_refused", project=pid, command=command[:300])
+            return f"ERROR: {why_refused}"
+        p = self.store.get(pid)
+        if sends or p is None or command not in p.allowed:
+            ask_id = uuid.uuid4().hex[:12]
+            ask = {"id": ask_id, "command": command, "why": str(args.get("why") or "")[:200], "sends": sends}
+            fut: asyncio.Future[tuple[bool, bool]] = asyncio.get_running_loop().create_future()
+            self._asks[ask_id] = (pid, ask, fut)
+            await emit("studio.approve", ask)
+            try:
+                allow, always = await asyncio.wait_for(asyncio.shield(fut), ASK_TIMEOUT_S)
+            except TimeoutError:
+                allow, always = False, False
+            finally:
+                self._asks.pop(ask_id, None)
+            await emit("studio.approved", {"id": ask_id, "allow": allow})
+            self._audit("studio.command_answer", project=pid, command=command[:300], allow=allow, always=always)
+            if not allow:
+                return ("ERROR: the user did not allow this command. Carry on without it, and tell them what to run "
+                        "themselves if it matters.")
+            if always and not sends:
+                self.store.allow(pid, command)
+        await emit("studio.command", {"command": command})
+        outcome = await commands.run(command, root, float(args.get("timeout_s") or commands.DEFAULT_TIMEOUT_S))
+        self._audit("studio.command", project=pid, command=command[:300], exit=outcome.exit_code,
+                    timed_out=outcome.timed_out, seconds=round(outcome.seconds, 1))
+        await emit("studio.command_done", {"command": command, "exit": outcome.exit_code,
+                                           "timed_out": outcome.timed_out, "seconds": round(outcome.seconds, 1),
+                                           "tail": outcome.output[-1500:]})
+        return outcome.for_model()
+
+    def answer(self, pid: str, ask_id: str, allow: bool, always: bool = False) -> bool:
+        """The user's answer to a command waiting in the Build page."""
+        found = self._asks.get(ask_id)
+        if found is None or found[0] != pid or found[2].done():
+            raise StudioError("That question is no longer waiting (it was answered, timed out or stopped).")
+        found[2].set_result((bool(allow), bool(always)))
+        return True
+
+    def disallow(self, pid: str, command: str) -> None:
+        self._project(pid)
+        self.store.allow(pid, command, on=False)
+
+    def _drop_asks(self, pid: str) -> None:
+        for ask_id, (owner, _ask, fut) in list(self._asks.items()):
+            if owner == pid:
+                if not fut.done():
+                    fut.cancel()
+                self._asks.pop(ask_id, None)
 
     def undo(self, pid: str) -> dict[str, Any]:
         if pid in self._runs:

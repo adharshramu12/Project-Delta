@@ -56,6 +56,14 @@ SPECS: list[dict[str, Any]] = [
         "name": "delete_file", "description": "Delete one file of the project (it can be undone).",
         "parameters": _schema({"path": {"type": "string"}}, ["path"])}},
     {"type": "function", "function": {
+        "name": "run_command", "description": "Run a command in the project folder (tests, a build, a linter, "
+        "installing packages): PowerShell on Windows. The user approves it first. It must finish by itself: never a "
+        "dev server or a watcher. Returns the exit code and the end of the output.",
+        "parameters": _schema({"command": {"type": "string"},
+                               "why": {"type": "string", "description": "One short line for the user: why run it"},
+                               "timeout_s": {"type": "integer", "description": "Seconds, default 180, at most 900"}},
+                              ["command"])}},
+    {"type": "function", "function": {
         "name": "update_memory", "description": f"Replace the project memory ({MEMORY_FILE}): what the project "
         "is, its stack and how to run it, decisions made, and the next steps. Keep it short (at most 80 lines).",
         "parameters": _schema({"content": {"type": "string"}}, ["content"])}},
@@ -206,11 +214,12 @@ class Workspace:
             return ""
 
     def call(self, name: str, args: dict[str, Any]) -> str:
-        fn = {s["function"]["name"]: getattr(self, s["function"]["name"]) for s in SPECS}.get(name)
+        fn = {n: getattr(self, n) for n in SPECS_ARGS if n not in ASYNC_TOOLS}.get(name)
         if fn is None:
             raise JailError(f"There is no tool called {name}.")
         return str(fn(**{k: v for k, v in (args or {}).items()
                          if k in SPECS_ARGS[name]}))
 
 
+ASYNC_TOOLS = {"run_command"}  # run by the service (it waits for the user's yes), not by the workspace
 SPECS_ARGS = {s["function"]["name"]: set(s["function"]["parameters"]["properties"]) for s in SPECS}

@@ -19,7 +19,7 @@
   const send = h("button", {type: "submit", class: "btn primary"}, icon("send"), "Send");
   const stopBtn = h("button", {type: "button", class: "btn", hidden: true}, icon("stop"), "Stop");
   const form = h("form", {class: "st-ask"}, input, h("div", {class: "row"}, send, stopBtn,
-    h("span", {class: "muted small", text: "Delta changes files only inside this project. Every request can be undone."})));
+    h("span", {class: "muted small", text: "Delta works only inside this project, asks before running any command, and every file change can be undone."})));
   const chat = h("section", {class: "st-chat", "aria-label": "Chat with Delta Build"}, log, form);
   box.append(h("div", {class: "st-grid"}, side, viewer, chat));
 
@@ -81,6 +81,11 @@
           const r = await call(`/api/studio/projects/${enc(current)}`, {method: "DELETE"});
           if (r.detail) D.toast({title: "Not removed", body: D.detail(r), kind: "danger"}); else home();
         }, "sm danger-outline")),
+      h("div", null, !(p.allowed && p.allowed.length) ? null : h("details", {class: "st-allowed"}, h("summary", {class: "small", text: `Always-allowed commands (${p.allowed.length})`}),
+        ...p.allowed.map(cmd => h("div", {class: "row"}, h("code", {class: "small", text: cmd}), btn("Ask again", async () => {
+          await call(`/api/studio/projects/${enc(current)}/disallow`, {method: "POST", body: JSON.stringify({command: cmd})});
+          open(current, true);
+        }, "sm"))))),
       h("h3", {class: "list-title", text: `Files (${files.length}${p.tree.length >= 400 ? "+" : ""})`}),
       h("div", {class: "st-tree", role: "list"}, ...(files.length ? files.map(f => h("button", {type: "button", role: "listitem", class: "st-file",
         title: f, onclick: () => showFile(f)}, h("span", {class: "st-dir", text: f.includes("/") ? f.slice(0, f.lastIndexOf("/") + 1) : ""}),
@@ -128,7 +133,7 @@
   function renderHistory() {
     log.replaceChildren(...(project.history.length ? project.history.map(bubble)
       : [h("p", {class: "muted small st-hint", text: "Try: \"Make a simple to-do web app in plain HTML, CSS and JavaScript\" or \"Explain this project and suggest the next three improvements\"."})]));
-    if (running) log.append(steps = h("div", {class: "st-steps"}, h("span", {class: "muted small", text: "Working…"})));
+    if (running) log.append(steps = h("div", {class: "st-steps"}, h("span", {class: "muted small", text: "Working…"}), ...(project.asks || []).map(askCard)));
     log.scrollTop = log.scrollHeight;
   }
   function setRunning(on) {
@@ -148,8 +153,25 @@
   input.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); } });
   stopBtn.onclick = () => call(`/api/studio/projects/${enc(current)}/stop`, {method: "POST"});
 
+  // A command waiting for the user's yes. "Always" is offered only for commands that do not send anything off the PC.
+  function askCard(a) {
+    const answer = async (allow, always) => {
+      card.querySelectorAll("button").forEach(b => { b.disabled = true; });
+      const r = await call(`/api/studio/projects/${enc(current)}/answer`, {method: "POST", body: JSON.stringify({id: a.id, allow, always})});
+      if (r.detail) D.toast({title: "Not answered", body: D.detail(r), kind: "warn"});
+    };
+    const card = h("div", {class: "st-ask-card" + (a.sends ? " sends" : ""), dataset: {ask: a.id}, role: "group", "aria-label": "Command waiting for your OK"},
+      h("b", {text: a.sends ? "Run this? It sends something off your PC" : "Run this command in the project?"}),
+      h("pre", {class: "st-code", text: a.command}),
+      a.why ? h("span", {class: "muted small", text: a.why}) : null,
+      h("div", {class: "row"}, btn("Run it", () => answer(true, false), "sm primary"),
+        a.sends ? null : btn("Always allow this command here", () => answer(true, true), "sm"),
+        btn("Don't run", () => answer(false, false), "sm danger-outline")));
+    return card;
+  }
+
   const LABEL = {list_files: "Looked at the files", read_file: "Read", search: "Searched for", write_file: "Wrote", edit_file: "Edited",
-    delete_file: "Deleted", update_memory: "Updated the project memory"};
+    delete_file: "Deleted", update_memory: "Updated the project memory", run_command: "Wants to run"};
   D.on("ws", m => {
     if (m.type !== "event" || !String(m.event).startsWith("studio.") || !m.data || m.data.project !== current) return;
     const d = m.data;
@@ -160,6 +182,20 @@
       steps.append(h("div", {class: "st-step"}, icon("circle"), h("span", {text: `${LABEL[d.tool] || d.tool} ${a.path || a.query || a.folder || ""}`.trim()})));
     } else if (m.event === "studio.tool_done" && !d.ok) {
       steps.append(h("div", {class: "st-step bad"}, icon("alert"), h("span", {class: "small", text: d.summary})));
+    } else if (m.event === "studio.approve") {
+      steps.append(askCard(d));
+    } else if (m.event === "studio.approved") {
+      const card = log.querySelector(`[data-ask="${CSS.escape(d.id)}"]`);
+      if (card) card.replaceChildren(h("span", {class: "muted small", text: d.allow ? "Allowed." : "Not allowed: Delta carries on without it."}));
+    } else if (m.event === "studio.command") {
+      steps.append(h("div", {class: "st-step"}, icon("play"), h("code", {text: d.command})));
+    } else if (m.event === "studio.command_done") {
+      const ok = d.exit === 0 && !d.timed_out;
+      const out = h("details", {class: "st-out"}, h("summary", {class: ok ? "" : "bad",
+        text: d.timed_out ? `Timed out after ${d.seconds}s and was stopped` : `${ok ? "Passed" : "Failed"} (exit ${d.exit}, ${d.seconds}s)`}),
+        h("pre", {class: "st-code", text: d.tail || "(no output)"}));
+      if (!ok) out.open = true;
+      steps.append(out);
     } else if (m.event === "studio.note") {
       steps.append(h("div", {class: "st-note", text: d.text}));
     }

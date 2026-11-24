@@ -7,6 +7,21 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Build runs commands, tests and builds, and fixes what fails** (milestone 2). Delta can now run a command in the
+  project folder: tests, a build, a type check, installing packages. After changing code it runs the project's
+  checks; if they fail it reads the error, fixes the cause and runs them again, at most 3 rounds, and it never
+  weakens or deletes a test to make it pass. Live: on a small project with two planted bugs, Delta fixed both, asked
+  to run `python -m unittest`, and all 3 tests passed.
+  - **Nothing runs without your OK.** Each command shows in the chat with Run it, Always allow this command here,
+    and Don't run. "Always allow" is remembered per project for that exact command, and can be removed. A command
+    that sends something off your PC (`git push`, `npm publish`, deploys, uploads) is marked as such and is never
+    always-allowed. A question nobody answers in 10 minutes counts as no.
+  - **Never run, even if allowed:** formatting disks, shutting down, the registry, user accounts, the firewall,
+    scheduled tasks, killing other programs, downloading and running a script in one go, and deleting anything
+    outside the project (a drive, the root, the home folder or `..`).
+  - Commands run in the project folder with a time limit (3 minutes by default, 15 at most), without Delta's own
+    keys in their environment. Stop, or the time limit, ends the command and everything it started. Commands that
+    keep running (dev servers, watchers) come with milestone 3.
 - **Build: a coding agent for your own projects** (milestone 1). A new Build page next to Chat. Create a project or
   open a folder you already have, then tell Delta what to build or change: it reads the code, plans, and edits or
   creates the files, using your own AI keys and apps (Claude Code, Codex, Gemini, Groq and the rest, with your

@@ -16,7 +16,7 @@ from typing import Any
 
 from delta.core.orchestrator import compact_history
 from delta.studio.jail import MEMORY_FILE, JailError
-from delta.studio.tools import SPECS, Workspace
+from delta.studio.tools import ASYNC_TOOLS, SPECS, Workspace
 from delta.system.logging import log
 
 MAX_STEPS = 30            # model calls per run
@@ -24,8 +24,9 @@ CONTEXT_CHARS = 60_000    # the request is kept under this (about 15k tokens)
 HISTORY_TURNS = 8         # earlier chat lines carried into a run
 
 SYSTEM = """You are Delta Build, a senior software engineer working in the user's project "{name}".
-You can only see and change files inside this project folder, with the tools given. You cannot run commands,
-install packages or open a browser in this version: when something must be run, tell the user the exact command.
+You can only see and change files inside this project folder, with the tools given. run_command runs a command in
+the project folder after the user approves it. You cannot open a browser or start a server that keeps running
+(a dev server, a watcher): tell the user the exact command for those.
 
 How you work:
 - Understand first: read the files that matter (list_files, search, read_file) before changing anything.
@@ -36,6 +37,10 @@ How you work:
 - Never write secrets (API keys, passwords) into files; use environment variables and say which ones are needed.
 - Keep the project memory ({memory}) current when you learn or decide something lasting: what the project is,
   its stack, how to run it, decisions, and the next steps. Use update_memory.
+- Check your work: when the project has tests, a build or a type check, run it with run_command after your
+  changes. If it fails, read the error, fix the cause and run it again: at most 3 rounds, then stop and say what is
+  still failing and why. Never weaken or delete a test to make it pass. If the user declines a command, carry on
+  without it and say what they should run themselves.
 - When you are done, answer in plain words: what you changed (file by file, one line each), how to run or check
   it, and the next steps. No preamble.
 
@@ -57,6 +62,7 @@ class RunResult:
 
 
 Emit = Callable[[str, dict[str, Any]], Awaitable[None]]
+Runner = Callable[[str, dict[str, Any]], Awaitable[str]]  # an async tool (run_command) -> its text for the model
 
 
 def first_prompt(ws: Workspace, name: str) -> str:
@@ -67,7 +73,7 @@ def first_prompt(ws: Workspace, name: str) -> str:
 
 
 async def run(router: Any, ws: Workspace, name: str, request: str, history: list[dict[str, Any]],
-              emit: Emit, max_steps: int = MAX_STEPS) -> RunResult:
+              emit: Emit, max_steps: int = MAX_STEPS, runner: Runner | None = None) -> RunResult:
     messages: list[dict[str, Any]] = [{"role": "system", "content": first_prompt(ws, name)}]
     for h in history[-HISTORY_TURNS:]:
         if h.get("role") in ("user", "assistant") and h.get("text"):
@@ -94,7 +100,13 @@ async def run(router: Any, ws: Workspace, name: str, request: str, history: list
             started = time.monotonic()
             await emit("studio.tool", {"tool": call.name, "args": _shown(call.arguments)})
             try:
-                output, ok = ws.call(call.name, call.arguments), True
+                if call.name in ASYNC_TOOLS:
+                    if runner is None:
+                        raise JailError(f"{call.name} is not available here.")
+                    output = await runner(call.name, call.arguments or {})
+                    ok = not output.startswith("ERROR")
+                else:
+                    output, ok = ws.call(call.name, call.arguments), True
             except (JailError, UnicodeDecodeError, OSError, TypeError, ValueError) as e:
                 output, ok = f"ERROR: {e}", False
             except Exception as e:  # a tool bug must end in a message to the model, never a broken run
