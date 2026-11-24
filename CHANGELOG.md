@@ -7,6 +7,23 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Build can use Claude Code to write the code** (milestone 4). Each project has an Engine choice: Delta (your AI
+  keys) or Claude Code (your Claude plan), shown when Claude Code is installed. Claude Code then works in the
+  project folder with file tools only: no terminal, no web, none of your own Claude Code settings or add-ons.
+  - **Kept in the project by Delta's guard.** Before each file action Claude Code runs Delta's check
+    (`delta.studio.hook`), which refuses anything outside the project folder, secret files, `.git` and every
+    non-file tool, and saves the file before it is changed. So Undo, See changes and the project memory work exactly
+    as with Delta's own engine. Your Anthropic API key is never passed to it; it uses your Claude plan's sign-in.
+  - Commands and live previews stay with Delta's engine, which asks first: Claude Code says the command to run.
+- **When a free key runs out, Build carries on with the next AI.** Build uses the same backup AIs as Delta's chat
+  (Apps > AI models): when one key is out of credit or at its daily limit, the next one answers the same request. When
+  every AI is out, Build says so plainly, naming each AI and why it stopped, keeps the files changed so far (they can
+  be undone), and lists what to do: wait for the limit to reset, add a backup AI or another free key, or switch the
+  project to Claude Code.
+
+### Fixed
+- Build's Undo could pick the wrong request when two requests started within the same second; request ids now sort
+  in the order they were made.
 - **Build shows your project live** (milestone 3). A Preview button, and Delta itself, can show the project's page
   inside the Build page: a plain HTML, CSS and JavaScript project is shown as it is (Delta serves the folder), and an
   app with a dev server (`npm run dev`, Vite, Next.js, Flask…) is started in the project folder with your OK and

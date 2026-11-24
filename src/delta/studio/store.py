@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+ENGINES = ("delta", "claude_code")
 MAX_TURNS = 30          # turns that can still be undone, per project
 MAX_HISTORY = 200       # chat lines kept per project
 
@@ -30,6 +31,7 @@ class Project:
     opened: float
     last_run: float = 0.0
     allowed: list[str] = field(default_factory=list)  # commands the user said "always allow" for, exactly
+    engine: str = "delta"  # who writes the code: "delta" (Delta's own agent) or "claude_code" (milestone 4)
 
     def public(self) -> dict[str, Any]:
         return asdict(self)
@@ -62,7 +64,8 @@ class StudioStore:
             try:
                 p = Project(**{k: item[k] for k in ("id", "name", "path", "created", "opened")},
                             last_run=float(item.get("last_run", 0)),
-                            allowed=[str(c) for c in item.get("allowed", []) if isinstance(c, str)][:50])
+                            allowed=[str(c) for c in item.get("allowed", []) if isinstance(c, str)][:50],
+                            engine=item.get("engine") if item.get("engine") in ENGINES else "delta")
             except (KeyError, TypeError, ValueError):
                 continue
             out[p.id] = p
@@ -117,6 +120,21 @@ class StudioStore:
             p.allowed = p.allowed[-50:]
             self._save(projects)
 
+    def set_engine(self, pid: str, engine: str) -> None:
+        if engine not in ENGINES:
+            raise ValueError("unknown engine")
+        with self._lock:
+            projects = self._load()
+            if (p := projects.get(pid)) is not None:
+                p.engine = engine
+                self._save(projects)
+
+    def changed_in(self, pid: str, turn_id: str) -> dict[str, str]:
+        """What a turn changed, from its backups: created (did not exist before) or changed / deleted."""
+        turn, existed = self._manifest(pid, turn_id)
+        root_files = {rel: ("changed" if was else "created") for rel, was in existed.items()}
+        return {rel: root_files[rel] for rel in turn.changed}
+
     def forget(self, pid: str) -> bool:
         """Remove the project from the list and delete Delta's own records of it. The project's files stay."""
         with self._lock:
@@ -169,7 +187,10 @@ class StudioStore:
         return self._dir(pid) / "turns"
 
     def new_turn(self, pid: str, request: str) -> Turn:
-        turn = Turn(time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6], request[:300], time.time())
+        # Sortable by time to the nanosecond: Undo takes the newest turn, so two requests in one second must still sort
+        # in the order they were made (a random suffix alone could put them the wrong way round).
+        stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{time.time_ns() % 10**9:09d}"
+        turn = Turn(stamp + "-" + uuid.uuid4().hex[:4], request[:300], time.time())
         folder = self._turns_dir(pid) / turn.id
         (folder / "files").mkdir(parents=True, exist_ok=True)
         self._write_turn(pid, turn, {})

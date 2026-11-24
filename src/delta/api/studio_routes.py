@@ -11,6 +11,7 @@ Telegram or Slack. Live progress arrives on the dashboard's one WebSocket as stu
   POST   /api/studio/projects/{id}/disallow  {"command"} stop always-allowing a command
   POST   /api/studio/projects/{id}/preview   {"command"?} start the live preview (none = serve the folder)
   DELETE /api/studio/projects/{id}/preview   stop it        GET .../preview   its address and latest output
+  POST   /api/studio/projects/{id}/engine    {"engine": "delta" | "claude_code"} who writes the code
   POST   /api/studio/projects/{id}/stop
   POST   /api/studio/projects/{id}/undo      put back the files of the latest request
   GET    /api/studio/projects/{id}/diff      ?turn=  what a request changed
@@ -46,6 +47,10 @@ class CommandIn(BaseModel):
 
 class PreviewIn(BaseModel):
     command: str = Field(default="", max_length=2000)
+
+
+class EngineIn(BaseModel):
+    engine: str = Field(max_length=20)
 
 
 class RunIn(BaseModel):
@@ -126,6 +131,10 @@ def register(app: FastAPI, c: Any, auth: Callable[..., None]) -> None:
     async def disallow(pid: str, body: CommandIn) -> dict[str, bool]:
         safe(lambda: studio().disallow(pid, body.command))
         return {"ok": True}
+
+    @app.post("/api/studio/projects/{pid}/engine", dependencies=[Depends(auth)])
+    async def engine(pid: str, body: EngineIn) -> dict[str, Any]:
+        return safe(lambda: studio().set_engine(pid, body.engine))
 
     @app.post("/api/studio/projects/{pid}/stop", dependencies=[Depends(auth)])
     async def stop(pid: str) -> dict[str, bool]:
