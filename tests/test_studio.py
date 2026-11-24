@@ -508,3 +508,19 @@ async def test_when_every_ai_is_out_the_user_is_told_plainly_what_to_do(tmp_path
     assert text.startswith("All your AIs are out of credit or at their limit")
     assert "- groq: out of credit" in text and "- gemini: out of credit" in text
     assert "backup AIs" in text and "Settings > Keys" in text and "task 'chat'" not in text
+
+
+async def test_a_blocked_action_is_shown_as_delta_s_reason_not_the_hook_command():
+    from delta.studio.agent import RunResult
+    from delta.studio.claude_engine import _handle
+
+    seen = []
+
+    async def emit(name, data):
+        seen.append(data)
+
+    event = {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "is_error": True,
+             "content": 'PreToolUse:Read hook error: ["C:/py.exe" -m delta.studio.hook --root "C:/p"]: '
+                        "../x.txt is outside the project."}]}}
+    await _handle(event, RunResult(""), {"t1": "Read"}, emit)
+    assert seen[0]["summary"] == "Blocked by Delta: ../x.txt is outside the project."

@@ -130,6 +130,8 @@ async def _handle(event: dict[str, Any], result: RunResult, names: dict[str, str
             if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("is_error"):
                 text = block.get("content")
                 text = text if isinstance(text, str) else json.dumps(text)[:300]
+                if "hook error:" in text and "]: " in text:  # "PreToolUse:Read hook error: [<command>]: <reason>"
+                    text = "Blocked by Delta: " + text.rsplit("]: ", 1)[1]
                 await emit("studio.tool_done", {"tool": names.get(str(block.get("tool_use_id")), ""), "ok": False,
                                                 "summary": text.strip()[:200], "ms": 0})
     elif kind == "result":
