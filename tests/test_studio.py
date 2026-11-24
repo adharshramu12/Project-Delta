@@ -77,7 +77,9 @@ def test_system_home_and_delta_folders_cannot_be_projects(tmp_path, monkeypatch)
     with pytest.raises(JailError, match="not a folder"):
         check_project_root(tmp_path / "missing", data, app, allowed)
     assert check_project_root(tmp_path / "ok", data, app, allowed) == (tmp_path / "ok").resolve()
-    assert check_project_root(Path.home() / "Documents", data, app) == (Path.home() / "Documents").resolve()         or not (Path.home() / "Documents").is_dir()
+    docs = Path.home() / "Documents"
+    if docs.is_dir():  # by default a folder in the user's own folder is allowed
+        assert check_project_root(docs, data, app) == docs.resolve()
 
 
 def test_edits_are_exact_and_every_change_can_be_undone(proj):
