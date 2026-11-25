@@ -24,6 +24,13 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   line.
 
 ### Fixed
+- **Gemini refused tasks that use tools.** Gemini answers HTTP 400 to a tool with no inputs sent with an empty input
+  list. Ten of Delta's chat tools are like that (list_windows, media_status, take_screenshot…), and Build's Stop
+  preview too, so a Gemini key worked for plain questions but every task with tools went to another AI (or failed with
+  only Gemini). Such tools are now sent without the empty list, which every provider accepts. Found by a live Build
+  test with free keys only, where Groq hit its per-minute limit, Gemini refused, and the next backup answered.
+- **A provider's reason is kept in the log.** Google wraps its errors so that only "Error code: 400" was logged; the
+  provider's own words are now kept, so a refusal can be understood.
 - **Tool calls that contain code were lost.** When an AI app (Claude Code, Codex) wrote a tool call with code in it,
   next to some text, Delta's reader counted the braces inside the code and missed the whole call. Build then said
   "done" without changing anything; Delta's chat agent was affected the same way. The reader now uses the JSON

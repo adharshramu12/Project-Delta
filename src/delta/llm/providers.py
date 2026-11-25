@@ -57,6 +57,20 @@ When you are finished and need no more tools, reply with ONLY:
 {{"final": "<your answer to the user>"}}"""
 
 
+def _said(e: Any) -> str:
+    """What the provider said, in its own words. Google wraps its error in a list, which leaves the message as only
+    "Error code: 400"; the reason (a bad tool schema, a model name) is in the body."""
+    message = str(getattr(e, "message", "") or "")
+    body = getattr(e, "body", None)
+    if isinstance(body, list) and body:
+        body = body[0]
+    if isinstance(body, dict):
+        inner = body.get("error", body)
+        if isinstance(inner, dict) and inner.get("message"):
+            return f"{message}: {str(inner['message'])[:300]}" if message else str(inner["message"])[:300]
+    return message[:300]
+
+
 def extract_json(text: str) -> Any:
     """Parse the first JSON object in `text` (models like to wrap JSON in prose or fences)."""
     text = text.strip()
@@ -104,12 +118,21 @@ def lean_schema(schema: Any, top: bool = True) -> Any:
 
 
 def wire_tools(tools: list[dict] | None) -> list[dict] | None:
-    """Tool specs as sent to an API with native tool calling: same tools, lean schemas (see lean_schema)."""
+    """Tool specs as sent to an API with native tool calling: same tools, lean schemas (see lean_schema). A tool with
+    no arguments is sent without parameters, and an empty "required" list is left out: Gemini answers 400 to an object
+    schema with no properties, and every other provider accepts a tool without parameters."""
     if not tools:
         return tools
-    return [{**t, "function": {**t["function"], "parameters": lean_schema(t["function"].get("parameters") or
-                                                                           {"type": "object", "properties": {}})}}
-            for t in tools]
+    out = []
+    for t in tools:
+        fn = {k: v for k, v in t["function"].items() if k != "parameters"}
+        params = lean_schema(t["function"].get("parameters") or {"type": "object", "properties": {}})
+        if isinstance(params, dict) and params.get("required") == []:
+            params = {k: v for k, v in params.items() if k != "required"}
+        if not (isinstance(params, dict) and params.get("type") == "object" and not params.get("properties")):
+            fn["parameters"] = params
+        out.append({**t, "function": fn})
+    return out
 
 
 def _type_text(schema: Any) -> str:
@@ -481,7 +504,7 @@ class OpenAICompatProvider:
                     or "parse tool" in text:
                 # The model wrote a malformed tool call; asking again usually works.
                 raise LLMError(f"{self.name}: malformed tool call", kind="bad_tool_call") from e
-            raise LLMError(f"{self.name}: HTTP {e.status_code}: {e.message}") from e
+            raise LLMError(f"{self.name}: HTTP {e.status_code}: {_said(e)}") from e
 
         choice = resp.choices[0].message
         content = choice.content or ""
