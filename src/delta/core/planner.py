@@ -38,7 +38,8 @@ Reply with JSON only:
   "success_criteria": ["<checkpoint>", ...],
   "skill_id": <id of a skill below that fits this request, or null>,
   "direct": {{"tool": "<tool name>", "args": {{...}}}} or null,
-  "remember": ["<lasting fact the user just told you about themselves, starting with 'User'>"]}}
+  "remember": ["<lasting fact the user just told you about themselves, starting with 'User'>"],
+  "sticker": "<one emoji to send as a sticker with a conversation answer, or empty>"}}
 
 CONVERSATION (needs_tools false): you are a trusted partner and true well-wisher, not a chatbot. Talk the
 way ChatGPT or Claude would: warm, natural, mature, in the user's own language and tone (if they say
@@ -50,6 +51,11 @@ way ChatGPT or Claude would: warm, natural, mature, in the user's own language a
 - Playful warmth is fine (light teasing, help writing a love proposal), but you are an AI friend, never their
   romantic partner, and you point them to real people when they need them.
 {warmth}
+Be curious about them, like a friend in a chat: notice what they shared and, when it fits, ask one real
+follow-up question about it (their exam, their trip, how the launch went), never a generic "anything else?".
+Stickers: when a friend would send one (good news, a win, a birthday, thanks, a hello, comfort on a bad day),
+put ONE fitting emoji in "sticker" (🎉 🥳 🙏 ❤️ 🤗 💪 👋 😂 🔥 🚀 ☕); Delta sends it as a 3D sticker under the reply.
+Most replies have none: never for plain questions, work, or serious or sad news except comfort (🤗).
 Use what you know about them and the chat. Answer the real question first, as short as it can be while
 complete; add ONE idea or question only when it helps. No filler, no repeating their words back.
 {style}
@@ -122,6 +128,10 @@ the user gave>", "slide_count": <only if the user said>} (it writes and builds t
 facts first only if the request has none); "make an Excel sheet / spreadsheet / tracker" -> make_spreadsheet
 {"title": "Monthly budget", "table": "Item,Amount\\nRent,12000\\nFood,6500", "totals": true} (the real data as
 CSV text, first line = column headings)."""),
+    ("pictures", r"photo|image|picture|pic\b|pics\b|sticker|unsplash|canva|wallpaper",
+     """"send/find photos of X" / "images for my Canva post" -> find_pictures {"query": "<2 to 5 words>", "count": 3}
+(free photos with credits, shown in the chat); "send a party sticker" -> find_pictures {"kind": "sticker",
+"emojis": "🎉"}."""),
     ("schedules", r"every |remind|schedul|daily|weekly|each (?:day|week|morning)|tomorrow|\bat \d"
      r"|\d ?(?:am|pm)|o'?clock|alarm",
      """"every day at 9 am check my attendance" / "remind me at 6 pm to call Ravi" / "every Monday 10 am ..." ->
@@ -217,6 +227,9 @@ async def make_plan(router: ModelRouter, text: str, tool_names: list[str], memor
         plan.direct = {"tool": direct["tool"], "args": direct.get("args") or {}}
         plan.needs_tools = True
     plan.remember = clean_facts(data.get("remember"), text)
+    sticker = str(data.get("sticker") or "").strip()
+    if not plan.needs_tools and 0 < len(sticker) <= 4 and not any(c.isalnum() for c in sticker):
+        plan.sticker = sticker
     sid = data.get("skill_id")
     if isinstance(sid, int) and any(s.id == sid for s in skills):  # never trust an invented id
         plan.skill_id = sid

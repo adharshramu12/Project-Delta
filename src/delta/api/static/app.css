@@ -699,3 +699,12 @@ dialog::backdrop{background:var(--overlay)}
 .st-ask-card.sends{border-color:var(--warn)}
 .st-out summary{cursor:pointer;color:var(--ok)}.st-out summary.bad{color:var(--danger)}.st-out .st-code{max-height:240px;margin-top:4px}
 .st-allowed{margin-top:var(--s2)}.st-allowed .row{align-items:center;justify-content:space-between;gap:var(--s2)}
+.pic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-top: 8px; }
+.pic-grid figure { margin: 0; }
+.pic-grid img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; display: block; }
+.pic-grid figure.sticker img { object-fit: contain; background: transparent; }
+.pic-grid figcaption { font-size: 11px; color: var(--text-2); margin-top: 4px; line-height: 1.3; }
+.sticker-line { margin: 2px 0 8px 44px; }
+.sticker-line .pic-grid { grid-template-columns: repeat(auto-fill, 96px); margin: 0; }
+.sticker-line img { aspect-ratio: 1; }
+.sticker-line figcaption { display: none; }

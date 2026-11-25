@@ -183,6 +183,11 @@ def fit_rules(system: str, tools: set[str]) -> str:
     return "\n".join(out)
 
 
+def _sticker_done(t: asyncio.Task[Any]) -> None:
+    if not t.cancelled() and t.exception() is not None:
+        log.info("chat.sticker_failed", error=str(t.exception())[:200])
+
+
 def friendly_model_error(e: LLMError) -> str:
     """What a non-technical user should read when no model could answer."""
     if isinstance(e, AllProvidersFailedError):
@@ -526,6 +531,15 @@ class Orchestrator:
         if self._learning:
             await asyncio.gather(*self._learning, return_exceptions=True)
 
+    def _send_sticker(self, req: Any, emoji: str) -> None:
+        """A sticker under a chat reply, like a friend would send. In the background, through the executor (so
+        every rule applies), and only when find_pictures is there; a sticker that fails is simply not sent."""
+        if "find_pictures" not in self.executor.registry.names():
+            return
+        task = asyncio.create_task(self.executor.execute("find_pictures", {"kind": "sticker", "emojis": emoji,
+                                                                           "count": 1}, task_id=req.id))
+        task.add_done_callback(_sticker_done)
+
     async def run(self, req: TaskRequest) -> TaskResult:
         """Always ends with a result, never with a task left "running": any failure (a bug, a full disk, a
         broken tool) becomes a failed task with a safe message, the run record is closed and the UI told.
@@ -671,6 +685,8 @@ class Orchestrator:
                     await self.events.publish("memory.learned", fact=fact)
         if not plan.needs_tools:
             answer = self.academy.add(plan.answer, req.text, f"{req.channel}:{req.chat_id or req.user}", req.history)
+            if plan.sticker:
+                self._send_sticker(req, plan.sticker)
             return TaskResult(req.id, "done", answer, provider=self.router.last_provider or "")
         if plan.direct and not steps:
             done = await self._direct(req, plan, steps)

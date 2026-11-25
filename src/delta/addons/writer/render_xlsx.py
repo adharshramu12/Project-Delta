@@ -33,7 +33,7 @@ _TOKEN = re.compile(r'\s*(?:(?P<num>\d+(?:\.\d+)?)|(?P<str>"[^"]*")'
                     r"|(?P<word>[A-Za-z]+)|(?P<op><>|<=|>=|[-+*/^(),:<>=%]))")
 _NUMBER = re.compile(r"^-?(?:\d{1,15}|\d{1,3}(?:,\d{2,3})+)(?:\.\d{1,10})?$")
 _PERCENT = re.compile(r"^-?\d{1,6}(?:\.\d{1,6})?\s?%$")
-_BAD = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
+_BAD = re.compile("[" + re.escape("".join(chr(c) for c in (*range(0x00, 0x09), 0x0B, 0x0C, *range(0x0E, 0x20)))) + "]")
 _SHEET_NAME_BAD = re.compile(r"[\[\]:*?/\\]")
 # columns that hold numbers nobody adds up: a totals row leaves them empty
 _NOT_SUMMED = re.compile(r"(?:\b(?:year|yr|id|(?:s|sr|roll)\.?\s?no|number|phone|mobile|pin|code|roll|rank|age|date|"

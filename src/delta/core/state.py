@@ -44,6 +44,7 @@ class Plan:
     direct: dict[str, Any] | None = None  # {"tool", "args"}: one call does the whole job (no agent loop)
     remember: list[str] = field(default_factory=list)  # lasting facts about the user, noted in the same call
     research: list[str] = field(default_factory=list)  # independent lookups for read-only helpers (opt-in)
+    sticker: str = ""  # one emoji Delta sends as a 3D sticker with a chat reply ("" = none)
 
 
 @dataclass

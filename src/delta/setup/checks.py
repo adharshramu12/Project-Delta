@@ -22,6 +22,7 @@ KEY_INFO = {
     "openrouter_api_key": "OpenRouter (free cloud key)",
     "tavily_api_key": "Tavily web search",
     "serpapi_api_key": "SerpAPI web search",
+    "unsplash_access_key": "Unsplash photos (free key)",
     "telegram_bot_token": "Telegram bot",
 }
 
@@ -106,6 +107,9 @@ async def validate_key(name: str, value: str) -> tuple[bool, str]:
             elif name == "tavily_api_key":
                 r = await c.post("https://api.tavily.com/search", json={"api_key": value, "query": "test",
                                                                         "max_results": 1})
+            elif name == "unsplash_access_key":
+                r = await c.get("https://api.unsplash.com/photos", params={"per_page": 1},
+                                headers={"Authorization": f"Client-ID {value}", "Accept-Version": "v1"})
             elif name == "serpapi_api_key":
                 r = await c.get("https://serpapi.com/account.json", params={"api_key": value})
             else:

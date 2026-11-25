@@ -11,6 +11,7 @@ The outline format is small on purpose, so one model call writes a whole deck:
     | Plan | Price |        a table, for comparisons and numbers
     | Free | 0     |
     > What to say on this slide (speaker notes)
+    ![city skyline at night]  a photo for this slide: the words are what to search for
 
 Limits are applied here, in code, not left to the model: a slide with too many points or table rows continues on
 the next slide ("Title (2)"), a deck never has more than MAX_SLIDES slides, and nothing is ever dropped silently
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 MAX_SLIDES = 40
 MAX_POINTS = 6  # per slide; more continue on the next slide
@@ -30,6 +32,7 @@ MAX_LEVEL = 2
 
 _TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
 _BULLET = re.compile(r"^(\s*)(?:[-*+•]|\d{1,2}[.)])\s+(.*\S)\s*$")
+_IMAGE = re.compile(r"^\s*!\[([^\]]{2,80})\](?:\([^)]*\))?\s*$")
 _NOTES = re.compile(r"^\s*(?:>\s?|(?:speaker\s+)?notes?\s*:\s*)(.*)$", re.I)
 
 
@@ -39,12 +42,16 @@ class Slide:
     points: list[tuple[int, str]] = field(default_factory=list)  # (level 0..MAX_LEVEL, text)
     table: list[list[str]] = field(default_factory=list)  # first row is the header
     notes: str = ""
+    image: str = ""  # what photo to look for ("" = none)
+    picture: Any = None  # the photo found for it (pictures.Picture), set before rendering
 
 
 @dataclass
 class Deck:
     title: str = ""
     subtitle: str = ""
+    image: str = ""  # a photo for the opening slide
+    picture: Any = None
     slides: list[Slide] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # what the limits changed, for the user
 
@@ -78,6 +85,10 @@ def parse_outline(text: str, title: str = "") -> Deck:
         if m := re.match(r"^#{2,6}\s+(.*)$", line):
             cur = Slide(_plain(m.group(1)))
             deck.slides.append(cur)
+            continue
+        if m := _IMAGE.match(line):
+            target = cur if cur is not None else deck
+            target.image = target.image or _plain(m.group(1))
             continue
         if cur is None:  # text before the first slide: the line under the title
             if not deck.subtitle:
@@ -124,7 +135,8 @@ def fit(deck: Deck) -> Deck:
         else:
             pieces = [(p, []) for p in point_parts]
         for n, (points, table) in enumerate(pieces, 1):
-            out.append(Slide(s.title if n == 1 else f"{s.title} ({n})", points, table, s.notes if n == 1 else ""))
+            out.append(Slide(s.title if n == 1 else f"{s.title} ({n})", points, table, s.notes if n == 1 else "",
+                             s.image if n == 1 and not table else ""))
     if len(out) > MAX_SLIDES:
         deck.notes.append(f"The deck had {len(out)} slides; only the first {MAX_SLIDES} were kept.")
         out = out[:MAX_SLIDES]

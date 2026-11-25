@@ -7,6 +7,19 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Keynote-style presentations with free photos.** Decks now look like a product keynote: a black opening slide
+  with one large centred line, white slides with big titles and few words, a single blue accent and light tables.
+  Delta adds free stock photos to the title slide and 2 to 4 others: from Unsplash with your free key (Settings >
+  Keys), otherwise from Openverse with no key at all. Photos fill their half of the slide, cropped and never
+  stretched, and every photo is credited on the slide and in the speaker notes. Say "no pictures" to leave them out.
+- **Pictures and stickers in chat.** Ask Delta for photos or stickers (for a post, Canva, a design or a message) and
+  they show in the chat with their credits, saved in Documents\Delta\Pictures ready to drag into Canva. Stickers are
+  Microsoft's 3D Fluent Emoji (MIT). On Telegram and Slack the pictures are sent to the chat.
+- **Unsplash in Apps.** Apps has an Unsplash photos card: paste your free Access Key once (Delta checks it with
+  Unsplash first) and from then on decks and chat use Unsplash photos by themselves. Remove it any time.
+- **Chat feels more like talking to a friend.** Delta is curious about what you share and asks one real follow-up
+  question when it fits. On good news, a win, thanks or a hello it may send a 3D sticker under its reply (🎉, 🙏, 👋),
+  and on a bad day a hug (🤗). Most replies have none, and never on work or plain questions.
 - **Explain a document in 3D.** On the Build page, pick a PDF, Word or PowerPoint file, or notes, and choose Make the
   lesson: Delta reads it and builds an interactive 3D lesson in a new project. There are 5 to 8 chapters, each with a
   3D model of the idea that you can turn, zoom and click, a short plain explanation and key points with their page.
@@ -31,6 +44,11 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
   test with free keys only, where Groq hit its per-minute limit, Gemini refused, and the next backup answered.
 - **A provider's reason is kept in the log.** Google wraps its errors so that only "Error code: 400" was logged; the
   provider's own words are now kept, so a refusal can be understood.
+- `delta doctor` and the terminal show only whether a key is set, never any of its characters (code scanning flagged
+  the partial keys as clear-text logging).
+- The control-character filter in the PowerPoint and Excel writers is written without a character range (flagged by
+  code scanning; same characters as before).
+- Dependency updates: pydantic 2.14.3, ruff 0.17.4, playwright 1.65.0, openai 3.49.0, fastapi 0.162.2.
 - **Tool calls that contain code were lost.** When an AI app (Claude Code, Codex) wrote a tool call with code in it,
   next to some text, Delta's reader counted the braces inside the code and missed the whole call. Build then said
   "done" without changing anything; Delta's chat agent was affected the same way. The reader now uses the JSON
