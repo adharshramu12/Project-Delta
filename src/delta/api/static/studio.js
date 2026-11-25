@@ -78,6 +78,20 @@
           h("option", {value: "claude_code", selected: p.engine === "claude_code", text: "Claude Code (your Claude plan)"}))) : h("span", null),
       h("div", {class: "row"},
         btn("Preview", () => (project.preview ? showPreview(project.preview) : previewSetup()), "sm primary", "play"),
+        btn("Download", async e => {
+          const b = e.currentTarget;
+          b.disabled = true; const label = b.lastChild.textContent; b.lastChild.textContent = "Preparing…";
+          try {
+            const zip = await D.blob(`/api/studio/projects/${enc(current)}/download`);
+            const url = URL.createObjectURL(zip);
+            const a = h("a", {href: url, download: `${(project.name || "project").replace(/[^\w .-]+/g, "")}.zip`});
+            document.body.append(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+            D.toast({title: "Downloaded", body: "The whole project as one zip. Secret files, .git and folders that can be rebuilt (node_modules…) are left out: see DELTA_EXPORT.txt inside.", kind: "ok"});
+          } catch (err) {
+            D.toast({title: "Not downloaded", body: D.plain(err), kind: "danger"});
+          } finally { b.disabled = false; b.lastChild.textContent = label; }
+        }, "sm", "download"),
         btn("Project memory", showMemory, "sm"),
         btn("Undo last request", async () => {
           if (!await D.confirm({title: "Undo the last request?", body: "The files it changed go back to how they were before it.", ok: "Undo"})) return;
@@ -170,10 +184,58 @@
   }
 
   // ---- chat
+  // ---- answers as formatted text: headings, lists, **bold**, `code`, ``` blocks with Copy. Built from text nodes
+  // only (never innerHTML), so nothing in a project or an answer can add HTML or scripts to the page.
+  function inline(text) {
+    const out = [];
+    const rx = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g;
+    let at = 0, m;
+    while ((m = rx.exec(text))) {
+      if (m.index > at) out.push(text.slice(at, m.index));
+      const t = m[0];
+      out.push(t[0] === "`" ? h("code", {class: "st-ic", text: t.slice(1, -1)}) : h("b", {text: t.slice(2, -2)}));
+      at = m.index + t.length;
+    }
+    if (at < text.length) out.push(text.slice(at));
+    return out;
+  }
+  function rich(text) {
+    const box = h("div", {class: "st-rich"});
+    const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+    let list = null;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const fence = line.match(/^```\s*([\w+-]*)/);
+      if (fence) {
+        const code = [];
+        for (i++; i < lines.length && !lines[i].startsWith("```"); i++) code.push(lines[i]);
+        const body = code.join("\n");
+        const copy = btn("Copy", async () => {
+          try { await navigator.clipboard.writeText(body); copy.textContent = "Copied"; } catch { copy.textContent = "Select and copy"; }
+        }, "sm st-copy");
+        box.append(h("div", {class: "st-block"}, h("div", {class: "st-block-head"}, h("span", {text: fence[1] || "code"}), copy),
+          h("pre", {class: "st-code"}, h("code", {text: body}))));
+        list = null;
+        continue;
+      }
+      const item = line.match(/^\s*(?:[-*]|\d+[.)])\s+(.*)$/);
+      if (item) {
+        if (!list) { list = h(/^\s*\d/.test(line) ? "ol" : "ul"); box.append(list); }
+        list.append(h("li", null, ...inline(item[1])));
+        continue;
+      }
+      list = null;
+      const head = line.match(/^(#{1,4})\s+(.*)$/);
+      if (head) box.append(h("h4", null, ...inline(head[2])));
+      else if (line.trim()) box.append(h("p", null, ...inline(line)));
+    }
+    return box;
+  }
+
   function bubble(m) {
     const changed = Object.entries(m.changed || {});
     return h("div", {class: "st-msg " + m.role},
-      h("div", {class: "st-text", text: m.text}),
+      m.role === "assistant" ? rich(m.text) : h("div", {class: "st-text", text: m.text}),
       changed.length ? h("div", {class: "st-changed"}, h("span", {class: "muted small", text: `${changed.length} file(s): ` + changed.map(([f, k]) => `${f} (${k})`).join(", ")}),
         m.turn ? btn("See changes", () => showDiff(m.turn), "sm") : null) : null,
       m.status && m.status !== "done" ? h("span", {class: "pill warn", text: D.words(m.status)}) : null);

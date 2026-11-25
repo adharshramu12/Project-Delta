@@ -524,3 +524,51 @@ async def test_a_blocked_action_is_shown_as_delta_s_reason_not_the_hook_command(
                         "../x.txt is outside the project."}]}}
     await _handle(event, RunResult(""), {"t1": "Read"}, emit)
     assert seen[0]["summary"] == "Blocked by Delta: ../x.txt is outside the project."
+
+
+# ---- download, design and game know-how ------------------------------------------------------------------------
+
+def test_the_download_is_one_clean_zip_without_secrets_git_or_rebuildable_folders(tmp_path):
+    import zipfile
+
+    from delta.studio.export import ExportError, build
+
+    root = tmp_path / "My Game!"
+    for rel, body in {"index.html": "<h1>hi</h1>", "src/game.js": "let x = 1", ".delta/PROJECT.md": "# memory",
+                      ".env": "KEY=secret", "keys/server.pem": "----", "node_modules/a/index.js": "x",
+                      ".git/config": "[core]", "dist/out.js": "built"}.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(body, encoding="utf-8")
+    out = build(root, "My Game!")
+    try:
+        names = set(zipfile.ZipFile(out.path).namelist())
+        assert names == {"My Game/index.html", "My Game/src/game.js", "My Game/.delta/PROJECT.md",
+                         "My Game/DELTA_EXPORT.txt"}
+        note = zipfile.ZipFile(out.path).read("My Game/DELTA_EXPORT.txt").decode()
+        assert "node_modules/" in note and ".git/" in note and ".env" in note and "keys/server.pem" in note
+        assert out.files == 3 and out.name.startswith("My Game-") and out.name.endswith(".zip")
+    finally:
+        out.path.unlink()
+    with pytest.raises(ExportError, match="no files"):
+        (tmp_path / "empty").mkdir()
+        build(tmp_path / "empty", "empty")
+
+
+def test_design_and_game_know_how_are_sent_only_when_the_request_needs_them():
+    from delta.studio.craft import DESIGN, GAME, notes_for
+
+    assert notes_for("make a snake game") .startswith(GAME[:20])
+    assert DESIGN in notes_for("build a landing page for my bakery") and GAME not in notes_for("landing page")
+    for plain in ("fix the bug in calc.py", "write unit tests for utils", "rename the variable x to count"):
+        assert notes_for(plain) == ""
+    assert len(GAME) < 1500 and len(DESIGN) < 1500  # a few hundred tokens, and only for these requests
+
+
+async def test_the_design_notes_reach_the_model_for_a_page_and_not_for_a_fix(tmp_path):
+    s, p, _ = _service(tmp_path, [LLMResponse("Done."), LLMResponse("Done.")])
+    s.start(p.id, "make a beautiful landing page")
+    await _wait(s, p.id)
+    s.start(p.id, "fix the typo in notes.txt")
+    await _wait(s, p.id)
+    first, second = s.c.router.seen
+    assert "DESIGN (this request" in first and "DESIGN (this request" not in second

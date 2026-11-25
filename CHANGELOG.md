@@ -6,6 +6,22 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Added
+- **Download a Build project.** A Download button gives the whole project as one zip, in a folder named after the
+  project. Secret files (`.env`, keys, certificates), `.git` and folders that can be rebuilt (`node_modules`, virtual
+  environments, build output, caches) are left out, and a `DELTA_EXPORT.txt` inside says what was left out and how
+  to get it back. The project memory is kept, so whoever opens it next knows the project.
+- **Designs with taste, and games.** When a request is about a page or a UI, Build adds design know-how: semantic
+  HTML, a clear type hierarchy, spacing on an 8px scale, CSS variables with a dark theme, accessible contrast and
+  focus states, mobile first, no frameworks unless asked. When it is about a game: a canvas game with a delta-time
+  loop, title, pause and game-over screens, keyboard and touch, a best score, sharp on every screen, no libraries or
+  assets. Both are sent only with such requests, so other requests cost nothing extra, and both engines get them.
+  Live: "make a small arcade game…" gave a playable Space Dodge (title screen, score, rising speed, best score,
+  touch controls) in 137 seconds, shown in the preview without being asked twice.
+- **Build feels like a coding tool.** Answers are formatted: headings, lists, bold, inline code, and code blocks with
+  a Copy button (built from text only, so nothing in a project can add HTML to the page). Build also tells the model
+  to write new files whole, once, and not to read back what it just wrote, which saves tokens.
+
 ## 0.4.8 - 2026-11-24
 
 Build: Delta builds your own projects. In short:

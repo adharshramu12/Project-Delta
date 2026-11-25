@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from delta.llm.cli_providers import find_cli
+from delta.studio import craft
 from delta.studio.agent import RunResult
 from delta.studio.jail import MEMORY_FILE
 from delta.system import proctree
@@ -65,7 +66,11 @@ def argv(exe: str, settings: str, model: str = "") -> list[str]:
 def _prompt(request: str, history: list[dict[str, Any]]) -> str:
     earlier = [f"{h['role']}: {str(h['text'])[:1500]}" for h in history[-6:]
                if h.get("role") in ("user", "assistant") and h.get("text")]
-    return ("Earlier in this project's chat:\n" + "\n".join(earlier) + "\n\nNow: " + request) if earlier else request
+    text = ("Earlier in this project's chat:\n" + "\n".join(earlier) + "\n\nNow: " + request) if earlier else request
+    if notes := craft.notes_for(request):  # the same design / game know-how as Delta's own engine
+        text += "\n\n" + notes.replace("start_preview", "the user's preview").replace(
+            "check_preview", "a final check").replace("write_file", "Write")
+    return text
 
 
 async def run(root: Path, store_root: Path, project: str, turn: str, request: str, history: list[dict[str, Any]],
