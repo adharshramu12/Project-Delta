@@ -653,3 +653,28 @@ def test_a_tool_call_with_code_in_it_is_read_even_with_prose_around_it():
     r = parse_prompt_tools(reply, "claude_code", "x")
     assert [c.name for c in r.tool_calls] == ["edit_file", "start_preview"]
     assert "scoreBoard.update(score);" in r.tool_calls[0].arguments["old_text"]
+
+
+def test_tools_without_arguments_are_sent_in_a_form_gemini_accepts():
+    """Gemini answers 400 to a function whose parameters are an object with no properties (stop_preview here, and ten
+    of Delta's chat tools such as list_windows): such a tool goes without parameters, and an empty required is left
+    out. Tools with arguments are unchanged."""
+    from delta.llm.providers import wire_tools
+    from delta.studio.tools import SPECS
+
+    sent = {t["function"]["name"]: t["function"] for t in wire_tools(SPECS)}
+    assert "parameters" not in sent["stop_preview"]
+    assert all(p.get("properties") for f in sent.values() if (p := f.get("parameters")) is not None)
+    assert all(p.get("required") != [] for f in sent.values() if (p := f.get("parameters")) is not None)
+    assert sent["read_file"]["parameters"]["required"] == ["path"]
+
+
+def test_a_providers_own_reason_is_kept_from_a_wrapped_error_body():
+    from types import SimpleNamespace
+
+    from delta.llm.providers import _said
+
+    google = SimpleNamespace(message="Error code: 400", body=[{"error": {
+        "code": 400, "message": "functionDeclaration parameters.properties: should be non-empty for OBJECT type"}}])
+    assert "should be non-empty for OBJECT type" in _said(google)
+    assert _said(SimpleNamespace(message="plain", body=None)) == "plain"
