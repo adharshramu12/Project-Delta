@@ -359,6 +359,24 @@
     box.append(h("div", {class: "row"}, (d.files || []).map(name => D.views.documents.downloadButton(name, "Download " + name.split(".").pop().toUpperCase()))));
   }
 
+  // ---- free pictures Delta found (find_pictures): shown with their credit; the files are in Documents\Delta\Pictures
+  async function showPictures(d) {
+    const grid = h("div", {class: "pic-grid"});
+    const onlyStickers = (d.pictures || []).every(p => p.source === "fluent-emoji");
+    // a sticker sits under the reply on its own, like in a messenger; photos come in a card with a heading
+    put(onlyStickers ? h("div", {class: "sticker-line"}, grid)
+      : h("div", {class: "card pic-card"}, h("div", {class: "card-top"}, icon("image"), h("b", {text: d.query || "Pictures"})), grid));
+    for (const p of (d.pictures || []).slice(0, 6)) {
+      const fig = h("figure", {class: p.source === "fluent-emoji" ? "sticker" : ""});
+      grid.append(fig);
+      try {
+        const u = keepURL(await D.blob(`/api/pictures/${encodeURIComponent(p.name)}`));
+        fig.append(h("a", {href: u, target: "_blank", title: p.name}, h("img", {src: u, alt: p.credit, loading: "lazy"})));
+      } catch { fig.append(h("span", {class: "muted", text: p.name})); }
+      fig.append(h("figcaption", {}, /^https:\/\//.test(p.link) ? h("a", {href: p.link, target: "_blank", rel: "noopener noreferrer", text: p.credit}) : h("span", {text: p.credit})));
+    }
+  }
+
   // ---- live events
   D.on("ws", m => {
     if (m.type === "approval") renderApproval(m.approval);
@@ -406,6 +424,7 @@
       }
       if (ev === "memory.learned") note("Remembered: " + d.fact, "", "memory");
       if (ev === "document.created") showDocument(d);
+      if (ev === "pictures.found") showPictures(d);
       if (ev === "learning.added") {
         const i = d.item || {};
         note(i.status === "pending" ? `Suggestion waiting for your OK in Memory, Learned: ${i.content}` : `Got it, I'll remember: ${i.content}`, "ok", "spark");

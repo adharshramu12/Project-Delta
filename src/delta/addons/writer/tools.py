@@ -373,7 +373,10 @@ DECK_SYSTEM = (
     "line of speaker notes (1 to 3 sentences that add what the slide does not say). Start with the problem or the "
     "key message, end with next steps or a summary. No slide numbers, no 'Thank you' slide unless asked. "
     "Never invent facts, numbers, names, dates or quotes: use only what is given, and write [to fill] where "
-    "something needed is missing. No preface, no closing remarks.\n")
+    "something needed is missing. No preface, no closing remarks.\n"
+    "Photos: put one line '![2 to 4 words to search for]' under the deck title, and under the title of the 2 to 4 "
+    "slides where a real photo helps (a place, people at work, a product, nature, a city). The words describe what "
+    "is in the photo, e.g. ![students in a library], never text, logos or charts. No photo on a table slide.\n")
 
 
 class MakePresentationArgs(BaseModel):
@@ -384,13 +387,17 @@ class MakePresentationArgs(BaseModel):
     slide_count: int | None = Field(default=None, ge=2, le=30, description="How many slides, only if the user said")
     write_for_me: bool = Field(default=True, description="Let Delta write the slides from the content. False = the "
                                                          "content is already an outline ('## ' per slide)")
+    photos: bool = Field(default=True, description="Add free stock photos (Unsplash, or Openverse without a key) to "
+                                                   "the title slide and a few others. False only if the user said "
+                                                   "no pictures")
 
 
 class MakePresentation(_WriterBase, Tool[MakePresentationArgs]):
     name = "make_presentation"
     description = ("Make a PowerPoint presentation (.pptx) in ONE call: give the topic and the facts, and Delta "
-                   "writes the slides (titles, short points, tables, speaker notes) and builds a clean 16:9 deck "
-                   "that opens in PowerPoint, Google Slides and Keynote. Do not write slides by hand or script "
+                   "writes the slides (titles, short points, tables, speaker notes) and builds a clean, "
+                   "keynote-style 16:9 deck with free stock photos (credited) that opens in PowerPoint, Google "
+                   "Slides, Keynote and Canva. Do not write slides by hand or script "
                    "them with run_python. Saved in the user's Documents\\Delta folder; asked from Telegram/Slack, "
                    "the file is sent back to that chat.")
     risk = Risk.WRITE
@@ -448,6 +455,12 @@ class MakePresentation(_WriterBase, Tool[MakePresentationArgs]):
             s.points = [(lvl, _fix_prose(t)) for lvl, t in s.points]
         notes += deck.notes
         folder = await asyncio.to_thread(documents_dir, getattr(self.cfg, "output_dir", "auto"))
+        if args.photos:
+            notes += await add_photos(deck, folder / "Pictures")
+        else:
+            deck.image = ""
+            for s in deck.slides:
+                s.image = ""
         stem = await asyncio.to_thread(unique_stem, folder, deck.title)
         try:
             path = await asyncio.to_thread(render_pptx, deck, folder / f"{stem}.pptx")
@@ -465,6 +478,102 @@ class MakePresentation(_WriterBase, Tool[MakePresentationArgs]):
                                 + (" ".join(notes) + "\n" if notes else "") + delivered.get("delivery_note", "")
                                 + FINISHED,
                           evidence)
+
+
+async def add_photos(deck: Any, folder: Path, budget_s: float = 40.0) -> list[str]:
+    """Find a photo for each slide that asks for one ('![...]' in the outline), all at once and within
+    `budget_s`. A slide whose photo is not found is simply left without one. Returns notes for the user."""
+    from delta.addons.writer.pictures import find_photos
+    from delta.system.secrets import get_secret
+
+    wanted = [x for x in [deck, *deck.slides] if getattr(x, "image", "") and not getattr(x, "table", None)]
+    if not wanted:
+        return []
+    key = get_secret("unsplash_access_key")
+
+    async def one(x: Any) -> None:
+        found = await find_photos(x.image, folder, 1, "landscape", key)
+        x.picture = found[0] if found else None
+
+    try:
+        await asyncio.wait_for(asyncio.gather(*(one(x) for x in wanted), return_exceptions=True), budget_s)
+    except TimeoutError:
+        log.info("writer.photos_timeout")
+    got = [x.picture for x in wanted if x.picture is not None]
+    if not got:
+        return ["No photos were added (the photo search did not answer)."]
+    where = "Unsplash" if any(p.source == "unsplash" for p in got) else "Openverse"
+    tip = "" if key else " Add a free Unsplash key in Settings > Keys for Unsplash photos."
+    return [f"Added {len(got)} free photo(s) from {where}, credited on the slide and in the notes.{tip}"]
+
+
+# --- find_pictures -------------------------------------------------------------------------------------
+
+
+class FindPicturesArgs(BaseModel):
+    query: str = Field(default="", description="What the photo shows, 2 to 5 words (for kind=photo)")
+    kind: Literal["photo", "sticker"] = Field(default="photo", description="photo: free stock photos. sticker: 3D "
+                                                                         "emoji stickers")
+    emojis: str = Field(default="", description="For kind=sticker: the emoji characters to turn into stickers, "
+                                                "e.g. '🎉🚀'")
+    count: int = Field(default=3, ge=1, le=6)
+    orientation: Literal["landscape", "portrait", "squarish"] = Field(default="landscape")
+
+
+class FindPictures(_WriterBase, Tool[FindPicturesArgs]):
+    name = "find_pictures"
+    description = ("Find free pictures and show them in the chat: stock photos (Unsplash with the user's free key, "
+                   "otherwise Openverse; openly licensed, credit included) or 3D emoji stickers. Use when the user "
+                   "asks for photos, images, pictures or stickers (for a post, Canva, a design, a message), or when "
+                   "a picture or sticker would make your reply clearly better. The files are saved in "
+                   "Documents\\Delta\\Pictures, ready to drag into Canva or anywhere.")
+    risk = Risk.WRITE
+    Args = FindPicturesArgs
+
+    def paths(self, args: FindPicturesArgs) -> list[str]:
+        return [str(self.folder / "Pictures")]
+
+    def summary(self, args: FindPicturesArgs) -> str:
+        what = args.emojis if args.kind == "sticker" else args.query
+        return f"find {args.count} free {args.kind}(s): {what[:60]}"
+
+    async def run(self, args: FindPicturesArgs) -> ToolResult:
+        from delta.addons.writer.pictures import find_photos, find_stickers
+        from delta.system.secrets import get_secret
+
+        folder = await asyncio.to_thread(documents_dir, getattr(self.cfg, "output_dir", "auto"))
+        folder = folder / "Pictures"
+        if args.kind == "sticker":
+            if not args.emojis.strip():
+                return ToolResult(False, "Give the emoji characters to make stickers from, e.g. emojis='🎉'.")
+            pics = await find_stickers(args.emojis, folder, args.count)
+        else:
+            if not args.query.strip():
+                return ToolResult(False, "Say what the photo should show, e.g. query='sunrise over mountains'.")
+            pics = await find_photos(args.query, folder, args.count, args.orientation,
+                                     get_secret("unsplash_access_key"))
+        if not pics:
+            return ToolResult(False, "No pictures found (or the picture sites did not answer). Try other words.")
+        req = CURRENT_REQUEST.get()
+        delivered = False
+        if delivery_route(req.channel if req else None) == "chat" and req is not None and self.executor is not None:
+            for pic in pics:  # back to Telegram/Slack, through the executor so every rule applies
+                sent = await self.executor.execute("send_file", {"path": str(pic.path), "caption": pic.credit[:200]},
+                                                   task_id=req.id)
+                delivered = delivered or bool(sent.ok and sent.evidence.get("delivered"))
+        elif self.events is not None:
+            try:
+                await self.events.publish("pictures.found", task_id=req.id if req else "",
+                                          query=args.query or args.emojis,
+                                          pictures=[{"name": p.path.name, "credit": p.credit, "link": p.link,
+                                                     "source": p.source} for p in pics])
+            except Exception:
+                log.exception("writer.event_failed")
+        lines = "\n".join(f"- {p.path.name}: {p.credit} ({p.link})" for p in pics)
+        shown = "Sent to your chat." if delivered else "They are shown in the chat above."
+        return ToolResult(True, f"Found {len(pics)} picture(s), saved in {folder}:\n{lines}\n{shown} Keep the credit "
+                                "line when you use a photo.", {"files": [str(p.path) for p in pics],
+                                                                 "pictures": [p.to_dict() for p in pics]})
 
 
 # --- make_spreadsheet ----------------------------------------------------------------------------------
@@ -591,8 +700,10 @@ def writer_tools(router: Any, cfg: Any, events: Any = None) -> list[Tool[Any]]:
     if cfg is not None and not getattr(cfg, "enabled", True):
         return []
     return [WritePost(router, cfg, events), PreparePost(router, cfg, events), MakeDocument(router, cfg, events),
-            MakePresentation(router, cfg, events), MakeSpreadsheet(router, cfg, events)]
+            MakePresentation(router, cfg, events), MakeSpreadsheet(router, cfg, events),
+            FindPictures(router, cfg, events)]
 
 
-__all__ = ["KINDS", "MakeDocument", "MakePresentation", "MakeSpreadsheet", "PreparePost", "WritePost", "delivery_route",
+__all__ = ["KINDS", "FindPictures",
+           "MakeDocument", "MakePresentation", "MakeSpreadsheet", "PreparePost", "WritePost", "delivery_route",
            "writer_tools"]

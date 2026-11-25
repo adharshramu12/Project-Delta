@@ -29,3 +29,19 @@ def test_planner_asks_for_partner_tone_and_free_learning():
     assert "never sugar-coated" in PLANNER_PROMPT and "cannot do" in PLANNER_PROMPT
     # the character rides in every planning call: keep it small
     assert len(PLANNER_PROMPT) < 7500
+
+
+async def test_a_friendly_reply_can_carry_one_sticker():
+    router = OneCallRouter('{"needs_tools": false, "answer": "Congrats! Which college?", "sticker": "🎉"}')
+    plan = await make_plan(router, "i passed my exam!!", [], "", "Delta")
+    assert plan.sticker == "🎉"
+    # words, or a sticker on a plan that uses tools, are dropped
+    for bad in ('"sticker": "party"', '"needs_tools": true, "sticker": "🎉"'):
+        router = OneCallRouter('{"needs_tools": false, "answer": "ok", ' + bad + '}')
+        plan = await make_plan(router, "hi", [], "", "Delta")
+        assert plan.sticker == ""
+
+
+def test_planner_asks_for_curiosity_and_rare_stickers():
+    assert "follow-up question" in PLANNER_PROMPT and '"sticker"' in PLANNER_PROMPT
+    assert "Most replies have none" in PLANNER_PROMPT

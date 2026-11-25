@@ -6,6 +6,7 @@ listed there can be served (matched by exact name), so no path in a request can 
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -18,6 +19,8 @@ MEDIA = {"pdf": "application/pdf", "md": "text/markdown; charset=utf-8", "html":
          "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
          "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
          "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+
+PICTURE = re.compile(r"(?:unsplash|openverse|sticker)-[0-9a-f]{12}\.(?:jpg|png)")
 
 
 def register(app: FastAPI, c: Any, auth: Any) -> None:
@@ -46,3 +49,15 @@ def register(app: FastAPI, c: Any, auth: Any) -> None:
         return FileResponse(folder() / name, media_type=MEDIA.get(kind, "application/octet-stream"),
                             filename=name if download else None, headers=headers,
                             content_disposition_type="attachment" if download else "inline")
+
+    @app.get("/api/pictures/{name}", dependencies=[Depends(auth)])
+    async def picture_file(name: str) -> FileResponse:
+        # Pictures that find_pictures saved: only names of the shape it makes, and only ones in the folder's own
+        # listing (served by the listed name), so a request cannot reach any other file.
+        pics = folder() / "Pictures"
+        listed = {p.name: p.name for p in pics.iterdir() if PICTURE.fullmatch(p.name)} if pics.is_dir() else {}
+        found = listed.get(name)
+        if found is None:
+            raise HTTPException(404, "no such picture")
+        return FileResponse(pics / found, media_type="image/png" if found.endswith(".png") else "image/jpeg",
+                            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})

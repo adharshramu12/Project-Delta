@@ -5,6 +5,10 @@ PowerPoint, Google Slides, LibreOffice Impress and Keynote: 16:9, a real slide m
 content layout (so "Design" and "Reset" in PowerPoint work), real title and body placeholders (so Outline view and
 screen readers see the text), tables as real tables, speaker notes, and slide numbers.
 
+The look is quiet on purpose, in the style of a product keynote: a black opening slide with one large line, white
+slides with a big title and few words, generous space, one blue accent, and photos that fill their half of the
+slide edge to edge (cropped, never stretched) with the photographer's credit on the photo and in the notes.
+
 All text is escaped; nothing in a deck is ever a macro, a link target or an external reference.
 """
 
@@ -14,6 +18,7 @@ import re
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from xml.sax.saxutils import escape
 
 from delta.addons.writer.slides import Deck, Slide
@@ -28,15 +33,22 @@ XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
 
 W, H = 12192000, 6858000  # 16:9 in EMU
 MARGIN = 685800
-INK, MUTED, DARK, ACCENT, PALE = "1F2937", "6B7280", "1F2A44", "E07A47", "F3F4F6"
-FONT = "Segoe UI"
+INK, MUTED, DARK, ACCENT, PALE = "1D1D1F", "6E6E73", "000000", "0071E3", "F5F5F7"
+LINE, SOFT = "D2D2D7", "A1A1A6"
+FONT, HEAD_FONT = "Segoe UI", "Segoe UI Semibold"
+PIC_X = 6400800  # a photo on a content slide fills the slide from here to the right edge
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
 # XML 1.0 forbids these control characters; one in a title would make the whole file unreadable.
-_BAD = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
+_BAD = re.compile("[" + re.escape("".join(chr(c) for c in (*range(0x00, 0x09), 0x0B, 0x0C, *range(0x0E, 0x20)))) + "]")
 
 
 def _esc(text: str) -> str:
     return escape(_BAD.sub("", text))
+
+
+def _attr(text: str) -> str:
+    """Text for an XML attribute: quotes escaped too (a credit like '"Dawn" by ...' has them)."""
+    return escape(_BAD.sub("", text), {'"': "&quot;"})
 
 
 def _runs(text: str, size: int = 0, color: str = "", bold: bool = False) -> str:
@@ -105,17 +117,19 @@ def _number(sid: int, xfrm: str = "") -> str:
 
 def _level(n: int, size: int, indent: int, color: str = INK, bullet: str = "•") -> str:
     left = 342900 + indent * 400000
-    return (f'<a:lvl{n}pPr marL="{left}" indent="-342900" algn="l"><a:spcBef><a:spcPts val="900"/></a:spcBef>'
-            f'<a:buClr><a:srgbClr val="{ACCENT}"/></a:buClr><a:buFont typeface="Arial"/><a:buChar char="{bullet}"/>'
+    return (f'<a:lvl{n}pPr marL="{left}" indent="-342900" algn="l"><a:lnSpc><a:spcPct val="110000"/></a:lnSpc>'
+            f'<a:spcBef><a:spcPts val="{1400 if n == 1 else 600}"/></a:spcBef>'
+            f'<a:buClr><a:srgbClr val="{ACCENT if n == 1 else SOFT}"/></a:buClr><a:buFont typeface="Arial"/>'
+            f'<a:buChar char="{bullet}"/>'
             f'<a:defRPr sz="{size}"><a:solidFill><a:srgbClr val="{color}"/></a:solidFill>'
             f'<a:latin typeface="{FONT}"/></a:defRPr></a:lvl{n}pPr>')
 
 
 def _master() -> str:
-    title_style = (f'<a:lvl1pPr algn="l"><a:lnSpc><a:spcPct val="95000"/></a:lnSpc><a:buNone/>'
-                   f'<a:defRPr sz="3200" b="1"><a:solidFill><a:srgbClr val="{DARK}"/></a:solidFill>'
-                   f'<a:latin typeface="{FONT}"/></a:defRPr></a:lvl1pPr>')
-    body_style = _level(1, 2200, 0) + _level(2, 1800, 1, MUTED, "–") + _level(3, 1600, 2, MUTED, "–")
+    title_style = (f'<a:lvl1pPr algn="l"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:buNone/>'
+                   f'<a:defRPr sz="3600" spc="-50"><a:solidFill><a:srgbClr val="{INK}"/></a:solidFill>'
+                   f'<a:latin typeface="{HEAD_FONT}"/></a:defRPr></a:lvl1pPr>')
+    body_style = _level(1, 2000, 0) + _level(2, 1700, 1, MUTED, "–") + _level(3, 1500, 2, MUTED, "–")
     other = (f'<a:lvl1pPr><a:defRPr sz="1200"><a:solidFill><a:srgbClr val="{MUTED}"/></a:solidFill>'
              f'<a:latin typeface="{FONT}"/></a:defRPr></a:lvl1pPr>')
     num = _number(5, NUM_BOX)
@@ -127,32 +141,32 @@ def _master() -> str:
             f'<p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr>{BODY_BOX}</p:spPr><p:txBody>'
             '<a:bodyPr><a:normAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr lvl="0"/><a:r><a:rPr lang="en-IN"/>'
             "<a:t>Text</a:t></a:r></a:p></p:txBody></p:sp>")
-    bar = _rect(4, "Accent", MARGIN, 1440000, 900000, 45720, ACCENT)
     layouts = "".join(f'<p:sldLayoutId id="{2147483649 + i}" r:id="rId{i + 1}"/>' for i in range(3))
     return (f'{XML}<p:sldMaster {NS}><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>'
-            f"<a:effectLst/></p:bgPr></p:bg><p:spTree>{TREE_HEAD}{title}{body}{bar}{num}</p:spTree></p:cSld>{CLR_MAP}"
+            f"<a:effectLst/></p:bgPr></p:bg><p:spTree>{TREE_HEAD}{title}{body}{num}</p:spTree></p:cSld>{CLR_MAP}"
             f"<p:sldLayoutIdLst>{layouts}</p:sldLayoutIdLst><p:txStyles><p:titleStyle>{title_style}</p:titleStyle>"
             f"<p:bodyStyle>{body_style}</p:bodyStyle><p:otherStyle>{other}</p:otherStyle></p:txStyles></p:sldMaster>")
 
 
 def _layout(kind: str) -> str:
-    """title: the opening slide (dark, large). content: title + points. table: title only (the table is drawn)."""
+    """title: the opening slide (black, one large centred line). content: title + points. table: title only (the
+    table is drawn)."""
     if kind == "title":
-        shapes = (_rect(4, "Accent", MARGIN, 3560000, 1200000, 60960, ACCENT)
-                  + _placeholder(2, "Title", 'type="ctrTitle"',
-                                 '<a:p><a:r><a:rPr lang="en-IN"/><a:t>Title</a:t></a:r></a:p>',
-                                 _xfrm(MARGIN, 1500000, W - 2 * MARGIN, 1900000)).replace(
+        shapes = (_placeholder(2, "Title", 'type="ctrTitle"',
+                               '<a:p><a:r><a:rPr lang="en-IN"/><a:t>Title</a:t></a:r></a:p>',
+                               _xfrm(MARGIN, 1700000, W - 2 * MARGIN, 2000000)).replace(
                       "<a:bodyPr/><a:lstStyle/>",
-                      '<a:bodyPr anchor="b"><a:normAutofit/></a:bodyPr><a:lstStyle><a:lvl1pPr algn="l">'
-                      '<a:defRPr sz="4400" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:defRPr>'
-                      "</a:lvl1pPr></a:lstStyle>")
+                      '<a:bodyPr anchor="b"><a:normAutofit/></a:bodyPr><a:lstStyle><a:lvl1pPr algn="ctr">'
+                      '<a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:defRPr sz="5400" spc="-100">'
+                      '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>'
+                      f'<a:latin typeface="{HEAD_FONT}"/></a:defRPr></a:lvl1pPr></a:lstStyle>')
                   + _placeholder(3, "Subtitle", 'type="subTitle" idx="1"',
                                  '<a:p><a:r><a:rPr lang="en-IN"/><a:t>Subtitle</a:t></a:r></a:p>',
-                                 _xfrm(MARGIN, 3800000, W - 2 * MARGIN, 1200000)).replace(
+                                 _xfrm(MARGIN, 3900000, W - 2 * MARGIN, 1100000)).replace(
                       "<a:bodyPr/><a:lstStyle/>",
-                      '<a:bodyPr><a:normAutofit/></a:bodyPr><a:lstStyle><a:lvl1pPr marL="0" indent="0" algn="l">'
-                      '<a:buNone/><a:defRPr sz="2000"><a:solidFill><a:srgbClr val="D1D5DB"/></a:solidFill></a:defRPr>'
-                      "</a:lvl1pPr></a:lstStyle>"))
+                      '<a:bodyPr><a:normAutofit/></a:bodyPr><a:lstStyle><a:lvl1pPr marL="0" indent="0" algn="ctr">'
+                      f'<a:buNone/><a:defRPr sz="2400"><a:solidFill><a:srgbClr val="{SOFT}"/></a:solidFill>'
+                      "</a:defRPr></a:lvl1pPr></a:lstStyle>"))
         bg = (f'<p:bg><p:bgPr><a:solidFill><a:srgbClr val="{DARK}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>')
         return (f'{XML}<p:sldLayout {NS} type="title" preserve="1" showMasterSp="0"><p:cSld name="Title Slide">{bg}'
                 f"<p:spTree>{TREE_HEAD}{shapes}</p:spTree></p:cSld>{OVR}</p:sldLayout>")
@@ -178,26 +192,81 @@ def _table(rows: list[list[str]], sid: int) -> str:
            f'<a:graphic><a:graphicData uri="{A.rsplit("/", 1)[0]}/table"><a:tbl>'
            '<a:tblPr firstRow="1" bandRow="1"/><a:tblGrid>'
            + "".join(f'<a:gridCol w="{col_w}"/>' for _ in range(cols)) + "</a:tblGrid>"]
-    line = '<a:solidFill><a:srgbClr val="D1D5DB"/></a:solidFill>'
+    line = f'<a:solidFill><a:srgbClr val="{LINE}"/></a:solidFill>'
     for i, row in enumerate(rows):
         cells = []
         for cell in row:
             head = i == 0
-            fill = DARK if head else (PALE if i % 2 == 0 else "FFFFFF")
-            text = (_runs(cell, size, "FFFFFF" if head else INK, bold=head)
+            fill = "FFFFFF" if head or i % 2 else PALE
+            text = (_runs(cell, size, ACCENT if head else INK, bold=head)
                     or f'<a:endParaRPr lang="en-IN" sz="{size}"/>')
             cells.append(f"<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p>{text}</a:p></a:txBody>"
                          f'<a:tcPr marL="110000" marR="110000" marT="70000" marB="70000" anchor="ctr">'
-                         f'<a:lnL w="6350">{line}</a:lnL><a:lnR w="6350">{line}</a:lnR>'
-                         f'<a:lnT w="6350">{line}</a:lnT><a:lnB w="6350">{line}</a:lnB>'
+                         '<a:lnL w="0"><a:noFill/></a:lnL><a:lnR w="0"><a:noFill/></a:lnR>'
+                         f'<a:lnT w="6350">{line}</a:lnT><a:lnB w="{19050 if head else 6350}">{line}</a:lnB>'
                          f'<a:solidFill><a:srgbClr val="{fill}"/></a:solidFill></a:tcPr></a:tc>')
         out.append(f'<a:tr h="{row_h}">{"".join(cells)}</a:tr>')
     out.append("</a:tbl></a:graphicData></a:graphic></p:graphicFrame>")
     return "".join(out)
 
 
+PIC_RID = "rIdPhoto"
+
+
+def _crop(width: int, height: int, cx: int, cy: int) -> str:
+    """srcRect that makes the picture cover the box (like CSS object-fit: cover): the overflow is cut evenly from
+    both sides, so nothing is stretched."""
+    if width <= 0 or height <= 0:
+        return ""
+    pic, box = width / height, cx / cy
+    if abs(pic - box) < 0.01:
+        return ""
+    if pic > box:
+        cut = int((1 - box / pic) / 2 * 100000)
+        return f'<a:srcRect l="{cut}" r="{cut}"/>'
+    cut = int((1 - pic / box) / 2 * 100000)
+    return f'<a:srcRect t="{cut}" b="{cut}"/>'
+
+
+def _picture(sid: int, pic: Any, x: int, y: int, cx: int, cy: int) -> str:
+    return (f'<p:pic><p:nvPicPr><p:cNvPr id="{sid}" name="Photo" descr="{_attr(pic.credit[:300])}"/><p:cNvPicPr>'
+            '<a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>'
+            f'<p:blipFill><a:blip r:embed="{PIC_RID}"/>{_crop(pic.width, pic.height, cx, cy)}'
+            '<a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+            f'<p:spPr>{_xfrm(x, y, cx, cy)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>')
+
+
+def _shade(sid: int, x: int, y: int, cx: int, cy: int, alpha: int) -> str:
+    """A black layer over a photo (alpha in thousandths of a percent) so white text on it stays readable."""
+    return (f'<p:sp><p:nvSpPr><p:cNvPr id="{sid}" name="Shade"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+            f'<p:spPr>{_xfrm(x, y, cx, cy)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
+            f'<a:solidFill><a:srgbClr val="000000"><a:alpha val="{alpha}"/></a:srgbClr></a:solidFill>'
+            '<a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-IN"/>'
+            "</a:p></p:txBody></p:sp>")
+
+
+def _credit(sid: int, text: str, x: int, y: int, cx: int, align: str = "r") -> str:
+    """The photo's credit, small and white on a soft shade at the photo's bottom edge."""
+    return (f'<p:sp><p:nvSpPr><p:cNvPr id="{sid}" name="Photo credit"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>'
+            f'<p:spPr>{_xfrm(x, y, cx, 300000)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
+            '<a:solidFill><a:srgbClr val="000000"><a:alpha val="35000"/></a:srgbClr></a:solidFill></p:spPr>'
+            '<p:txBody><a:bodyPr lIns="137160" rIns="137160" tIns="45720" bIns="45720" anchor="ctr"><a:noAutofit/>'
+            f'</a:bodyPr><a:lstStyle/><a:p><a:pPr algn="{align}"/>{_runs(text[:160], 900, "FFFFFF")}</a:p>'
+            "</p:txBody></p:sp>")
+
+
 def _slide(s: Slide) -> tuple[str, str]:
-    """(slide xml, layout kind)."""
+    """(slide xml, layout kind). A slide with a photo keeps the left part for text and fills the right part."""
+    pic = s.picture
+    if pic is not None and not s.table:
+        width = PIC_X - MARGIN - 380000
+        title = _placeholder(2, "Title", 'type="title"', f"<a:p>{_runs(s.title)}</a:p>",
+                             _xfrm(MARGIN, 420000, width, 1000000))
+        paras = "".join(f'<a:p><a:pPr lvl="{lvl}"/>{_runs(text)}</a:p>' for lvl, text in s.points) or EMPTY_P
+        body = _placeholder(3, "Content", 'idx="1"', paras, _xfrm(MARGIN, 1600000, width, 4500000))
+        photo = _picture(10, pic, PIC_X, 0, W - PIC_X, H) + _credit(11, pic.credit, PIC_X, H - 300000, W - PIC_X)
+        shapes = photo + title + body
+        return f"{XML}<p:sld {NS}><p:cSld><p:spTree>{TREE_HEAD}{shapes}</p:spTree></p:cSld>{OVR}</p:sld>", "content"
     title = _placeholder(2, "Title", 'type="title"', f"<a:p>{_runs(s.title)}</a:p>")
     if s.table:
         shapes = title + _table(s.table, 4) + _number(9)
@@ -209,10 +278,16 @@ def _slide(s: Slide) -> tuple[str, str]:
 
 
 def _title_slide(deck: Deck) -> str:
+    """The opening slide; with a photo, the photo fills it under a dark shade and the words sit on top."""
     sub = (_placeholder(3, "Subtitle", 'type="subTitle" idx="1"', f"<a:p>{_runs(deck.subtitle)}</a:p>")
            if deck.subtitle else "")
     title = _placeholder(2, "Title", 'type="ctrTitle"', f"<a:p>{_runs(deck.title)}</a:p>")
-    return f"{XML}<p:sld {NS}><p:cSld><p:spTree>{TREE_HEAD}{title}{sub}</p:spTree></p:cSld>{OVR}</p:sld>"
+    photo = ""
+    if deck.picture is not None:
+        pic = deck.picture
+        photo = (_picture(10, pic, 0, 0, W, H) + _shade(11, 0, 0, W, H, 50000)
+                 + _credit(12, pic.credit, W - 5200000, H - 300000, 5200000))
+    return f"{XML}<p:sld {NS}><p:cSld><p:spTree>{TREE_HEAD}{photo}{title}{sub}</p:spTree></p:cSld>{OVR}</p:sld>"
 
 
 def _notes_master() -> str:
@@ -263,13 +338,24 @@ def _rels(items: list[tuple[str, str]]) -> str:
     return f'{XML}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{body}</Relationships>'
 
 
+def _with_credit(notes: str, pic: Any) -> str:
+    """Speaker notes plus the photo's credit and link, so the credit travels with the deck even if the photo is
+    cropped or replaced."""
+    if pic is None:
+        return notes
+    return (notes + "\n" if notes else "") + f"{pic.credit} ({pic.link})"
+
+
 def render_pptx(deck: Deck, out: Path) -> Path:
     """Write the deck to `out`. The opening slide is made from the deck's title; then one slide per Slide."""
     layouts = ["title", "content", "table"]
-    slides: list[tuple[str, str, str]] = [(_title_slide(deck), "title", "")]
+    slides: list[tuple[str, str, str]] = [(_title_slide(deck), "title", _with_credit("", deck.picture))]
+    pictures: list[Any] = [deck.picture]
     for s in deck.slides:
         xml, kind = _slide(s)
-        slides.append((xml, kind, s.notes))
+        used = s.picture if (s.picture is not None and not s.table) else None
+        slides.append((xml, kind, _with_credit(s.notes, used)))
+        pictures.append(used)
     with_notes = [i for i, (_, _, notes) in enumerate(slides, 1) if notes]
 
     types = [f'<Override PartName="/ppt/presentation.xml" ContentType="{CT}.presentation.main+xml"/>',
@@ -320,6 +406,8 @@ def render_pptx(deck: Deck, out: Path) -> Path:
         z.writestr("[Content_Types].xml",
                    f'{XML}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
                    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                   '<Default Extension="jpg" ContentType="image/jpeg"/>'
+                   '<Default Extension="png" ContentType="image/png"/>'
                    f'<Default Extension="xml" ContentType="application/xml"/>{"".join(types)}</Types>')
         z.writestr("_rels/.rels", _rels([("officeDocument", "ppt/presentation.xml")]).replace(
             f'Type="{REL}/officeDocument" Target="ppt/presentation.xml"/>',
@@ -349,7 +437,16 @@ def render_pptx(deck: Deck, out: Path) -> Path:
                 z.writestr(f"ppt/notesSlides/_rels/notesSlide{i}.xml.rels",
                            _rels([("notesMaster", "../notesMasters/notesMaster1.xml"),
                                   ("slide", f"../slides/slide{i}.xml")]))
-            z.writestr(f"ppt/slides/_rels/slide{i}.xml.rels", _rels(rels))
+            slide_rels = _rels(rels)
+            pic = pictures[i - 1]
+            if pic is not None:
+                ext = "png" if Path(pic.path).suffix.lower() == ".png" else "jpg"
+                z.write(pic.path, f"ppt/media/image{i}.{ext}")
+                slide_rels = slide_rels.replace(
+                    "</Relationships>",
+                    f'<Relationship Id="{PIC_RID}" Type="{REL}/image" Target="../media/image{i}.{ext}"/>'
+                    "</Relationships>")
+            z.writestr(f"ppt/slides/_rels/slide{i}.xml.rels", slide_rels)
         if with_notes:
             z.writestr("ppt/notesMasters/notesMaster1.xml", _notes_master())
             z.writestr("ppt/notesMasters/_rels/notesMaster1.xml.rels", _rels([("theme", "../theme/theme2.xml")]))

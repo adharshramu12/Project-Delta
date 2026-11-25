@@ -19,6 +19,7 @@ KNOWN_SECRETS = {
     "deepseek_api_key": "DeepSeek API key (platform.deepseek.com; the one DeepSeek Harness uses)",
     "tavily_api_key": "Tavily search API key",
     "serpapi_api_key": "SerpAPI key",
+    "unsplash_access_key": "Unsplash Access Key (unsplash.com/developers, free): photos for decks and chat",
     "telegram_bot_token": "Telegram bot token (BotFather)",
     "slack_bot_token": "Slack bot token (xoxb-...)",
     "slack_app_token": "Slack app-level token for Socket Mode (xapp-...)",
@@ -57,6 +58,6 @@ def delete_secret(name: str) -> None:
 
 
 def mask(value: str | None) -> str:
-    if not value:
-        return "(not set)"
-    return value[:4] + "…" + value[-2:] if len(value) > 8 else "****"
+    """How a key is shown in the terminal: only whether it is set. Not even a few characters of it: a screenshot or a
+    shared log of `delta doctor` must give nothing of a key away."""
+    return "set" if value else "(not set)"

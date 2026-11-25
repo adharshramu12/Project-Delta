@@ -96,6 +96,26 @@
     box.append(h("div", {class: "card"}, h("div", {class: "card-top"}, h("b", {text: "Google Calendar"}), st),
       h("small", {class: "muted", text: g.connected ? "Meetings use the official Calendar API: exact, instant, no tokens." : "Connect once so meetings use the official Calendar API instead of the web page."}), row, msg));
   }
+  // Unsplash: free photos for decks and chat. Without a key Delta already uses Openverse; with one it uses Unsplash
+  // by itself, no other step. The key is checked with Unsplash before it is kept (Windows Credential Manager).
+  async function unsplashCard(box) {
+    const s = await api("/api/setup").catch(() => null); if (!s || !s.keys || !s.keys.unsplash_access_key) return;
+    const on = s.keys.unsplash_access_key.set;
+    const msg = h("div", {class: "msg", role: "status"}), row = h("div", {class: "row"});
+    if (on) row.append(btn("Remove key", async () => { await api("/api/settings/key/unsplash_access_key", {method: "DELETE"}).catch(() => {}); renderApps(box); }, "sm"));
+    else {
+      const key = h("input", {type: "password", placeholder: "Unsplash Access Key", "aria-label": "Unsplash Access Key"});
+      row.append(key, btn("Connect", async () => {
+        msg.textContent = "Checking the key with Unsplash.";
+        const r = await api("/api/setup/key", {method: "POST", body: JSON.stringify({name: "unsplash_access_key", value: key.value.trim()})}).catch(e => ({message: D.plain(e)}));
+        msg.textContent = r.message || ""; if (r.ok) renderApps(box);
+      }, "primary sm"));
+      row.classList.add("inline-form");
+    }
+    box.append(h("div", {class: "card"}, h("div", {class: "card-top"}, h("b", {text: "Unsplash photos"}), on ? state(true, "Connected") : state(false, "Using free Openverse photos")),
+      h("small", {class: "muted", text: on ? "Delta adds Unsplash photos to presentations and sends them in chat by itself, with the photographer's credit."
+        : "Photos already work with no key. For Unsplash's photos, get a free Access Key at unsplash.com/developers (New Application) and paste it here."}), row, msg));
+  }
   async function renderApps(box = $("s_appslist")) {
     if (box.id === "s_appslist") renderMain();
     if (!box.children.length) box.append(D.skeleton(2));
@@ -136,6 +156,7 @@
     box.replaceChildren(frag);
     if (!list.length && box.id !== "w_apps") box.append(h("p", {class: "muted small", text: "No AI apps found on this PC. A free Groq key works well."}));
     await googleCard(box);
+    await unsplashCard(box);
   }
 
   // ---- connected apps (MCP), laid out as a directory: a search box and category filters over one list, the apps
