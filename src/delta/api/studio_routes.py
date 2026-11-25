@@ -12,6 +12,7 @@ Telegram or Slack. Live progress arrives on the dashboard's one WebSocket as stu
   POST   /api/studio/projects/{id}/preview   {"command"?} start the live preview (none = serve the folder)
   DELETE /api/studio/projects/{id}/preview   stop it        GET .../preview   its address and latest output
   POST   /api/studio/projects/{id}/engine    {"engine": "delta" | "claude_code"} who writes the code
+  GET    /api/studio/projects/{id}/download  the whole project as a zip (no secrets, .git or generated folders)
   POST   /api/studio/projects/{id}/stop
   POST   /api/studio/projects/{id}/undo      put back the files of the latest request
   GET    /api/studio/projects/{id}/diff      ?turn=  what a request changed
@@ -25,7 +26,9 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from delta.studio.service import Studio, StudioError
 
@@ -114,6 +117,24 @@ def register(app: FastAPI, c: Any, auth: Callable[..., None]) -> None:
     @app.get("/api/studio/projects/{pid}/preview", dependencies=[Depends(auth)])
     async def preview_logs(pid: str) -> dict[str, Any]:
         return studio().preview_logs(pid)
+
+    @app.get("/api/studio/projects/{pid}/download", dependencies=[Depends(auth)])
+    async def download(pid: str) -> FileResponse:
+        """The whole project as one zip (without secrets, .git and folders that can be made again)."""
+        import asyncio
+
+        from delta.studio.export import ExportError, build
+
+        s = studio()
+        p, root = safe(lambda: s._project(pid))
+        try:
+            out = await asyncio.to_thread(build, root, p.name)
+        except ExportError as e:
+            raise HTTPException(400, str(e)) from e
+        s._audit("studio.download", project=pid, files=out.files, bytes=out.size)
+        return FileResponse(out.path, media_type="application/zip", filename=out.name,
+                            headers={"Cache-Control": "no-store", "X-Delta-Files": str(out.files)},
+                            background=BackgroundTask(out.path.unlink, missing_ok=True))
 
     @app.get("/api/studio/projects/{pid}/file", dependencies=[Depends(auth)])
     async def read(pid: str, path: str) -> dict[str, Any]:
