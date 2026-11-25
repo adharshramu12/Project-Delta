@@ -12,6 +12,7 @@ Telegram or Slack. Live progress arrives on the dashboard's one WebSocket as stu
   POST   /api/studio/projects/{id}/preview   {"command"?} start the live preview (none = serve the folder)
   DELETE /api/studio/projects/{id}/preview   stop it        GET .../preview   its address and latest output
   POST   /api/studio/projects/{id}/engine    {"engine": "delta" | "claude_code"} who writes the code
+  PUT    /api/studio/explainer?name=     a document (the body) -> a new project with a 3D lesson being built
   GET    /api/studio/projects/{id}/download  the whole project as a zip (no secrets, .git or generated folders)
   POST   /api/studio/projects/{id}/stop
   POST   /api/studio/projects/{id}/undo      put back the files of the latest request
@@ -25,7 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -117,6 +118,36 @@ def register(app: FastAPI, c: Any, auth: Callable[..., None]) -> None:
     @app.get("/api/studio/projects/{pid}/preview", dependencies=[Depends(auth)])
     async def preview_logs(pid: str) -> dict[str, Any]:
         return studio().preview_logs(pid)
+
+    @app.put("/api/studio/explainer", dependencies=[Depends(auth)])
+    async def explainer_upload(request: Request, name: str = "notes.pdf") -> dict[str, Any]:
+        """A document (the request body) -> a new project with an interactive 3D lesson being built from it."""
+        import contextlib
+        import os
+        import tempfile
+
+        from delta.studio.explainer import MAX_BYTES
+
+        s = studio()
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MAX_BYTES:
+            raise HTTPException(413, f"The file is larger than {MAX_BYTES // 1024 // 1024} MB.")
+        fd, tmp = tempfile.mkstemp(prefix="delta-explainer-")
+        try:
+            size = 0
+            with os.fdopen(fd, "wb") as f:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > MAX_BYTES:
+                        raise HTTPException(413, f"The file is larger than {MAX_BYTES // 1024 // 1024} MB.")
+                    f.write(chunk)
+            p, turn = await s.explain(Path(tmp), Path(name).name[:120] or "notes")
+        except StudioError as e:
+            raise HTTPException(400, str(e)) from e
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+        return {"project": p.public(), "turn": turn}
 
     @app.get("/api/studio/projects/{pid}/download", dependencies=[Depends(auth)])
     async def download(pid: str) -> FileResponse:

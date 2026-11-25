@@ -7,6 +7,27 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Explain a document in 3D.** On the Build page, pick a PDF, Word or PowerPoint file, or notes, and choose Make the
+  lesson: Delta reads it and builds an interactive 3D lesson in a new project. There are 5 to 8 chapters, each with a
+  3D model of the idea that you can turn, zoom and click, a short plain explanation and key points with their page.
+  It ends with a quiz that gives the reason for each answer. Facts come only from the document. The lesson uses a
+  copy of three.js (0.187.0, MIT) that ships with Delta, so it works offline and loads nothing from the internet.
+  Live: a one-page note on the water cycle became a 6-chapter lesson with a 6-question quiz in about 4.5 minutes,
+  with no errors in its own check.
+- **Build tests its own pages and fixes what breaks.** After a change to a page or game, Delta opens it in a hidden
+  browser (Edge or Chrome, a throw-away profile, the preview's address only), lets it run, presses the keys a game
+  starts with, and reads every JavaScript error and every file that did not load. It then fixes the cause and checks
+  again. Live: a game that crashed on the first key press (`scoreBoard` did not exist) was found and fixed in 61
+  seconds.
+- **A fix stays a fix.** When the request is to check or fix something, Build changes only what is broken and
+  suggests other improvements instead of making them. In an earlier test it had rewritten a whole game to fix one
+  line.
+
+### Fixed
+- **Tool calls that contain code were lost.** When an AI app (Claude Code, Codex) wrote a tool call with code in it,
+  next to some text, Delta's reader counted the braces inside the code and missed the whole call. Build then said
+  "done" without changing anything; Delta's chat agent was affected the same way. The reader now uses the JSON
+  parser itself.
 - **Download a Build project.** A Download button gives the whole project as one zip, in a folder named after the
   project. Secret files (`.env`, keys, certificates), `.git` and folders that can be rebuilt (`node_modules`, virtual
   environments, build output, caches) are left out, and a `DELTA_EXPORT.txt` inside says what was left out and how

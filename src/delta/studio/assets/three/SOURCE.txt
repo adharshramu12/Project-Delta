@@ -1,0 +1,12 @@
+three.js 0.187.0 (MIT licence, see LICENSE), from the npm registry:
+https://registry.npmjs.org/three/-/three-0.187.0.tgz
+sha512-Qiu7R+Cmh8CstZsY1uJOSWnVlfo7ZtNLV7mF8Jltk3LB3AtDu9cRZlcnRKkAk8Y4z6KKw35z7Y7Urd7jWY8etA== (checked against the registry)
+
+Files, unchanged from the package (build/three.module.js, build/three.core.js, examples/jsm/controls/OrbitControls.js):
+e7fca2fe9e7670a828af9b28084669a5909445b7f36f1f26cee9bf8f2961c32c *OrbitControls.js
+613e370f76638fdef83926642bf256dc9615684922de1ce1f63a8583e5d78578 *three.core.js
+104f56145899722094556490d787aae0617cc2fc3382f31df02d724ea1aee341 *three.module.js
+
+Delta Build copies these into a 3D explainer project (vendor/three/), so the lesson works offline and loads nothing
+from the internet. To update: replace the files from a newer package, update this note and EXPLAINER_THREE in
+delta/studio/explainer.py.

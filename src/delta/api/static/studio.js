@@ -43,6 +43,29 @@
       h("h3", {class: "list-title", text: "New project"}),
       h("form", {class: "st-form", onsubmit: e => { e.preventDefault(); if (name.value.trim()) add({name: name.value}); }},
         name, h("small", {class: "muted", text: `Made in ${o.home}`}), h("button", {type: "submit", class: "btn"}, icon("plus"), "Create")),
+      h("h3", {class: "list-title", text: "Explain a document in 3D"}),
+      h("div", {class: "st-form"},
+        h("small", {class: "muted", text: "A PDF, Word or PowerPoint file, or notes: Delta makes an interactive 3D lesson from it, with a quiz."}),
+        (() => {
+          const pick = h("input", {type: "file", accept: ".pdf,.docx,.pptx,.txt,.md", "aria-label": "Document to explain"});
+          const go = h("button", {type: "button", class: "btn"}, icon("spark"), "Make the lesson");
+          go.onclick = async () => {
+            const file = pick.files && pick.files[0];
+            if (!file) { pick.click(); return; }
+            go.disabled = true; go.lastChild.textContent = "Reading the document…";
+            try {
+              const r = await fetch(`/api/studio/explainer?name=${enc(file.name)}`, {method: "PUT", body: file,
+                headers: {"Authorization": "Bearer " + D.token}});
+              const d = await r.json().catch(() => ({}));
+              if (!r.ok) throw new Error(D.detail(d) || String(r.status));
+              D.toast({title: "Making the lesson", body: "Delta is reading the notes and building the 3D lesson. It shows in the preview when it is ready.", kind: "ok"});
+              open(d.project.id);
+            } catch (e) {
+              D.toast({title: "Not started", body: D.plain(e), kind: "danger"});
+            } finally { go.disabled = false; go.lastChild.textContent = "Make the lesson"; }
+          };
+          return h("div", {class: "row st-pick"}, pick, go);
+        })()),
       h("h3", {class: "list-title", text: "Open an existing project"}),
       h("form", {class: "st-form", onsubmit: e => { e.preventDefault(); if (path.value.trim()) add({path: path.value}); }},
         path, h("small", {class: "muted", text: "Paste the folder's path (in File Explorer: right-click the folder, Copy as path)."}),
@@ -313,6 +336,11 @@
         h("pre", {class: "st-code", text: d.tail || "(no output)"}));
       if (!ok) out.open = true;
       steps.append(out);
+    } else if (m.event === "studio.selfcheck") {
+      const clean = d.ran && !d.errors && !d.failed;
+      steps.append(h("div", {class: "st-step" + (clean ? "" : " bad")}, icon(clean ? "check" : "alert"),
+        h("span", {text: !d.ran ? "Could not run the page in a browser" : clean ? "Ran the page: no errors"
+          : `Ran the page: ${d.errors} error(s), ${d.failed} file(s) missing. Fixing…`})));
     } else if (m.event === "studio.note") {
       steps.append(h("div", {class: "st-note", text: d.text}));
     }

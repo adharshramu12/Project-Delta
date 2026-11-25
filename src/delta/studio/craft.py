@@ -42,11 +42,21 @@ _DESIGN = re.compile(r"\b(website|web ?site|web ?page|landing|page|ui|ux|design|
                      r"responsive|beautiful|modern|pretty|look)\b", re.I)
 
 
+SCOPE = """SCOPE: these notes are for making something new or for a change the user asks for. When the request is to
+fix, check or adjust an existing project, keep its code, design and features as they are: fix the cause with the
+smallest change, and only suggest (do not add) other improvements in your answer."""
+_FIX = re.compile(r"\b(fix|bug|broken|crash|error|debug|check|not working|doesn'?t work|failing|repair|wrong)\b", re.I)
+
+
 def notes_for(request: str) -> str:
     """The craft notes this request needs ("" for none)."""
-    parts = []
+    parts = [SCOPE] if _FIX.search(request or "") else []
+    if "[3D explainer]" in (request or ""):  # delta.studio.explainer: a lesson, designed
+        from delta.studio.explainer import EXPLAINER
+
+        return EXPLAINER + "\n\n" + DESIGN
     if _GAME.search(request or ""):
         parts.append(GAME)
     if _DESIGN.search(request or ""):
         parts.append(DESIGN)
-    return "\n\n".join(parts)
+    return "\n\n".join(parts) if len(parts) > 1 or (parts and parts[0] != SCOPE) else ""

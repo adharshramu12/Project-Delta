@@ -16,7 +16,7 @@ from typing import Any
 
 from delta.core.orchestrator import friendly_model_error
 from delta.llm.schemas import LLMError
-from delta.studio import agent, claude_engine, commands, preview
+from delta.studio import agent, claude_engine, commands, preview, selfcheck
 from delta.studio.jail import MEMORY_FILE, JailError, check_file, check_project_root
 from delta.studio.store import Project, StudioStore
 from delta.studio.tools import Workspace
@@ -68,6 +68,23 @@ class Studio:
         p = self.store.add(clean, root)
         self._audit("studio.project_created", project=p.id, path=str(root))
         return p
+
+    async def explain(self, upload: Path, filename: str) -> tuple[Project, str]:
+        """A new project that turns a document into an interactive 3D lesson (delta.studio.explainer), and the
+        request that builds it, already started."""
+        from delta.studio import explainer
+
+        try:
+            title, notes, pages = await asyncio.to_thread(explainer.read, upload, filename)
+        except explainer.ExplainerError as e:
+            raise StudioError(str(e)) from e
+        name, n = f"{title} - 3D lesson", 2
+        while (self.projects_home / name).exists():
+            name, n = f"{title} - 3D lesson {n}", n + 1
+        p = self.create(name)
+        await asyncio.to_thread(explainer.prepare, Path(p.path), title, notes)
+        self._audit("studio.explainer", project=p.id, pages=pages, chars=len(notes))
+        return p, self.start(p.id, explainer.REQUEST.format(title=title))
 
     def open(self, path: str, name: str = "") -> Project:
         try:
@@ -285,7 +302,12 @@ class Studio:
             return "ERROR: no preview is running. Start one with start_preview."
         if tool == "check_preview":
             path = str(args.get("path") or "").lstrip("/")
-            return await preview.page_check(pv.url + path)
+            first = await preview.page_check(pv.url + path)
+            if first.startswith("ERROR"):
+                return first
+            run = await selfcheck.run_page(pv.url + path)
+            await emit("studio.selfcheck", {"errors": len(run.errors), "failed": len(run.failed), "ran": run.ok})
+            return first + "\n\n" + run.report()
         return pv.tail(int(args.get("lines") or 60)) or "(no output yet)"  # preview_logs
 
     async def start_preview(self, pid: str, command: str = "", emit: Any = None) -> preview.Preview:
