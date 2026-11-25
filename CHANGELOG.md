@@ -6,6 +6,18 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.4.9 - 2026-11-25
+
+Presentations that look like a keynote, free pictures everywhere, and Build that teaches. In short:
+
+- **Keynote-style decks with free photos** (#104): clean slides with photos from Unsplash or Openverse, credited.
+- **Pictures and stickers in chat** (#104): ask for photos or stickers; Delta also reacts with a sticker now and then.
+- **Unsplash in Apps** (#104): paste a free key once and Delta uses it by itself.
+- **Explain a document in 3D** (#102): a PDF or notes become an interactive 3D lesson for students.
+- **Build checks its own work** (#102): it opens the page in a real browser and fixes what breaks.
+- **Download a project as a zip** (#101), and design and game know-how in Build.
+- **Gemini works with tools again** (#103).
+
 ### Added
 - **Keynote-style presentations with free photos.** Decks now look like a product keynote: a black opening slide
   with one large centred line, white slides with big titles and few words, a single blue accent and light tables.
