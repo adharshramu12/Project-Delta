@@ -191,9 +191,10 @@ def test_the_payload_stays_small():
     3.8 KB with its styles).
     Then to 304 KB for Build's formatted answers (headings, lists, code blocks with Copy, built from text nodes)
     and the Download button, about 3.4 KB with its styles.
+    Then to 307 KB for Build's self-check step line and the Explain a document in 3D upload (about 2 KB).
     Lazy loading would not lower this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 304_000, total
+    assert total < 307_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 

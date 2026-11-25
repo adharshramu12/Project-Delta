@@ -72,8 +72,9 @@ SPECS: list[dict[str, Any]] = [
                                                                           "plain HTML project"},
                                "why": {"type": "string"}}, [])}},
     {"type": "function", "function": {
-        "name": "check_preview", "description": "Load a page of the running preview and return its status, title "
-        "and text, to check your change works.",
+        "name": "check_preview", "description": "Test the running preview: load the page, run it in a real browser "
+        "for a few seconds pressing the usual game keys, and return its title, text, every JavaScript error and every "
+        "file that did not load. Use it after each change to a page or game, and fix what it reports.",
         "parameters": _schema({"path": {"type": "string", "description": "e.g. 'about.html'; empty = the home page"}},
                               [])}},
     {"type": "function", "function": {

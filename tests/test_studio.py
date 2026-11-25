@@ -561,6 +561,8 @@ def test_design_and_game_know_how_are_sent_only_when_the_request_needs_them():
     assert DESIGN in notes_for("build a landing page for my bakery") and GAME not in notes_for("landing page")
     for plain in ("fix the bug in calc.py", "write unit tests for utils", "rename the variable x to count"):
         assert notes_for(plain) == ""
+    fix = notes_for("check that this game works and fix anything broken")
+    assert fix.startswith("SCOPE:") and GAME in fix  # a fix to a game: the game notes, but keep what is there
     assert len(GAME) < 1500 and len(DESIGN) < 1500  # a few hundred tokens, and only for these requests
 
 
@@ -572,3 +574,82 @@ async def test_the_design_notes_reach_the_model_for_a_page_and_not_for_a_fix(tmp
     await _wait(s, p.id)
     first, second = s.c.router.seen
     assert "DESIGN (this request" in first and "DESIGN (this request" not in second
+
+
+# ---- self-check in a real browser, and the 3D explainer ---------------------------------------------------------
+
+async def test_the_self_check_runs_the_page_and_finds_a_bug_that_only_a_key_press_shows(tmp_path):
+    from delta.studio import preview, selfcheck
+    from delta.tools.browser import find_browser
+
+    if find_browser() is None:
+        pytest.skip("no Edge or Chrome on this machine")
+    root = (tmp_path / "g").resolve()
+    root.mkdir()
+    (root / "index.html").write_text("<title>G</title><canvas></canvas><script src='game.js'></script>"
+                                     "<script src='gone.js'></script><img src='https://example.com/a.png'>",
+                                     encoding="utf-8")
+    (root / "game.js").write_text("addEventListener('keydown', () => player.move());", encoding="utf-8")
+    pv = preview.start_static(root)
+    try:
+        run = await selfcheck.run_page(pv.url)
+    finally:
+        await pv.stop()
+    if not run.ok:
+        pytest.skip(f"the browser could not start here: {run.note}")
+    assert any("player is not defined" in e for e in run.errors)
+    assert run.failed == ["/gone.js (HTTP 404)"]
+    assert run.outside == ["https://example.com/a.png"] and run.canvas
+    assert "Fix the cause" in run.report()
+
+
+def test_a_document_becomes_lesson_notes_with_pages(tmp_path):
+    from delta.studio.explainer import ExplainerError, prepare, read
+
+    doc = tmp_path / "Photosynthesis_basics.md"
+    doc.write_text("Plants turn light into sugar.\n\nChlorophyll absorbs red and blue light.", encoding="utf-8")
+    title, notes, _ = read(doc, doc.name)
+    assert title == "Photosynthesis basics" and "Chlorophyll" in notes and notes.startswith("# Photosynthesis basics")
+    folder = tmp_path / "lesson"
+    prepare(folder, title, notes)
+    assert (folder / "source" / "notes.md").read_text(encoding="utf-8") == notes
+    for f in ("three.module.js", "three.core.js", "OrbitControls.js", "LICENSE"):
+        assert (folder / "vendor" / "three" / f).stat().st_size > 1000
+    empty = tmp_path / "empty.txt"
+    empty.write_bytes(b"")
+    with pytest.raises(ExplainerError, match="empty"):
+        read(empty, empty.name)
+    pic = tmp_path / "x.png"
+    pic.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+    with pytest.raises(ExplainerError, match="picture"):
+        read(pic, pic.name)
+
+
+async def test_uploading_a_document_starts_a_lesson_project_with_the_explainer_notes(tmp_path):
+    s, _p, _ = _service(tmp_path, [LLMResponse("The lesson is ready.")])
+    doc = tmp_path / "cells.txt"
+    doc.write_text("A cell is the smallest unit of life. The nucleus holds DNA.", encoding="utf-8")
+    p, _turn = await s.explain(doc, "Cell Biology.txt")
+    await _wait(s, p.id)
+    root = Path(p.path)
+    assert p.name.startswith("Cell Biology - 3D lesson") and (root / "vendor" / "three" / "three.module.js").exists()
+    assert "nucleus holds DNA" in (root / "source" / "notes.md").read_text(encoding="utf-8")
+    prompt = s.c.router.seen[-1]
+    assert "3D EXPLAINER" in prompt and "DESIGN (this request" in prompt and "./vendor/three/three.module.js" in prompt
+    p2, _ = await s.explain(doc, "Cell Biology.txt")  # the same document again: a new, separate project
+    assert p2.name == "Cell Biology - 3D lesson 2"
+
+
+def test_a_tool_call_with_code_in_it_is_read_even_with_prose_around_it():
+    """Live: Claude Code wrote prose, then {"tool_calls": [an edit whose code has "{" and "});"]}: the old brace
+    counter stopped inside the code, the call was lost, and Build said done without fixing anything."""
+    from delta.llm.providers import parse_prompt_tools
+
+    reply = ("I'll make the smallest fix: remove the missing scoreBoard call.\n\n"
+             '{"tool_calls": [{"name": "edit_file", "arguments": {"path": "game.js", "old_text": '
+             '"  if (e.key === \\"ArrowRight\\") paddle.x += 30;\\n  scoreBoard.update(score);\\n});", '
+             '"new_text": "  if (e.key === \\"ArrowRight\\") paddle.x += 30;\\n});"}}, '
+             '{"name": "start_preview", "arguments": {"why": "test it"}}]}')
+    r = parse_prompt_tools(reply, "claude_code", "x")
+    assert [c.name for c in r.tool_calls] == ["edit_file", "start_preview"]
+    assert "scoreBoard.update(score);" in r.tool_calls[0].arguments["old_text"]

@@ -694,6 +694,7 @@ dialog::backdrop{background:var(--overlay)}
 .st-block-head{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;font-size:var(--fs-xs);color:var(--text-3);background:var(--surface)}
 .st-block .st-code{border-radius:0;max-height:360px}.st-copy{height:24px}
 .st-steps .st-step{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.st-pick{flex-wrap:wrap;gap:var(--s2)}.st-pick input[type=file]{max-width:100%;font-size:var(--fs-sm)}
 .st-ask-card{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3);border:1px solid var(--accent);border-radius:var(--r-md);background:var(--surface)}
 .st-ask-card.sends{border-color:var(--warn)}
 .st-out summary{cursor:pointer;color:var(--ok)}.st-out summary.bad{color:var(--danger)}.st-out .st-code{max-height:240px;margin-top:4px}

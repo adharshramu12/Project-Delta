@@ -65,17 +65,17 @@ def extract_json(text: str) -> Any:
         text = fence.group(1).strip()
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as first:
+        # The first complete JSON object anywhere in the text, read by the JSON parser itself: counting braces
+        # broke on a brace inside a string (code in an edit, "(e) => { ... });"), and the whole tool call was lost.
+        decoder = json.JSONDecoder()
         start = text.find("{")
-        if start == -1:
-            raise
-        depth = 0
-        for i, ch in enumerate(text[start:], start):
-            depth += ch == "{"
-            depth -= ch == "}"
-            if depth == 0:
-                return json.loads(text[start : i + 1])
-        raise
+        while start != -1:
+            try:
+                return decoder.raw_decode(text, start)[0]
+            except json.JSONDecodeError:
+                start = text.find("{", start + 1)
+        raise first
 
 
 def lean_schema(schema: Any, top: bool = True) -> Any:
