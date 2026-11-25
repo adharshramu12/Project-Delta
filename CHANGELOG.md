@@ -6,6 +6,16 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.4.8 - 2026-11-24
+
+Build: Delta builds your own projects. In short:
+
+- **Build panel** (#96): create or open a project and tell Delta what to make; it writes the code, remembers the project and can undo any request.
+- **Runs tests and builds** (#97): with your OK for every command, and it fixes what fails.
+- **Live preview** (#98): the project's page shown inside Build.
+- **Claude Code as the engine** (#99): use your Claude plan, kept inside the project by Delta's guard.
+- **Free keys running out** (#99): Build moves to your next AI, and tells you plainly when all are out.
+
 ### Added
 - **Build can use Claude Code to write the code** (milestone 4). Each project has an Engine choice: Delta (your AI
   keys) or Claude Code (your Claude plan), shown when Claude Code is installed. Claude Code then works in the
