@@ -7,6 +7,12 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Voice mode.** Press the mic in the chat box and talk to Delta hands-free, like a call. No button to hold: Delta
+  hears where you start and stop talking. It understands Hindi, Telugu, English and mixes of them (the same free
+  Groq speech service as Telegram voice notes), answers short and plain like a friend, and reads the answer aloud in
+  the language you spoke with this PC's voices. Talk over Delta and it stops to listen. Turn on "Only after Hey
+  Delta" so it answers only when you call it (then follow-ups for 20 seconds). Tri listens with wide eyes and moves
+  its mouth while Delta talks. Recordings are never stored, and the microphone is off whenever voice mode is.
 - **Library.** The Documents page is now the Library: everything Delta made for you in one place, whatever chat it
   came from. Documents, presentations, spreadsheets, pictures and Build projects, newest first, with search and
   filters. Each file says which chat made it and takes you back there. Open a file in its own app (PowerPoint,

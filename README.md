@@ -78,6 +78,10 @@ If something failed, it tells you plainly instead of pretending.
 - **Screen co-pilot.** Press Ctrl+Alt+D in any app and Delta opens a new chat with a picture of your screen. Ask it
   to explain what you see, fix an Excel or code error, or tell you the next step in a form. Nothing is sent until you
   press Send.
+- **Voice mode.** Press the mic in the chat box and just talk, hands-free. Delta understands Hindi, Telugu, English
+  and mixes of them, answers out loud in the language you spoke, and stops to listen when you talk over it. "Hey
+  Delta" mode answers only when you call it. Tri listens and talks along. Speech is turned into text with the free Groq
+  key Delta already uses; answers are read with your PC's own voices, and recordings are never stored.
 - **Talks like a friend.** Delta answers the person, not just the words: warm, honest, in your own tone. It is
   curious about what you share and asks one real follow-up question when it fits, and on good news, thanks or a
   hello it may send a sticker under its reply. Most replies have none.

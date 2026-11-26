@@ -27,6 +27,9 @@ from delta.system.logging import log
 from delta.system.vault import VaultUnavailableError
 
 STATIC = Path(__file__).parent / "static"
+# voice mode: one spoken turn from the dashboard's microphone
+VOICE_TYPES = {"audio/webm": ".webm", "audio/ogg": ".ogg"}
+VOICE_MAX_BYTES = 8_000_000  # about 8 minutes of Opus: far more than one turn
 # Ctrl+Alt+D sent with nothing typed (delta.system.copilot)
 SCREEN_REQUEST = ("This is a picture of my screen right now. Tell me briefly what I am looking at, point out any "
                   "error or problem on it and how to fix it, and what I should do next.")
@@ -89,6 +92,7 @@ class TaskIn(BaseModel):
     text: str = ""
     chat_id: str = ""  # empty: a new chat is started
     attachments: list[str] = Field(default_factory=list, max_length=10)  # ids from PUT /api/attachments
+    spoken: bool = False  # said in voice mode: a short answer that reads well aloud
 
 
 class ChatPatch(BaseModel):
@@ -228,6 +232,27 @@ def create_app(c: Container, token: str) -> FastAPI:
                 "tools": c.registry.names(), "autonomy": c.settings.boundaries.autonomy,
                 "pending_approvals": len(c.approvals.pending()), "warnings": c.warnings}
 
+    @app.post("/api/voice/transcribe", dependencies=[Depends(auth)])
+    async def voice_transcribe(request: Request) -> dict[str, Any]:
+        """Voice mode: one spoken turn (WebM or Ogg audio from the dashboard's microphone) to text and language."""
+        from delta.channels.voice import VoiceError, transcribe_with_language
+
+        kind = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if kind not in VOICE_TYPES:
+            raise HTTPException(415, "Send the recording as WebM or Ogg audio.")
+        audio = bytearray()
+        async for chunk in request.stream():
+            audio += chunk
+            if len(audio) > VOICE_MAX_BYTES:
+                raise HTTPException(413, "That recording is too long for one turn.")
+        if len(audio) < 1000:
+            return {"text": "", "language": ""}
+        try:
+            text, language = await transcribe_with_language(bytes(audio), "turn" + VOICE_TYPES[kind], kind)
+        except VoiceError as e:
+            return {"text": "", "language": "", "error": str(e)}
+        return {"text": text, "language": language}
+
     @app.post("/api/tasks", dependencies=[Depends(auth)])
     async def create_task(body: TaskIn) -> dict[str, str]:
         chats = c.chats
@@ -247,7 +272,8 @@ def create_app(c: Container, token: str) -> FastAPI:
                 chats.add(chat_id, "user", text, {"attachments": [a.public() for a in files]} if files else None)
             except VaultUnavailableError as e:  # never stored unencrypted: say why instead of a bare 500
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from e
-        req = TaskRequest(text, channel="api", chat_id=chat_id, history=history, attachments=[a.id for a in files])
+        req = TaskRequest(text, channel="api", chat_id=chat_id, history=history, attachments=[a.id for a in files],
+                          spoken=body.spoken)
         return launch(req, chat_id) | ({"text": text} if files and not body.text.strip() else {})
 
     def _attached(ids: list[str], chat_id: str) -> list[Any]:

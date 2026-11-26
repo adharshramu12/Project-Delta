@@ -561,7 +561,7 @@
   // ---- sending
   const failed = text => put(h("div", {class: "msg delta failed"}, h("span", {class: "avatar"}, icon("logo")), h("div", {class: "answer"}, h("div", {class: "answer-text", text}))));
   $("send").onsubmit = async e => {
-    e.preventDefault(); const text = $("text").value.trim();
+    e.preventDefault(); const text = $("text").value.trim(), spoken = !!D.voiceTurn;
     if (/^\/tour$/i.test(text)) { $("text").value = ""; grow(); D.tour.start(); return; }  // replay the first-run tour
     if (files.some(f => f.state === "loading")) { D.toast({title: "Still reading your files", kind: "warn"}); return; }
     const ready = files.filter(f => f.state === "ready");
@@ -572,7 +572,7 @@
     const ids = ready.map(f => f.att.id);
     clearFiles();
     const sentFrom = current;
-    const started = await api("/api/tasks", {method: "POST", body: JSON.stringify({text, chat_id: current, attachments: ids})})
+    const started = await api("/api/tasks", {method: "POST", body: JSON.stringify({text, chat_id: current, attachments: ids, spoken: !!D.voiceTurn})})
       .catch(err => { failed("Could not reach Delta. " + D.plain(err)); return null; });
     if (started && started.text && !text) { const b = sent.querySelector(".bubble"); if (b) b.textContent = started.text; }
     if (!started || !started.task_id) {
@@ -580,6 +580,7 @@
       return;
     }
     taskChat[started.task_id] = started.chat_id; busy.add(started.chat_id);
+    D.emit("chat:started", {task_id: started.task_id, spoken});
     if (sentFrom === current && started.chat_id !== current) setCurrent(started.chat_id);  // a new chat was just created
     if (started.chat_id === current) { runFor(started.task_id); active = started.task_id; renderProgress(); }
     D.pref.set("delta_tried", "1");

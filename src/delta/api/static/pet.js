@@ -142,6 +142,8 @@
     set("done", 1800); say(`${part}${name ? ", " + name : ""}! I'm Tri. Let's get things done.`, 5000);
   }
 
+  D.pet = {set, say};  // voice mode: Tri listens and talks along
+
   // ---- on and off (Settings > Look and feel)
   function show(on) {
     if (on && !pet.isConnected) { document.body.append(pet); restartIdle(); playLater(); setTimeout(greet, 1500); }

@@ -19,6 +19,7 @@ class TaskRequest:
     # chat), wrapped as outside content, and plain notes for the user (e.g. "I could not see the picture itself").
     attachment_context: str = ""
     attachment_notes: list[str] = field(default_factory=list)
+    spoken: bool = False  # said out loud in voice mode: the answer is read aloud, so it is short and plain
 
     @property
     def with_context(self) -> str:
@@ -26,6 +27,10 @@ class TaskRequest:
         like "send it to him" resolve, then any attached files' extract. Instant commands and skill matching use
         `text` alone."""
         files = f"\n\n{self.attachment_context}" if self.attachment_context else ""
+        if self.spoken:
+            files += ("\n\n(Said out loud in voice mode: your answer will be read aloud. Reply like a friend on a "
+                      "call: 1 to 3 short sentences in the language and script the user spoke, no lists, headings, "
+                      "links, emojis or markdown.)")
         if not self.history:
             return self.text + files
         return (f"Earlier in this chat (for context; do not redo finished work):\n{self.history}\n\n"

@@ -208,6 +208,15 @@ saying what you found (it worked, or how it failed) is very welcome.
 - The Library's Open and Show in folder buttons on a real PC: the listing, filters, names and details panel were
   checked in the dashboard; opening files in their apps was not clicked.
 
+## Voice mode
+
+- A full spoken conversation with a real microphone: the microphone is blocked in the test browser, so turns,
+  barge-in and the wake word were checked by tests and a stand-in microphone, not by talking. Speaking aloud and
+  Tri's faces were checked in the dashboard.
+- Voices for Hindi, Telugu and other languages: the test PC had English voices only. Delta's own window (Edge) has
+  natural voices for many languages; otherwise Windows can add them (Settings > Time & language > Speech).
+- How loud "talking" has to be is a fixed level; a very noisy room or a quiet microphone may need it tuned.
+
 ## Resource use
 
 - Idle use measured on Linux (the service with no task, every default on): about 70 MB of memory, 3 threads,
