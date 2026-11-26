@@ -200,6 +200,14 @@ saying what you found (it worked, or how it failed) is very welcome.
 - Openverse photos, Fluent Emoji stickers and a deck with photos were checked on a real PC: the deck opened in
   PowerPoint and its slides were exported and looked at. Openverse search results are not always a close match.
 
+## Library and screen co-pilot
+
+- Ctrl+Alt+D pressed on a real keyboard: the hotkey registered on a real PC, and the chat step (a new chat with the
+  screen attached, focus in the box) was checked in the dashboard, but the key itself was not pressed by hand during
+  the test (simulated key presses do not reach Windows hotkeys from the test shell).
+- The Library's Open and Show in folder buttons on a real PC: the listing, filters, names and details panel were
+  checked in the dashboard; opening files in their apps was not clicked.
+
 ## Resource use
 
 - Idle use measured on Linux (the service with no task, every default on): about 70 MB of memory, 3 threads,

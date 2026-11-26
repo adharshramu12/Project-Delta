@@ -27,6 +27,9 @@ from delta.system.logging import log
 from delta.system.vault import VaultUnavailableError
 
 STATIC = Path(__file__).parent / "static"
+# Ctrl+Alt+D sent with nothing typed (delta.system.copilot)
+SCREEN_REQUEST = ("This is a picture of my screen right now. Tell me briefly what I am looking at, point out any "
+                  "error or problem on it and how to fix it, and what I should do next.")
 # The dashboard's own files (styles and scripts), served by exact name from a list made at start-up: nothing in a
 # request is ever used as a path. Types are fixed here because Windows can map .js to text/plain in the registry.
 ASSET_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}
@@ -231,7 +234,8 @@ def create_app(c: Container, token: str) -> FastAPI:
         chat_id = body.chat_id
         history = ""
         files = _attached(body.attachments, chat_id)
-        text = body.text.strip() or (DEFAULT_REQUEST if files else "")
+        screen = bool(files) and all(getattr(f, "source", "") == "copilot" for f in files)
+        text = body.text.strip() or (SCREEN_REQUEST if screen else DEFAULT_REQUEST if files else "")
         if not text:
             raise HTTPException(400, "Type a message or attach a file.")
         if chats is not None:

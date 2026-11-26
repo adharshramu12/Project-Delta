@@ -398,6 +398,7 @@ class AttachmentsConfig(BaseModel):
     max_mb: float = Field(default=20, ge=1, le=200)           # one file; Telegram bots can download 20 MB at most
     max_pages: int = Field(default=300, ge=1, le=5000)        # PDF pages / slides / Word parts read at most
     max_files_per_message: int = Field(default=5, ge=1, le=10)
+    copilot_hotkey: bool = True  # Ctrl+Alt+D: a picture of the screen into a new chat (delta.system.copilot)
     retention_days: float = Field(default=30, ge=0)           # uploaded files older than this are removed (0 = keep)
     prompt_chars: int = Field(default=6000, ge=1000, le=60000)  # extract sent with the request, all files together
     read_chars: int = Field(default=8000, ge=1000, le=60000)    # one read_attachment answer at most

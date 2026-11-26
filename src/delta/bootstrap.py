@@ -131,6 +131,7 @@ class Container:
     guard: Any = None  # RemoteGuard: PIN and lock for remote control
     studio: Any = None  # delta.studio.service.Studio: the Build panel's coding agent (separate from tasks)
     watch: Any = None  # delta.safety.watch.IntrusionWatch: tells the owner about repeated refused attempts
+    library: Any = None  # delta.library.Library: everything Delta made, whatever chat it came from
     emergency: Any = None  # EmergencyContacts (encrypted)
     running: asyncio.Task[Any] | None = None  # the task being worked on now (any channel can stop it)
     scheduler: Any = None  # delta.scheduler.service.Scheduler (its loop starts in `delta run`)
@@ -669,4 +670,10 @@ def build(settings: Settings) -> Container:
         container.studio = Studio(container, data, REPO_ROOT, home,
                                   [Path(f) for f in settings.studio.extra_folders if str(f).strip()])
         container.closers.append(("studio", container.studio.close))  # runs and live previews stop with Delta
+    from delta.addons.writer.document import documents_dir
+    from delta.library import Library
+
+    container.library = Library(data, lambda: documents_dir(settings.writer.output_dir, create=False),
+                                container.chats, container.studio)
+    events.subscribe(container.library.on_event)  # which chat made each document and picture
     return container

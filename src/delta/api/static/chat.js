@@ -377,6 +377,18 @@
     }
   }
 
+  // ---- screen co-pilot (Ctrl+Alt+D): a new chat with the screen attached, waiting for the user's question. Nothing is
+  // sent until they press Send; Enter on an empty box asks the default question.
+  function copilotScreen(att) {
+    const sheet = $("sheet"); if (sheet && sheet.open) sheet.close();
+    D.go("chat"); newChat();
+    for (const f of files) if (f.att) api(`/api/attachments/${encodeURIComponent(f.att.id)}`, {method: "DELETE"}).catch(() => {});
+    const f = {state: "ready", att};
+    chipFor(f, {name: att.name, type: "image/jpeg"}); files = [f]; renderFiles();
+    const t = $("text");
+    t.value = ""; t.placeholder = "Ask about your screen: explain this, fix this error, what do I do next?"; t.focus();
+  }
+
   // ---- live events
   D.on("ws", m => {
     if (m.type === "approval") renderApproval(m.approval);
@@ -395,6 +407,7 @@
       if (ev === "memory.learned") D.emit("memory:changed");
       if (ev === "learning.added") D.emit("learned:changed");
       if (ev === "document.created") D.emit("documents:changed");
+      if (ev === "copilot.screen" && d.attachment) copilotScreen(d.attachment);
       if (ev === "chat.handoff") {
         D.toast({title: `${d.person} needs you`, body: d.reason, kind: "warn", timeout: 0});
         if (window.Notification && Notification.permission === "granted") new Notification(`Delta: ${d.person} needs you`, {body: d.reason});
@@ -424,7 +437,7 @@
       }
       if (ev === "memory.learned") note("Remembered: " + d.fact, "", "memory");
       if (ev === "document.created") showDocument(d);
-      if (ev === "pictures.found") showPictures(d);
+      if (ev === "pictures.found") { showPictures(d); D.emit("documents:changed"); }
       if (ev === "learning.added") {
         const i = d.item || {};
         note(i.status === "pending" ? `Suggestion waiting for your OK in Memory, Learned: ${i.content}` : `Got it, I'll remember: ${i.content}`, "ok", "spark");
@@ -586,7 +599,7 @@
   // ---- attach (button, drop, paste): uploaded and read at once, so the chip says what was found
   let files = [];
   function renderFiles() { $("attachlist").hidden = !files.length; $("attachlist").replaceChildren(...files.map(f => f.el)); }
-  function clearFiles() { files = []; renderFiles(); }
+  function clearFiles() { files = []; renderFiles(); $("text").placeholder = "Ask Delta to do something"; }
   function chipFor(f, file) {
     const chip = f.att ? fileChip(f.att) : fileChip({name: file.name, kind: file.type.startsWith("image/") ? "image" : ""}, f.error || "Reading on this PC");
     chip.classList.toggle("loading", !f.att && !f.error); chip.classList.toggle("bad", !!f.error);
@@ -634,7 +647,7 @@
   document.addEventListener("keydown", e => {
     if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); newChat(); }
   });
-  D.views.chat = {show() { titleBar(); }};
+  D.views.chat = {show() { titleBar(); }, open: openChat};
 
   D.chat = {
     start() {

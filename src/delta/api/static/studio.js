@@ -347,5 +347,5 @@
     log.scrollTop = log.scrollHeight;
   });
 
-  D.views.build = {show: () => (current ? open(current, true) : home())};
+  D.views.build = {show: () => (current ? open(current, true) : home()), open: pid => open(pid)};
 })();

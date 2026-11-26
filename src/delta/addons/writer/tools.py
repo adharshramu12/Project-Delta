@@ -72,6 +72,7 @@ class _WriterBase:
         if self.events is not None:
             try:
                 await self.events.publish("document.created", task_id=req.id if req else "", title=title,
+                                          chat_id=req.chat_id if req else "",
                                           files=[f.name for f in files],
                                           preview=primary.name if primary.suffix == ".pdf" else "")
             except Exception:
@@ -564,6 +565,7 @@ class FindPictures(_WriterBase, Tool[FindPicturesArgs]):
         elif self.events is not None:
             try:
                 await self.events.publish("pictures.found", task_id=req.id if req else "",
+                                          chat_id=req.chat_id if req else "",
                                           query=args.query or args.emojis,
                                           pictures=[{"name": p.path.name, "credit": p.credit, "link": p.link,
                                                      "source": p.source} for p in pics])
