@@ -197,9 +197,10 @@ def test_the_payload_stays_small():
     screen co-pilot's chat step, about 6 KB with its styles.
     Then to 330 KB for voice mode (voice.js: the microphone, turns, barge-in, the wake word, speaking in the
     user's language; Tri's listening and talking faces), about 10 KB with its styles.
+    Then to 339 KB for Tri's arms and legs, outfits, bike ride and its friend Tia (SVG and CSS, about 7 KB).
     Lazy loading would not lower this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 330_000, total
+    assert total < 339_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 
