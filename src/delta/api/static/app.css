@@ -735,3 +735,43 @@ dialog::backdrop{background:var(--overlay)}
 .tri[data-mood="talking"] .tri-mouth.o { opacity: 1; animation: tri-talk .22s ease-in-out infinite alternate; transform-origin: center; transform-box: fill-box; }
 @keyframes tri-talk { from { transform: scaleY(.35); } to { transform: scaleY(1.1); } }
 @media (prefers-reduced-motion: reduce) { .voice-dot, .tri[data-mood="talking"] .tri-mouth.o, .tri[data-mood="listening"] .tri-body { animation: none; } }
+/* Tri's arms, legs, outfits, bike and friend Tia */
+.tri-limb{fill:none;stroke:#9C4A22;stroke-width:4;stroke-linecap:round}
+.tri-hand{fill:#E07A47;stroke:#9C4A22;stroke-width:2}
+.tri-arm{transition:transform .3s}
+.tri-arm.l{transform-origin:30px 76px}.tri-arm.r{transform-origin:90px 76px}
+.tri-leg.l{transform-origin:46px 99px}.tri-leg.r{transform-origin:74px 99px}
+.tri[data-mood="wave"] .tri-arm.r{animation:tri-wave .3s ease-in-out 5 alternate}
+@keyframes tri-wave{from{transform:rotate(-70deg)}to{transform:rotate(-110deg)}}
+.tri[data-mood="dance"] .tri-body{animation:tri-dance .6s ease-in-out 4}
+.tri[data-mood="dance"] .tri-arm.l{transform:rotate(80deg)}.tri[data-mood="dance"] .tri-arm.r{transform:rotate(-80deg)}
+.tri[data-mood="dance"] .tri-leg.l,.tri.riding .tri-leg.l{animation:tri-step .3s ease-in-out infinite alternate}
+.tri[data-mood="dance"] .tri-leg.r,.tri.riding .tri-leg.r{animation:tri-step .3s ease-in-out infinite alternate-reverse}
+@keyframes tri-dance{25%{transform:rotate(-10deg) translateX(-4px)}75%{transform:rotate(10deg) translateX(4px)}}
+@keyframes tri-step{from{transform:rotate(-14deg)}to{transform:rotate(14deg)}}
+.tri[data-mood="flex"] .tri-arm.l{transform:rotate(100deg)}.tri[data-mood="flex"] .tri-arm.r{transform:rotate(-100deg)}
+.tri[data-mood="flex"] .tri-body{animation:tri-shake .25s linear 4}
+.tri[data-mood="done"] .tri-arm.l{transform:rotate(110deg)}.tri[data-mood="done"] .tri-arm.r{transform:rotate(-110deg)}
+.tri[data-mood="working"] .tri-arm.l{animation:tri-step .3s ease-in-out infinite alternate}
+.tri[data-mood="working"] .tri-arm.r{animation:tri-step .3s ease-in-out infinite alternate-reverse}
+.fit{display:none}
+.tri[data-outfit="cap"]>.tri-svg .fit.cap,.tri[data-outfit="party"]>.tri-svg .fit.party,.tri[data-outfit="crown"]>.tri-svg .fit.crown,.tri[data-outfit="shades"]>.tri-svg .fit.shades,.tri[data-outfit="scarf"]>.tri-svg .fit.scarf,.tri-outfit[data-fit="bow"] .fit.bow{display:inline}
+.fit-a{fill:#2563EB}.fit-b{fill:#7C3AED}.fit-c{fill:#F5B700;stroke:#B98900;stroke-width:1.5}.fit-d{fill:#111}.fit-e{fill:#EC4899}
+.fit-line{stroke:#111;stroke-width:3}
+.tri-bike{display:none}
+.bike-wheel{fill:none;stroke:#2A2420;stroke-width:4}
+.bike-frame{fill:none;stroke:#DC2626;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+.tri.riding .tri-bike{display:inline}
+.tri.riding{animation:tri-ride 6.2s ease-in-out 1}
+.tri.riding .tri-body{animation:tri-bounce .3s ease-in-out infinite}
+.tri.riding .tri-arm.l{transform:rotate(-40deg)}.tri.riding .tri-arm.r{transform:rotate(30deg)}
+@keyframes tri-ride{0%{transform:none}45%{transform:translateX(calc(-100vw + 140px))}50%{transform:translateX(calc(-100vw + 140px)) scaleX(-1)}95%{transform:scaleX(-1)}100%{transform:none}}
+.tia{position:absolute;left:-62px;bottom:0;width:52px;height:52px;animation:tia-in .6s var(--ease) 1}
+.tia .tri-shape{fill:#F472B6;stroke:#BE185D}
+.tia .tri-hand{fill:#F472B6;stroke:#BE185D}.tia .tri-limb{stroke:#BE185D}
+.tia.leaving{animation:tia-out .8s ease-in 1 forwards}
+.tia-hearts{position:absolute;left:30px;top:-18px;color:#EC4899;font-size:13px;white-space:nowrap;animation:tia-hearts 2s ease-out infinite}
+@keyframes tia-in{from{transform:translateX(-60px);opacity:0}}
+@keyframes tia-out{to{transform:translateX(-80px);opacity:0}}
+@keyframes tia-hearts{from{transform:translateY(6px);opacity:0}30%{opacity:1}to{transform:translateY(-14px);opacity:0}}
+@media (prefers-reduced-motion: reduce){.tri.riding,.tri.riding .tri-body,.tia,.tia-hearts,.tri[data-mood] .tri-arm,.tri[data-mood] .tri-leg{animation:none}}

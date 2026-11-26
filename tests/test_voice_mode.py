@@ -98,3 +98,14 @@ def test_dashboard_has_voice_mode_with_barge_in_wake_word_and_tri() -> None:
     assert '<script src="/ui/voice.js"></script>' in (STATIC / "index.html").read_text(encoding="utf-8")
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     assert '.tri[data-mood="talking"]' in css and '.tri[data-mood="listening"]' in css
+
+
+def test_tri_has_limbs_outfits_a_bike_and_a_friend() -> None:
+    js = (STATIC / "pet.js").read_text(encoding="utf-8")
+    for part in ("tri-arm", "tri-leg", "tri-bike", "OUTFITS", "tiaVisits", "ondblclick", '"dance"', '"flex"', '"wave"'):
+        assert part in js, part
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    assert ".tri.riding" in css and ".tia" in css
+    # play never runs while Delta works or with reduced motion: the gate is shared
+    assert "const free = () => !busy && !still.matches" in js
+    assert ".tri.riding,.tri.riding .tri-body,.tia" in css  # still under reduced motion

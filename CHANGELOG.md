@@ -7,6 +7,10 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 ## Unreleased
 
 ### Added
+- **Tri grew arms and legs.** Delta's pet now waves, dances, flexes and walks. It wears outfits (a cap, a party hat,
+  a crown, sunglasses or a scarf; double-click Tri to change, and it remembers), sometimes rides its red bike across
+  the screen, and its friend Tia, a pink triangle with a bow, drops by with hearts. Tri still plays only while Delta
+  is idle, never covers a button, and stays still with Windows' reduced motion.
 - **Voice mode.** Press the mic in the chat box and talk to Delta hands-free, like a call. No button to hold: Delta
   hears where you start and stop talking. It understands Hindi, Telugu, English and mixes of them (the same free
   Groq speech service as Telegram voice notes), answers short and plain like a friend, and reads the answer aloud in
