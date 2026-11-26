@@ -192,6 +192,14 @@ saying what you found (it worked, or how it failed) is very welcome.
   bill about 85 tokens, and how other providers count a downscaled picture. The token figures in the docs are
   estimates from the providers' published rules, not measured bills.
 
+## Pictures, stickers and presentations (0.4.9)
+
+- Photos from Unsplash with a real Access Key: tested only with a stand-in, because no key was on the test PC. The
+  key check, the photographer's credit and the download report Unsplash asks for are written to its API guide.
+- Pictures and stickers in the live dashboard chat and on Telegram or Slack: tested by code, not yet by hand.
+- Openverse photos, Fluent Emoji stickers and a deck with photos were checked on a real PC: the deck opened in
+  PowerPoint and its slides were exported and looked at. Openverse search results are not always a close match.
+
 ## Resource use
 
 - Idle use measured on Linux (the service with no task, every default on): about 70 MB of memory, 3 threads,

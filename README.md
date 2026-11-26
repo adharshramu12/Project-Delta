@@ -14,7 +14,7 @@ If something failed, it tells you plainly instead of pretending.
 
 ## What it does
 
-- **Dashboard.** One window with Chat, Tasks, Apps, Schedules, Documents, Memory and Settings. A top bar shows the
+- **Dashboard.** One window with Chat, Tasks, Apps, Build, Schedules, Documents, Memory and Settings. A top bar shows the
   AI model, the browser, phone (PIN) protection and the connection. Anything that changes or sends something shows
   up as a card that says exactly what will happen, with Approve, Allow for this task and Deny. Light and dark
   themes follow Windows. More: [docs/UI.md](docs/UI.md).
@@ -56,6 +56,25 @@ If something failed, it tells you plainly instead of pretending.
   Notion: search", "Opening youtube.com") with a timer, and says "Still waiting" when one step is slow. On Telegram a
   longer task gets one status message that updates itself and ends with Finished, Stopped or Could not finish, then
   the answer. A request that has to wait for the running task says so, and no task runs for more than 20 minutes.
+- **Build: an AI coding studio.** Open or create a project and tell Delta what to make: websites, apps and small
+  games. It reads the code, makes the changes, shows a live preview, runs tests and builds (with your OK for every
+  command), opens the page in a real browser to catch its own errors, and can undo any request. Use free cloud keys
+  (if one runs out, Delta moves to the next), Codex or your Claude plan through Claude Code, which Delta keeps inside
+  the project folder. Download any project as a clean zip, with keys and secrets left out.
+- **Explain a document in 3D.** On the Build page, give it a PDF, Word or PowerPoint file, or notes, and Delta builds
+  an interactive 3D lesson from it: 5 to 8 chapters with a 3D model you can turn, and a short quiz at the end. Made
+  for students; it runs offline in the browser.
+- **Presentations that look like a keynote.** "Make a PPT about solar power" gives a clean 16:9 deck: a black
+  opening slide with one large line, white slides with big titles and few words, one blue accent, light tables and
+  speaker notes. Delta adds free photos by itself, cropped to fill their space and never stretched, with the
+  photographer's credit on the slide and in the notes. It opens in PowerPoint, Google Slides, Keynote and Canva.
+- **Free pictures and stickers in chat.** "Send me 3 photos of a beach for my Canva post" or "send a party sticker".
+  Pictures show in the chat with their credits and are saved in Documents\Delta\Pictures, ready to drag into Canva;
+  on Telegram and Slack they are sent to the chat. Photos come from Openverse (openly licensed, no key needed), or
+  from Unsplash once you paste a free key in Apps > Unsplash photos. Stickers are Microsoft's 3D Fluent Emoji.
+- **Talks like a friend.** Delta answers the person, not just the words: warm, honest, in your own tone. It is
+  curious about what you share and asks one real follow-up question when it fits, and on good news, thanks or a
+  hello it may send a sticker under its reply. Most replies have none.
 - **Human writing.** Chat answers, emails and documents come out in plain Indian English. A check in code (no extra
   AI call) removes long dashes, stock AI phrases and US spellings before you see the text. More:
   [docs/STYLE_AND_IDENTITY.md](docs/STYLE_AND_IDENTITY.md).
@@ -65,9 +84,8 @@ If something failed, it tells you plainly instead of pretending.
   Delta stays under about 1 GB instead of growing.
 
 Delta also runs scheduled tasks and reminders, keeps a history of every task with resume after a crash, lets you
-undo its file changes, remembers what you tell it (encrypted on your PC) and makes PDF and Word documents, PowerPoint presentations
-and Excel spreadsheets. The
-docs below cover each one.
+undo its file changes, remembers what you tell it (encrypted on your PC) and makes PDF and Word documents and Excel
+spreadsheets. The docs below cover each one.
 
 ## Requirements
 
@@ -167,6 +185,9 @@ From a terminal: `delta doctor` checks your setup, `delta app` opens Delta. The 
 - **Captchas.** Delta never bypasses managed captchas: reCAPTCHA, hCaptcha and Cloudflare Turnstile are always
   refused and handed to you. Only simple text captchas are read, and only on your own accounts: on a saved login with
   a password (on by default, one switch per login turns it off) or on a site you allowed with `delta captcha allow`.
+- **Pictures are checked.** Only https addresses are fetched, every picture must really be a JPEG or PNG (checked
+  by its bytes) of at most 8 MB, file names are made by Delta, and the dashboard serves only pictures Delta saved.
+  Every photo keeps its credit and licence line.
 - **No posting for you.** Delta writes LinkedIn, Medium and Substack drafts but never presses Post; you paste and
   post yourself.
 - **Your data stays yours.** Keys live in Windows Credential Manager. Memory, chats and saved logins are encrypted
