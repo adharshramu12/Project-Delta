@@ -20,6 +20,14 @@ class VoiceError(RuntimeError):
 
 
 async def transcribe(audio: bytes, filename: str = "voice.ogg") -> str:
+    text, _ = await transcribe_with_language(audio, filename)
+    return text
+
+
+async def transcribe_with_language(audio: bytes, filename: str = "voice.ogg",
+                                   content_type: str = "audio/ogg") -> tuple[str, str]:
+    """(text, language) for a recording. The language is Whisper's own guess ("hindi", "english", ...), used by
+    voice mode to answer in the same language."""
     key = get_secret("groq_api_key")
     if not key:
         raise VoiceError("To understand voice notes I need a free Groq key: on your PC open Delta > Setup > "
@@ -29,15 +37,16 @@ async def transcribe(audio: bytes, filename: str = "voice.ogg") -> str:
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
             r = await client.post(GROQ_URL, headers={"Authorization": f"Bearer {key}"},
-                                  data={"model": MODEL, "response_format": "json", "temperature": "0"},
-                                  files={"file": (filename, audio, "audio/ogg")})
+                                  data={"model": MODEL, "response_format": "verbose_json", "temperature": "0"},
+                                  files={"file": (filename, audio, content_type)})
     except httpx.HTTPError as e:
         raise VoiceError(f"I couldn't reach the speech service ({type(e).__name__}). Try again, or type it.") from e
     if r.status_code == 429:
         raise VoiceError("The free speech service is busy right now. Try again in a minute, or type it.")
     if r.status_code >= 400:
         raise VoiceError(f"The speech service refused the note (HTTP {r.status_code}). Try again, or type it.")
-    text = str(r.json().get("text", "")).strip()
+    body = r.json()
+    text = str(body.get("text", "")).strip()
     if not text:
         raise VoiceError("I couldn't hear any words in that note. Try again a little closer to the mic.")
-    return text
+    return text, str(body.get("language") or "").strip().lower()

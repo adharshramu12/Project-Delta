@@ -195,9 +195,11 @@ def test_the_payload_stays_small():
     Then to 311 KB for pictures and stickers in chat and the Unsplash card in Apps (about 3.5 KB with its styles).
     Then to 318 KB for the Library (search, filters, open, rename, delete, the chat each file came from) and the
     screen co-pilot's chat step, about 6 KB with its styles.
+    Then to 330 KB for voice mode (voice.js: the microphone, turns, barge-in, the wake word, speaking in the
+    user's language; Tri's listening and talking faces), about 10 KB with its styles.
     Lazy loading would not lower this total: it counts every file the dashboard ships."""
     total = sum(len(t.encode("utf-8")) for t in TEXT_FILES.values())
-    assert total < 318_000, total
+    assert total < 330_000, total
     assert not list(STATIC.glob("*.map")) and not list(Path(STATIC).glob("node_modules"))
 
 
