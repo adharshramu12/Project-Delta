@@ -29,6 +29,7 @@
     apps: [["rect", {x: 3.5, y: 3.5, width: 7, height: 7, rx: 1.8}], ["rect", {x: 13.5, y: 3.5, width: 7, height: 7, rx: 1.8}], ["rect", {x: 3.5, y: 13.5, width: 7, height: 7, rx: 1.8}], ["rect", {x: 13.5, y: 13.5, width: 7, height: 7, rx: 1.8}]],
     clock: [["circle", {cx: 12, cy: 12, r: 8.5}], P("M12 7.5V12l3 2")],
     doc: [P("M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"), P("M14 3v5h5M9 13h6M9 17h4")],
+    folder: [P("M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z")],
     memory: [P("M12 3.5 3.5 8 12 12.5 20.5 8z"), P("M3.5 12 12 16.5 20.5 12M3.5 16 12 20.5 20.5 16")],
     settings: [P("M4 7h8M16 7h4M4 17h3M11 17h9"), ["circle", {cx: 14, cy: 7, r: 2}], ["circle", {cx: 9, cy: 17, r: 2}]],
     plus: [P("M12 5v14M5 12h14")],
@@ -224,7 +225,7 @@
 
   // ---- views
   const views = {};
-  const TITLES = {chat: "Chat", tasks: "Tasks", apps: "Apps", schedules: "Schedules", documents: "Documents", memory: "Memory", settings: "Settings", build: "Build"};
+  const TITLES = {chat: "Chat", tasks: "Tasks", apps: "Apps", schedules: "Schedules", documents: "Library", memory: "Memory", settings: "Settings", build: "Build"};
   let view = "";
   function go(name, opts) {
     if (!TITLES[name]) name = "chat";

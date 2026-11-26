@@ -560,6 +560,12 @@ async def run(open_ui: bool = False) -> int:
         c.updates.notify = tell_phone
         c.updates.start()
         c.lifecycle.on_shutdown("updates", c.updates.stop)
+    if sys.platform == "win32" and settings.attachments.enabled and settings.attachments.copilot_hotkey:
+        from delta.system import copilot
+
+        hotkey = copilot.start(c, lambda: open_dashboard(settings, token))  # Ctrl+Alt+D: screen into a new chat
+        if hotkey is not None:
+            c.lifecycle.on_shutdown("copilot", lambda: asyncio.to_thread(hotkey.stop))
     if sys.platform == "win32" and (opener := c.registry.get("open_app")) is not None:
         with contextlib.suppress(Exception):  # the first "open X" then needs no PowerShell (background, cheap)
             opener.index.warm()  # type: ignore[attr-defined]

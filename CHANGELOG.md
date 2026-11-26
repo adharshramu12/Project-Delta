@@ -6,6 +6,17 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+### Added
+- **Library.** The Documents page is now the Library: everything Delta made for you in one place, whatever chat it
+  came from. Documents, presentations, spreadsheets, pictures and Build projects, newest first, with search and
+  filters. Each file says which chat made it and takes you back there. Open a file in its own app (PowerPoint,
+  Excel, Photos), show it in File Explorer, download, rename or delete it (to the Recycle Bin, so it can come back).
+  Build projects open in Build and are never deleted from here.
+- **Screen co-pilot (Ctrl+Alt+D).** Press Ctrl+Alt+D in any app: Delta takes a picture of the screen and opens a new
+  chat with it attached. Ask "explain this", "fix this error" or "what do I do next?", or just press Send. Nothing is
+  sent until you press Send, and anything Delta then does on the PC asks first as usual. Turn it off with
+  `attachments.copilot_hotkey: false`.
+
 ## 0.4.9 - 2026-11-25
 
 Presentations that look like a keynote, free pictures everywhere, and Build that teaches. In short:

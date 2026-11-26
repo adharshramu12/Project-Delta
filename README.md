@@ -14,7 +14,7 @@ If something failed, it tells you plainly instead of pretending.
 
 ## What it does
 
-- **Dashboard.** One window with Chat, Tasks, Apps, Build, Schedules, Documents, Memory and Settings. A top bar shows the
+- **Dashboard.** One window with Chat, Tasks, Apps, Build, Schedules, Library, Memory and Settings. A top bar shows the
   AI model, the browser, phone (PIN) protection and the connection. Anything that changes or sends something shows
   up as a card that says exactly what will happen, with Approve, Allow for this task and Deny. Light and dark
   themes follow Windows. More: [docs/UI.md](docs/UI.md).
@@ -72,6 +72,12 @@ If something failed, it tells you plainly instead of pretending.
   Pictures show in the chat with their credits and are saved in Documents\Delta\Pictures, ready to drag into Canva;
   on Telegram and Slack they are sent to the chat. Photos come from Openverse (openly licensed, no key needed), or
   from Unsplash once you paste a free key in Apps > Unsplash photos. Stickers are Microsoft's 3D Fluent Emoji.
+- **Library.** Everything Delta made for you, from every chat, in one place: documents, presentations,
+  spreadsheets, pictures and Build projects. Search and filter, see which chat made each one and jump back to it, open
+  it in its own app, show it in File Explorer, rename it or delete it (to the Recycle Bin).
+- **Screen co-pilot.** Press Ctrl+Alt+D in any app and Delta opens a new chat with a picture of your screen. Ask it
+  to explain what you see, fix an Excel or code error, or tell you the next step in a form. Nothing is sent until you
+  press Send.
 - **Talks like a friend.** Delta answers the person, not just the words: warm, honest, in your own tone. It is
   curious about what you share and asks one real follow-up question when it fits, and on good news, thanks or a
   hello it may send a sticker under its reply. Most replies have none.
