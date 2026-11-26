@@ -6,6 +6,15 @@ and Delta uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-26
+
+A Library for everything Delta made, a screen co-pilot, voice mode, and a livelier Tri. In short:
+
+- **Library** (#107): every document, deck, sheet, picture and Build project from every chat, in one place.
+- **Screen co-pilot** (#107): press Ctrl+Alt+D in any app and ask Delta about what is on screen.
+- **Voice mode** (#108): talk to Delta hands-free in your language and hear it answer; talk over it to interrupt.
+- **Tri** (#109): arms and legs, outfits, a bike ride and its friend Tia.
+
 ### Added
 - **Tri grew arms and legs.** Delta's pet now waves, dances, flexes and walks. It wears outfits (a cap, a party hat,
   a crown, sunglasses or a scarf; double-click Tri to change, and it remembers), sometimes rides its red bike across
